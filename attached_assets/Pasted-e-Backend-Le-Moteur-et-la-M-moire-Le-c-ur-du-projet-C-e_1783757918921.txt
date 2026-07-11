@@ -1,0 +1,31 @@
+e Backend : Le "Moteur" et la "Mémoire" (Le cœur du projet)
+
+C’est là que réside toute l'intelligence et la persistance. Le backend ne s'occupe pas de l'affichage, il s'occupe de réfléchir, d'agir et de se souvenir. Il est composé de trois briques sur AWS et CockroachDB :
+
+    Le Cerveau (Amazon Bedrock) : Il fournit les modèles d'IA. Claude 3.5 Sonnet analyse l'erreur et prend les décisions (l'agent). Amazon Titan traduit les textes en vecteurs mathématiques (les embeddings).
+
+    L'Exécuteur (AWS Lambda) : C'est une fonction de code Python/Node.js qui tourne "dans le cloud" sans serveur permanent. C'est elle qui reçoit l'alerte, appelle Bedrock pour savoir quoi faire, et exécute les ordres.
+
+    La Mémoire Indestructible (CockroachDB) : Une base de données SQL hautement disponible. C'est ici que la Lambda backend va sauvegarder l'état de sa réflexion à chaque étape (tables transactionnelles) et stocker les souvenirs des pannes passées (index vectoriel).
+
+🖥️ Le Frontend : Le "Tableau de Bord" (L'interface visuelle)
+
+C'est l'application web avec laquelle les juges du hackathon (et toi) vont interagir. Pour aller vite et rester efficace, elle peut être développée en Streamlit (100% Python) ou en React/Next.js. Son rôle est purement visuel :
+
+    Le Déclencheur : Il contient les boutons interactifs pour simuler les pannes (ex: injecter une fausse erreur de latence) ou pour forcer le crash de la Lambda (pour prouver la résilience).
+
+    Le Moniteur de l'Agent : Une section qui affiche en direct les logs textuels de ce que l'agent est en train de faire ("Pensée : Je détecte une panne... Action : Je cherche dans ma mémoire vectorielle...").
+
+    L'Inspecteur de la Base de Données : Un affichage graphique ou sous forme de tableaux des données réelles stockées dans CockroachDB. On y voit les statuts changer en temps réel (TRIGGERED ➔ RESOLVED).
+
+🔄 Comment les deux communiquent ?
+
+    Tu cliques sur un bouton sur le Frontend (ex: "Simuler Panne").
+
+    Le Frontend envoie une requête HTTP (via une API Gateway AWS) pour réveiller la fonction AWS Lambda (Backend).
+
+    Le Backend fait son travail : il parle à Bedrock, écrit et lit dans CockroachDB, résout le problème.
+
+    Le Backend met à jour les tables dans CockroachDB.
+
+    Le Frontend rafraîchit son écran en interrogeant régulièrement CockroachDB pour afficher l'avancement en temps réel.
