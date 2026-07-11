@@ -1,1 +1,2 @@
 - [Orval zod codegen breaks on format uuid/date-time](orval-zod-uuid-format.md) — `format: uuid` in openapi.yaml generates zod v4-only `zod.uuid()`; use plain `type: string` instead.
+- [CockroachDB Serverless connection quirks](cockroachdb-serverless-connection.md) — psql needs `&sslrootcert=system`; use hand-written SQL instead of `drizzle-kit push` for CockroachDB DDL.

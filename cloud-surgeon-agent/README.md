@@ -142,17 +142,25 @@ tableaux en interrogeant à nouveau le backend.
   export API_BASE_URL="https://<id-api-gateway>.execute-api.<region>.amazonaws.com"
   streamlit run frontend/app.py --server.port 5000
   ```
-- **Dans ce Repl (démo)** : comme AWS Lambda/Bedrock/CockroachDB Serverless
-  ne sont pas disponibles ici, le rôle de "API Gateway + Lambda" est joué par
-  le service API du monorepo (`artifacts/api-server`, routes
-  `/api/incidents/*` et `/api/logs`, logique dans
-  `artifacts/api-server/src/lib/cloud-surgeon.ts`), qui persiste l'état dans
-  la base Postgres du Repl (extension `pgvector` activée pour émuler le type
-  `VECTOR` de CockroachDB — mêmes tables, même opérateur de similarité
-  cosinus `<=>`). Le raisonnement Claude et les outils sont simulés par un
-  moteur déterministe (pas de credentials AWS nécessaires). C'est la
-  configuration par défaut du workflow **Cloud-Surgeon Dashboard** de ce
-  Repl (`API_BASE_URL` par défaut : `http://localhost:80/api`).
+- **Dans ce Repl (démo)** : comme AWS Lambda/Bedrock ne sont pas disponibles
+  ici, le rôle de "API Gateway + Lambda" est joué par le service API du
+  monorepo (`artifacts/api-server`, routes `/api/incidents/*` et
+  `/api/logs`, logique dans `artifacts/api-server/src/lib/cloud-surgeon.ts`).
+  Ce service se connecte à un **vrai cluster CockroachDB Serverless**
+  (secret `COCKROACHDB_URL`, voir `lib/db/src/index.ts`) — ce n'est pas un
+  Postgres de substitution : les tables `incident_state`, `incident_vectors`
+  (avec son `CREATE VECTOR INDEX` natif CockroachDB, pas une extension
+  pgvector) et `execution_logs` vivent sur CockroachDB Cloud. Le raisonnement
+  Claude et les outils sont simulés par un moteur déterministe (pas de
+  credentials AWS nécessaires pour la démo), mais **toute la persistance
+  d'état, la déduplication par empreinte, et la recherche RAG par similarité
+  cosinus tournent contre CockroachDB réel**. C'est la configuration par
+  défaut du workflow **Cloud-Surgeon Dashboard** de ce Repl (`API_BASE_URL`
+  par défaut : `http://localhost:80/api`).
+  - Le schéma est appliqué directement avec `psql "$COCKROACHDB_URL&sslrootcert=system" -f database/schema.sql`
+    plutôt que `drizzle-kit push`, car l'introspection de `drizzle-kit push`
+    n'est pas garantie compatible avec le dialecte CockroachDB (le SQL du
+    fichier `schema.sql`, lui, est écrit et testé pour CockroachDB).
 
 Pour lancer le dashboard seul en local :
 
