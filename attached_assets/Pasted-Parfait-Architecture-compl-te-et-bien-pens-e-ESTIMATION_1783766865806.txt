@@ -1,0 +1,228 @@
+Parfait ! 🎯 **Architecture complète et bien pensée !**
+
+# 💰 **ESTIMATION COÛTS BEDROCK - AGENT DEVOPS**
+
+Voici l'analyse détaillée pour votre agent DevOps autonome :
+
+---
+
+## 🏗️ **ARCHITECTURE CONFIRMÉE**
+
+```
+Frontend (Streamlit) 
+    ↓ HTTP
+API Gateway 
+    ↓
+Lambda (Python + boto3)
+    ↓
+Bedrock (Claude 3.5 Sonnet + Titan V2)
+    ↓
+CockroachDB Serverless (état + vecteurs + logs)
+```
+
+**✅ Points forts pour les coûts :**
+- **Reprise résiliente** → Pas de re-calcul
+- **RAG intelligent** → Évite raisonnements redondants
+- **Persistance immédiate** → Pas de perte de tokens
+
+---
+
+## 💸 **TARIFICATION BEDROCK POUR VOTRE PROJET**
+
+### **🤖 Claude 3.5 Sonnet (Agent principal)**
+| Type | Prix/1K tokens | Usage dans votre projet |
+|------|----------------|-------------------------|
+| **Input** | $3.00 | Alertes + contexte + historique RAG |
+| **Output** | $15.00 | Raisonnement + tool-calls + résolutions |
+
+### **📊 Titan Text Embeddings V2**
+| Type | Prix/1K tokens | Usage dans votre projet |
+|------|----------------|-------------------------|
+| **Input** | $0.0001 | Vectorisation incidents résolus |
+| **Output** | $0.0001 | Recherche similarité RAG |
+
+---
+
+## 📊 **ESTIMATION PAR INCIDENT**
+
+### **🔍 Analyse d'un incident type**
+
+**Scénario : Panne CloudWatch → Diagnostic → Réparation**
+
+| Étape | Tokens Input | Tokens Output | Coût |
+|-------|--------------|---------------|------|
+| **1. Analyse initiale** | 500 | 200 | $0.0045 |
+| **2. RAG search** | 100 | 50 | $0.00008 |
+| **3. Tool-call diagnostic** | 300 | 150 | $0.00315 |
+| **4. Tool-call réparation** | 200 | 100 | $0.0021 |
+| **5. Vectorisation résolution** | 400 | - | $0.00004 |
+| **TOTAL par incident** | **1,500** | **500** | **$0.012** |
+
+**💡 Coût moyen : ~1.2¢ par incident résolu**
+
+---
+
+## 📈 **COÛTS PAR NIVEAU D'USAGE**
+
+### **🧪 Phase Hackathon/Démo**
+| Métrique | Volume | Coût Bedrock/jour | Coût/mois |
+|----------|--------|-------------------|-----------|
+| **Tests** | 5-10 incidents | **$0.06-0.12** | **$1.80-3.60** |
+| **Démos** | 20-50 incidents | **$0.24-0.60** | **$7.20-18.00** |
+
+### **🚀 Production - Petite équipe**
+| Métrique | Volume | Coût Bedrock/jour | Coût/mois |
+|----------|--------|-------------------|-----------|
+| **10 incidents/jour** | 300/mois | **$0.12** | **$3.60** |
+| **50 incidents/jour** | 1,500/mois | **$0.60** | **$18.00** |
+
+### **🏢 Production - Organisation moyenne**
+| Métrique | Volume | Coût Bedrock/jour | Coût/mois |
+|----------|--------|-------------------|-----------|
+| **100 incidents/jour** | 3K/mois | **$1.20** | **$36.00** |
+| **300 incidents/jour** | 9K/mois | **$3.60** | **$108.00** |
+
+### **🌐 Production - Grande organisation**
+| Métrique | Volume | Coût Bedrock/jour | Coût/mois |
+|----------|--------|-------------------|-----------|
+| **500 incidents/jour** | 15K/mois | **$6.00** | **$180.00** |
+| **1000 incidents/jour** | 30K/mois | **$12.00** | **$360.00** |
+
+---
+
+## 🎯 **OPTIMISATIONS COÛTS SPÉCIFIQUES**
+
+### **💡 RAG Intelligence (Économie 60-80%)**
+```python
+# Recherche similarité avant raisonnement complet
+def check_similar_incidents(alert_embedding):
+    similar = db.vector_search(alert_embedding, threshold=0.85)
+    if similar:
+        return similar.resolution  # Coût : ~$0.002 au lieu de $0.012
+    else:
+        return full_reasoning()    # Coût complet seulement si nécessaire
+```
+
+**Impact :** Si 70% des incidents sont similaires → **Économie 8.4¢ par incident**
+
+### **🔄 Prompt Caching (Économie 85%)**
+```python
+# Cache le contexte système
+system_prompt = """
+Tu es un agent DevOps expert...
+[Contexte de 2000 tokens mis en cache]
+"""
+# Économie : 85% sur les tokens système répétitifs
+```
+
+### **⚡ Tier Flex pour non-critique**
+```python
+# Incidents non-urgents en mode Flex (-30%)
+if incident.priority != "critical":
+    service_tier = "flex"  # Économie 30%
+```
+
+---
+
+## 💰 **COÛTS AVEC OPTIMISATIONS**
+
+### **📊 Comparaison avant/après optimisation**
+
+| Niveau | Sans optimisation | Avec RAG + Cache | Économie |
+|--------|-------------------|------------------|----------|
+| **Démo** | $18/mois | **$5.40/mois** | **70%** |
+| **Petite équipe** | $18/mois | **$5.40/mois** | **70%** |
+| **Moyenne org** | $108/mois | **$32.40/mois** | **70%** |
+| **Grande org** | $360/mois | **$108/mois** | **70%** |
+
+---
+
+## 🎯 **IMPACT SUR VOS CRÉDITS AWS (139,64 $)**
+
+### **💳 Durée avec vos crédits actuels**
+
+| Phase | Coût IA/mois | Coût infra/mois | Total/mois | Durée crédits |
+|-------|--------------|-----------------|------------|---------------|
+| **Hackathon** | $3.60 | $15.00 | **$18.60** | **7.5 mois** |
+| **Démo optimisée** | $5.40 | $20.00 | **$25.40** | **5.5 mois** |
+| **Production légère** | $32.40 | $50.00 | **$82.40** | **1.7 mois** |
+
+**💡 Excellente nouvelle :** L'IA représente seulement 15-40% du coût total !
+
+---
+
+## 🚀 **ARCHITECTURE COÛT-OPTIMISÉE**
+
+### **🔧 Stack recommandé pour démarrer**
+```yaml
+# Configuration économique
+Lambda:
+  - Runtime: Python 3.11
+  - Memory: 512MB (suffisant pour Bedrock calls)
+  - Timeout: 15min (incidents complexes)
+
+API Gateway:
+  - Type: REST API (moins cher que HTTP API pour ce volume)
+  - Caching: Activé pour réponses fréquentes
+
+CockroachDB:
+  - Tier: Serverless (pay-per-use)
+  - Storage: Optimisé pour vecteurs
+
+Bedrock:
+  - Claude 3.5 Sonnet: Standard tier
+  - Titan V2: Standard tier
+  - Prompt caching: Activé
+```
+
+### **📊 Coût infrastructure estimé**
+| Service | Coût/mois (usage léger) |
+|---------|-------------------------|
+| **Lambda** | $2-5 |
+| **API Gateway** | $3-8 |
+| **CockroachDB Serverless** | $10-25 |
+| **CloudWatch Logs** | $2-5 |
+| **TOTAL INFRA** | **$17-43/mois** |
+
+---
+
+## 🎯 **RECOMMANDATIONS STRATÉGIQUES**
+
+### **🚀 Phase 1 : Hackathon (Maintenant)**
+- **Budget IA :** 3-5 $/mois
+- **Focus :** Proof of concept
+- **Optimisations :** RAG basique + prompt caching
+
+### **📈 Phase 2 : Pilote interne**
+- **Budget IA :** 15-30 $/mois  
+- **Focus :** Robustesse + métriques
+- **Optimisations :** RAG avancé + tier flex
+
+### **🏢 Phase 3 : Production multi-clients**
+- **Budget IA :** 50-200 $/mois par client
+- **Focus :** Scaling + monétisation
+- **ROI :** 1 incident évité = économie > coût IA mensuel
+
+---
+
+## 💡 **PLAN D'ACTION IMMÉDIAT**
+
+**Avec vos crédits actuels, je recommande :**
+
+1. **🚀 MAINTENANT** : Démarrer en mode hackathon (3$/mois IA)
+2. **📊 SEMAINE 1** : Implémenter RAG basique
+3. **⚡ SEMAINE 2** : Activer prompt caching
+4. **📈 MOIS 1** : Mesurer ROI et optimiser
+
+**Résultat :** Prototype fonctionnel pour **~20$/mois total** pendant **7 mois** avec vos crédits !
+
+---
+
+## ❓ **QUESTIONS POUR AFFINER**
+
+1. **🎯 Priorité** : Démarrage immédiat ou planification détaillée ?
+2. **📊 Métriques** : Quels KPIs mesurer (résolution rate, MTTR, coûts) ?
+3. **🔧 Intégrations** : Autres outils DevOps à connecter ?
+4. **💰 Monétisation** : Modèle de pricing pour vos clients ?
+
+**Prêt à lancer le développement ? 🚀**
