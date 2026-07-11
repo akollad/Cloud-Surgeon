@@ -1,0 +1,79 @@
+CONCOURS : Hackathon CockroachDB x AWS 2026
+PROJET : "Cloud-Surgeon" - Agent DevOps Autonome Serverless
+RÔLE : Tu es un ingénieur principal expert en Python, AWS SDK (boto3) et CockroachDB (PostgreSQL).
+
+OBJECTIF TECHNIQUE :
+Générer une application complète en Python (prête pour AWS Lambda) qui implémente un agent autonome utilisant Amazon Bedrock (Claude 3.5 Sonnet) pour le raisonnement, Amazon Bedrock (Titan V2) pour les embeddings, et CockroachDB Serverless pour la mémoire d'état et le RAG vectoriel.
+
+---
+
+1. CODE SQL EXACT (À GÉNÉRER DANS UN FICHIER schema.sql)
+Tu dois générer le script SQL strict pour CockroachDB en utilisant l'extension vectorielle native.
+- Active l'extension vectorielle si nécessaire.
+- Table `incident_state` :
+    - incident_id (UUID, PRIMARY KEY, DEFAULT gen_random_uuid())
+    - alert_fingerprint (VARCHAR(255), UNIQUE, pour identifier l'alerte unique)
+    - status (VARCHAR(50) : 'TRIGGERED', 'DIAGNOSING', 'REPAIRING', 'RESOLVED', 'FAILED')
+    - current_step (VARCHAR(100))
+    - context_json (JSONB : stocke l'historique complet des pensées de l'agent et les outputs d'outils)
+    - updated_at (TIMESTAMP DEFAULT now())
+- Table `incident_vectors` :
+    - vector_id (UUID, PRIMARY KEY, DEFAULT gen_random_uuid())
+    - error_message_text (TEXT)
+    - embedding (VECTOR(1024)) -- Taille requise pour Amazon Titan Text Embeddings V2
+- Table `execution_logs` :
+    - log_id (UUID, PRIMARY KEY, DEFAULT gen_random_uuid())
+    - incident_id (UUID, FOREIGN KEY)
+    - action_taken (TEXT)
+    - result (TEXT)
+    - created_at (TIMESTAMP DEFAULT now())
+
+Ajoute un index de similarité vectorielle (IVFFLAT ou HNSW) adapté à CockroachDB sur la colonne embedding.
+
+---
+
+2. ARCHITECTURE DU CODE PYTHON (lambda_function.py)
+Le fichier doit être structuré de manière modulaire avec les fonctions exactes suivantes :
+
+A. Connexion à CockroachDB :
+Utilise `psycopg2.extras.RealDictCursor`. Implémente une fonction `get_db_connection()` utilisant la variable d'environnement `DATABASE_URL`.
+
+B. Génération d'embeddings (Titan V2) :
+Fonction `get_embedding(text: str) -> list[float]`
+- Utilise `boto3.client('bedrock-runtime')`.
+- ModelId : 'amazon.titan-embed-text-v2:0'
+- Le body doit respecter exactement le format AWS : json.dumps({"inputText": text, "dimensions": 1024, "type": "text"})
+- Extrait la liste de float depuis `embedding` dans la réponse.
+
+C. Recherche Vectorielle (RAG SQL) :
+Fonction `find_similar_incident(embedding: list[float]) -> dict`
+- Exécute la requête SQL de distance cosinus exacte sur CockroachDB : 
+  `SELECT error_message_text FROM incident_vectors ORDER BY embedding <=> %s::vector LIMIT 1;`
+
+D. Gestion de l'État (Idempotence) :
+Fonction `get_or_create_incident(alert_text: str) -> tuple[str, str, dict]`
+- Calcule un hash/fingerprint de `alert_text`.
+- Tente d'insérer l'incident en mode 'TRIGGERED'. Si le fingerprint existe déjà (ON CONFLICT), récupère l'état actuel (`status`, `context_json`) pour reprendre l'exécution. C'est la clé de la résilience si la Lambda a crashé à l'exécution précédente.
+
+E. Boucle d'Agent (Reconnaissance d'outils / Tool Calling) :
+Fonction `run_agent_loop(incident_id: str, current_status: str, context: dict, alert_text: str)`
+- Modèle : 'anthropic.claude-3-5-sonnet-20240620-v1:0' via l'API Bedrock Messages (`invoke_model`).
+- Déclare formellement deux outils (Tools) dans la requête Bedrock :
+    1. `execute_ccloud_command` : prend un argument string `command_json`.
+    2. `aws_repair_service` : prend deux arguments `service_name` et `action`.
+- Implémente la boucle : si Claude demande un `tool_use`, appelle la fonction Python correspondante (simulée avec des logs), enregistre le résultat dans le `context_json` de la table `incident_state` IMMÉDIATEMENT, puis réinjecte le résultat à Claude.
+- Si Claude renvoie sa réponse finale, mets à jour le statut de l'incident à 'RESOLVED' ou 'FAILED' dans CockroachDB.
+
+---
+
+3. DIRECTIVES REQUISES (DO'S)
+- Utilise une gestion stricte des blocks `try...except` autour des appels de base de données et d'API Bedrock.
+- Commente chaque section critique en expliquant au jury pourquoi cette écriture garantit la persistance de la mémoire face aux pannes.
+- Écris un code de parsing robuste pour la réponse de Bedrock (boto3 renvoie un streaming body qu'il faut lire avec `.read().decode('utf-8')`).
+
+4. INTERDICTIONS STRICTES (DON'TS)
+- NE PAS utiliser de librairies d'agents tierces comme LangChain ou CrewAI. Nous voulons du code natif boto3 et psycopg2 pur pour contrôler l'état exact de la mémoire transactionnelle sans surcouche masquée.
+- NE PAS laisser de variables d'état globales hors du handler Lambda.
+- NE PAS hardcoder de clés AWS. Le client boto3 doit s'initialiser via les rôles IAM de la Lambda.
+
+Génère maintenant l'intégralité des fichiers `schema.sql`, `lambda_function.py`, et `requirements.txt`.

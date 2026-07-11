@@ -1,0 +1,45 @@
+CONTEXTE & OBJECTIF DE MISSION
+Nous construisons "Cloud-Surgeon", un agent IA de production DevOps autonome et ultra-résilient pour le Hackathon CockroachDB x AWS 2026. 
+L'agent est exécuté de manière serverless via AWS Lambda. Sa mission est de détecter des alertes d'infrastructure, de diagnostiquer la cause via un système de RAG (Recherche vectorielle), et d'exécuter des actions de réparation (via AWS ou la CLI ccloud de CockroachDB).
+
+La contrainte critique du hackathon est de prouver que CockroachDB sert de couche de mémoire indestructible. Si la fonction AWS Lambda crash ou expire au milieu d'une réparation, une nouvelle instance de Lambda doit pouvoir lire l'état exact dans CockroachDB et reprendre le travail là où il s'est arrêté, avec 0% de perte de contexte.
+
+---
+
+STACK TECHNIQUE REQUISE
+1. Langage : Python 3.11+ (ou Node.js si spécifié)
+2. IA / LLM : Amazon Bedrock API (Modèles : anthropic.claude-3-5-sonnet-20240620-v1:0 pour le raisonnement, et amazon.titan-embed-text-v2:0 pour les vecteurs).
+3. Base de données : CockroachDB Cloud Serverless (via le driver standard `psycopg2` ou `asyncpg` pour PostgreSQL).
+4. Déploiement : AWS Lambda (Serverless).
+
+---
+
+ARCHITECTURE DES TABLES COCKROACHDB À GÉNÉRER
+Génère les scripts SQL initiaux pour CockroachDB incluant :
+1. Une table `incident_state` : ID de l'incident, statut (triggered, diagnosing, repairing, resolved, failed), étape actuelle, contexte textuel JSON, et timestamp.
+2. Une table `incident_vectors` : ID, embedding (colonne de type VECTOR), et description textuelle des pannes passées résolues (pour le RAG de l'agent).
+3. Une table `execution_logs` : Historique chronologique des actions machine tentées par l'agent.
+
+---
+
+À FAIRE (DO'S) - DIRECTIVES DE CODAGE
+1. IDEMPOTENCE & SURVIVABILITÉ : Au tout début du script d'entrée (handler Lambda), l'agent doit TOUJOURS vérifier s'il existe un incident actif non résolu dans `incident_state`. Si oui, il charge ce contexte au lieu d'en créer un nouveau.
+2. AGENTIC WORKFLOW (Tool Calling) : Implémente une boucle de réflexion où Claude 3.5 Sonnet utilise des fonctions (Tools). Fournis-lui au moins deux outils : `execute_ccloud_command` (pour simuler la gestion CLI de CockroachDB) et `aws_repair_service` (pour simuler une action AWS).
+3. VECTOR SEARCH INTEGRATION : Avant de choisir une action, l'agent doit appeler l'API Amazon Bedrock Titan pour vectoriser l'alerte actuelle, puis faire une requête SQL de similarité cosinus (opérateur `<=>` ou `CosineDistance` selon la syntaxe CockroachDB Vector) pour trouver la solution historique la plus proche.
+4. GESTION DES SECRETS : Utilise des variables d'environnement pour les clés d'accès, les chaînes de connexion CockroachDB et les configurations AWS.
+
+---
+
+À NE PAS FAIRE (DON'TS) - ERREURS À ÉVITER
+1. NE PAS stocker l'état de l'agent en mémoire vive locale (ex: dans une variable globale Python). Tout doit transiter par CockroachDB, car la Lambda peut mourir à tout moment.
+2. NE PAS coder d'appels d'API en dur. Utilise le SDK officiel `boto3` pour interagir avec Amazon Bedrock.
+3. NE PAS omettre la gestion des erreurs SQL. Si la base de données est temporairement inaccessible, le script doit lever une exception propre.
+4. NE PAS oublier le mode "Safe-by-default" : les requêtes générées par l'agent sur la base de données ne doivent jamais pouvoir altérer la structure des tables principales de mémoire de l'agent (protection contre l'injection de prompts).
+
+---
+
+LIVRABLES ATTENDUS DE TA PART (OUTIL IA) :
+1. Les scripts SQL de création des tables optimisés pour CockroachDB (avec gestion des types vectoriels).
+2. Le fichier principal `lambda_function.py` contenant le gestionnaire d'événements, la logique d'appel à Bedrock (Claude 3.5 + Titan), le système de RAG vectoriel SQL, et la boucle de Tool Calling de l'agent.
+3. Un fichier `requirements.txt` contenant les dépendances nécessaires (`boto3`, `psycopg2-binary`, etc.).
+4. Un guide d'installation rapide pour le fichier README.
