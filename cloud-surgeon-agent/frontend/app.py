@@ -4,358 +4,76 @@ Cloud-Surgeon — Dashboard de simulation (Streamlit)
 Interface interactive pour déclencher des "pannes" simulées et regarder
 l'agent Cloud-Surgeon les diagnostiquer et les réparer, en direct.
 
-Deux modes, sélectionnés automatiquement :
+Architecture (voir le document d'architecture du projet) :
 
-1. Mode CockroachDB (si la variable d'environnement COCKROACHDB_URL est
-   définie) : l'état des incidents, le journal d'exécution et la mémoire
-   vectorielle RAG sont RÉELLEMENT lus/écrits dans CockroachDB, exactement
-   comme le ferait la Lambda de production (mêmes tables, même schéma,
-   mêmes requêtes de similarité cosinus `<=>`). Cela permet de démontrer en
-   vidéo que CockroachDB survit bien à une "coupure" de l'agent.
+    Frontend (ce fichier) --HTTP (API Gateway)--> Backend (Lambda) --> Bedrock
+                                                                    --> CockroachDB
 
-2. Mode simulation (si aucune base n'est connectée) : tout l'état vit dans
-   `st.session_state`, pour pouvoir enregistrer une démo immédiatement sans
-   configurer d'infrastructure.
+Dans ce Repl, le rôle de "API Gateway + Lambda" est joué par le service API
+Express du monorepo (`artifacts/api-server`, routes `/api/incidents/*` et
+`/api/logs`, implémentation dans `artifacts/api-server/src/lib/cloud-surgeon.ts`) :
 
-Dans les deux modes, le raisonnement de Claude 3.5 Sonnet et les outils
-(`execute_ccloud_command`, `aws_repair_service`) sont simulés par un petit
-moteur déterministe (`simulate_agent_turn`) afin que la démo fonctionne sans
-clés AWS Bedrock. En production, ce rôle est tenu par `run_agent_loop` dans
-`backend/lambda_function.py`, qui appelle réellement Bedrock.
+1. Ce dashboard clique "Déclencher l'agent" → envoie une requête HTTP POST à
+   `/api/incidents/trigger`.
+2. Le backend fait le travail : il "réfléchit" (raisonnement Claude simulé,
+   en l'absence de credentials AWS Bedrock dans ce Repl), écrit et lit l'état
+   dans la base (CockroachDB en production, Postgres+pgvector dans ce Repl de
+   développement — même schéma, mêmes requêtes `<=>` de similarité cosinus).
+3. Le backend répond avec l'incident mis à jour.
+4. Ce dashboard rafraîchit ses tableaux en interrogeant régulièrement
+   `/api/incidents` et `/api/logs`.
+
+Le vrai déploiement AWS (`backend/lambda_function.py`, Bedrock + CockroachDB
+Serverless) est décrit dans le README à la racine du projet ; ce dashboard
+est un stand-in fonctionnel côté Replit pour la démo/vidéo Devpost.
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
 import os
-import time
-import uuid
-from datetime import datetime, timezone
 
+import requests
 import streamlit as st
 
-try:
-    import psycopg2
-    import psycopg2.extras
-except ImportError:  # pragma: no cover - psycopg2 optional in pure simulation mode
-    psycopg2 = None
-
 # ----------------------------------------------------------------------------
-# Connexion (mode CockroachDB si disponible)
+# Le service API du monorepo (Express) joue le rôle d'API Gateway + Lambda.
+# Il est routé par le proxy partagé du Repl sur le chemin /api. Depuis ce
+# process Python (côté serveur, pas navigateur), on l'atteint directement via
+# le proxy local sur le port 80 — la même route que curl utiliserait.
 # ----------------------------------------------------------------------------
-COCKROACHDB_URL = os.environ.get("COCKROACHDB_URL")
+API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:80/api")
 
 
-@st.cache_resource(show_spinner=False)
-def get_connection():
-    """Ouvre (et met en cache pour la session Streamlit) une connexion CockroachDB."""
-    if not COCKROACHDB_URL or psycopg2 is None:
-        return None
+def api_post(path: str, json: dict) -> dict | None:
     try:
-        conn = psycopg2.connect(
-            COCKROACHDB_URL,
-            cursor_factory=psycopg2.extras.RealDictCursor,
-            connect_timeout=10,
-            sslmode="require",
-        )
-        conn.autocommit = False
-        return conn
-    except Exception as exc:  # noqa: BLE001
-        st.session_state["_db_error"] = str(exc)
+        resp = requests.post(f"{API_BASE_URL}{path}", json=json, timeout=30)
+        resp.raise_for_status()
+        return resp.json()
+    except requests.RequestException as exc:  # noqa: BLE001
+        st.session_state["_api_error"] = str(exc)
         return None
 
 
-CONN = get_connection()
-DB_MODE = CONN is not None
+def api_get(path: str, params: dict | None = None) -> list | dict | None:
+    try:
+        resp = requests.get(f"{API_BASE_URL}{path}", params=params, timeout=15)
+        resp.raise_for_status()
+        return resp.json()
+    except requests.RequestException as exc:  # noqa: BLE001
+        st.session_state["_api_error"] = str(exc)
+        return None
 
 
-def _fingerprint(alert_text: str) -> str:
-    return hashlib.sha256(alert_text.strip().encode("utf-8")).hexdigest()
+def trigger_agent(alert_text: str, simulate_crash: bool) -> dict | None:
+    return api_post("/incidents/trigger", {"alertText": alert_text, "simulateCrash": simulate_crash})
 
 
-def _pseudo_embedding(text: str) -> list[float]:
-    """
-    Vecteur pseudo-aléatoire déterministe (1024 dims) dérivé d'un hash du
-    texte. Tient lieu de remplaçant à Amazon Titan Text Embeddings V2 pour
-    la démo, sans nécessiter de credentials AWS. En production, cette
-    fonction est `get_embedding()` dans `backend/lambda_function.py`, qui
-    appelle réellement Bedrock.
-    """
-    seed = int(hashlib.sha256(text.strip().encode("utf-8")).hexdigest(), 16)
-    vec = []
-    x = seed
-    for _ in range(1024):
-        x = (1103515245 * x + 12345) & 0x7FFFFFFF
-        vec.append((x / 0x7FFFFFFF) * 2 - 1)
-    return vec
+def fetch_incidents() -> list:
+    return api_get("/incidents") or []
 
 
-def _cosine_distance(a: list[float], b: list[float]) -> float:
-    dot = sum(x * y for x, y in zip(a, b))
-    norm_a = sum(x * x for x in a) ** 0.5
-    norm_b = sum(y * y for y in b) ** 0.5
-    if norm_a == 0 or norm_b == 0:
-        return 1.0
-    cosine_sim = dot / (norm_a * norm_b)
-    return 1 - cosine_sim
-
-
-def _vector_literal(embedding: list[float]) -> str:
-    return "[" + ",".join(repr(float(x)) for x in embedding) + "]"
-
-
-# ----------------------------------------------------------------------------
-# Persistance : incident_state / incident_vectors / execution_logs
-# Mêmes tables et mêmes requêtes que backend/lambda_function.py, mais
-# rejouées ici depuis Streamlit (mode CockroachDB) ou simulées en mémoire.
-# ----------------------------------------------------------------------------
-def _init_session_store() -> None:
-    if "sim_incidents" not in st.session_state:
-        st.session_state.sim_incidents = {}  # fingerprint -> incident dict
-    if "sim_vectors" not in st.session_state:
-        st.session_state.sim_vectors = []  # list of {"text":..., "embedding":...}
-    if "sim_logs" not in st.session_state:
-        st.session_state.sim_logs = []  # list of log rows
-
-
-_init_session_store()
-
-
-def get_or_create_incident(alert_text: str) -> dict:
-    fingerprint = _fingerprint(alert_text)
-
-    if DB_MODE:
-        with CONN.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO incident_state (alert_fingerprint, status, current_step, context_json)
-                VALUES (%s, 'TRIGGERED', 'INIT', %s::jsonb)
-                ON CONFLICT (alert_fingerprint) DO NOTHING
-                RETURNING incident_id, alert_fingerprint, status, current_step, context_json, updated_at;
-                """,
-                (fingerprint, json.dumps({"alert_text": alert_text, "turns": []})),
-            )
-            row = cur.fetchone()
-            if row is None:
-                cur.execute(
-                    "SELECT incident_id, alert_fingerprint, status, current_step, context_json, updated_at "
-                    "FROM incident_state WHERE alert_fingerprint = %s;",
-                    (fingerprint,),
-                )
-                row = cur.fetchone()
-            CONN.commit()
-            return dict(row)
-
-    existing = st.session_state.sim_incidents.get(fingerprint)
-    if existing:
-        return existing
-
-    incident = {
-        "incident_id": str(uuid.uuid4()),
-        "alert_fingerprint": fingerprint,
-        "status": "TRIGGERED",
-        "current_step": "INIT",
-        "context_json": {"alert_text": alert_text, "turns": []},
-        "updated_at": datetime.now(timezone.utc),
-    }
-    st.session_state.sim_incidents[fingerprint] = incident
-    return incident
-
-
-def persist_incident_state(incident: dict, status: str, current_step: str, context: dict) -> None:
-    incident["status"] = status
-    incident["current_step"] = current_step
-    incident["context_json"] = context
-    incident["updated_at"] = datetime.now(timezone.utc)
-
-    if DB_MODE:
-        with CONN.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE incident_state
-                SET status = %s, current_step = %s, context_json = %s::jsonb, updated_at = now()
-                WHERE incident_id = %s;
-                """,
-                (status, current_step, json.dumps(context), incident["incident_id"]),
-            )
-            CONN.commit()
-    else:
-        st.session_state.sim_incidents[incident["alert_fingerprint"]] = incident
-
-
-def log_execution(incident_id: str, action_taken: str, result: str) -> None:
-    row = {
-        "log_id": str(uuid.uuid4()),
-        "incident_id": incident_id,
-        "action_taken": action_taken,
-        "result": result,
-        "created_at": datetime.now(timezone.utc),
-    }
-    if DB_MODE:
-        with CONN.cursor() as cur:
-            cur.execute(
-                "INSERT INTO execution_logs (incident_id, action_taken, result) VALUES (%s, %s, %s);",
-                (incident_id, action_taken, result),
-            )
-            CONN.commit()
-    else:
-        st.session_state.sim_logs.append(row)
-
-
-def find_similar_incident(embedding: list[float]) -> dict | None:
-    if DB_MODE:
-        with CONN.cursor() as cur:
-            cur.execute(
-                """
-                SELECT error_message_text, embedding <=> %s::vector AS distance
-                FROM incident_vectors
-                ORDER BY embedding <=> %s::vector
-                LIMIT 1;
-                """,
-                (_vector_literal(embedding), _vector_literal(embedding)),
-            )
-            row = cur.fetchone()
-            return dict(row) if row else None
-
-    best = None
-    for entry in st.session_state.sim_vectors:
-        distance = _cosine_distance(embedding, entry["embedding"])
-        if best is None or distance < best["distance"]:
-            best = {"error_message_text": entry["text"], "distance": distance}
-    return best
-
-
-def index_resolved_incident(error_message_text: str, embedding: list[float]) -> None:
-    if DB_MODE:
-        with CONN.cursor() as cur:
-            cur.execute(
-                "INSERT INTO incident_vectors (error_message_text, embedding) VALUES (%s, %s::vector);",
-                (error_message_text, _vector_literal(embedding)),
-            )
-            CONN.commit()
-    else:
-        st.session_state.sim_vectors.append({"text": error_message_text, "embedding": embedding})
-
-
-def fetch_all_incidents() -> list[dict]:
-    if DB_MODE:
-        with CONN.cursor() as cur:
-            cur.execute(
-                "SELECT incident_id, alert_fingerprint, status, current_step, updated_at "
-                "FROM incident_state ORDER BY updated_at DESC LIMIT 50;"
-            )
-            return [dict(r) for r in cur.fetchall()]
-    return sorted(
-        st.session_state.sim_incidents.values(), key=lambda i: i["updated_at"], reverse=True
-    )
-
-
-def fetch_all_logs() -> list[dict]:
-    if DB_MODE:
-        with CONN.cursor() as cur:
-            cur.execute(
-                "SELECT log_id, incident_id, action_taken, result, created_at "
-                "FROM execution_logs ORDER BY created_at DESC LIMIT 100;"
-            )
-            return [dict(r) for r in cur.fetchall()]
-    return sorted(st.session_state.sim_logs, key=lambda r: r["created_at"], reverse=True)
-
-
-# ----------------------------------------------------------------------------
-# Simulation du raisonnement Claude 3.5 Sonnet + tool calling
-# (remplace `run_agent_loop` de backend/lambda_function.py pour la démo)
-# ----------------------------------------------------------------------------
-SCRIPT = [
-    {
-        "thought": "Je détecte une anomalie d'infrastructure. Avant toute action corrective, "
-        "je vérifie l'état réel du composant concerné via la CLI ccloud.",
-        "tool_name": "execute_ccloud_command",
-        "tool_input": lambda alert: {"command_json": json.dumps({"action": "cluster:status", "target": alert[:40]})},
-        "status_after": "DIAGNOSING",
-    },
-    {
-        "thought": "Le diagnostic confirme la dégradation. Je déclenche une action de "
-        "réparation ciblée sur le service AWS concerné.",
-        "tool_name": "aws_repair_service",
-        "tool_input": lambda alert: {"service_name": "auto-detected-service", "action": "restart"},
-        "status_after": "REPAIRING",
-    },
-]
-
-
-def simulate_tool_call(tool_name: str, tool_input: dict) -> dict:
-    """Reproduit fidèlement la sortie simulée des outils du backend Lambda."""
-    if tool_name == "execute_ccloud_command":
-        action = json.loads(tool_input["command_json"]).get("action", "unknown")
-        return {"success": True, "action": action, "output": f"[SIMULATION] Commande ccloud '{action}' exécutée avec succès sur le cluster."}
-    if tool_name == "aws_repair_service":
-        return {
-            "success": True,
-            "service_name": tool_input["service_name"],
-            "action": tool_input["action"],
-            "output": f"[SIMULATION] Action '{tool_input['action']}' appliquée avec succès au service AWS '{tool_input['service_name']}'.",
-        }
-    return {"success": False, "error": f"Outil inconnu: {tool_name}"}
-
-
-def run_simulated_agent(incident: dict, alert_text: str, start_turn: int, crash_after: int | None):
-    """
-    Rejoue la boucle d'agent à partir de `start_turn` (résilience : si on
-    reprend un incident déjà entamé, on ne rejoue pas les tours déjà
-    persistés). S'arrête prématurément si `crash_after` est atteint, pour
-    simuler une Lambda tuée en plein vol.
-    """
-    context = incident["context_json"]
-    context.setdefault("turns", [])
-
-    for turn_index in range(start_turn, len(SCRIPT)):
-        step = SCRIPT[turn_index]
-        tool_input = step["tool_input"](alert_text)
-
-        with st.status(f"Tour {turn_index + 1} — {step['tool_name']}", expanded=True) as status_box:
-            st.write(f"**Pensée de l'agent :** {step['thought']}")
-            time.sleep(0.4)
-            st.write(f"**Appel d'outil :** `{step['tool_name']}({json.dumps(tool_input)})`")
-            tool_output = simulate_tool_call(step["tool_name"], tool_input)
-            time.sleep(0.4)
-            st.write(f"**Résultat :** `{json.dumps(tool_output)}`")
-            status_box.update(label=f"Tour {turn_index + 1} — {step['tool_name']} (terminé)", state="complete")
-
-        log_execution(incident["incident_id"], f"{step['tool_name']}({json.dumps(tool_input)})", json.dumps(tool_output))
-
-        context["turns"].append(
-            {
-                "turn": turn_index,
-                "thought": step["thought"],
-                "tool_name": step["tool_name"],
-                "tool_input": tool_input,
-                "tool_output": tool_output,
-            }
-        )
-
-        # Écriture immédiate — c'est le point critique de résilience.
-        persist_incident_state(incident, step["status_after"], f"AGENT_TURN_{turn_index}", context)
-
-        if crash_after is not None and turn_index == crash_after:
-            st.error(
-                f"💥 Crash simulé de la Lambda juste après le tour {turn_index + 1}. "
-                "L'état a déjà été persisté dans CockroachDB avant ce point — "
-                "relance l'agent ci-dessous pour prouver la reprise sans perte de contexte."
-            )
-            return
-
-    # Réponse finale
-    final_text = (
-        "RESOLVED: Le service a été redémarré avec succès et les métriques sont revenues à la normale."
-    )
-    context["final_response"] = final_text
-    persist_incident_state(incident, "RESOLVED", "FINALIZED", context)
-
-    st.success(final_text)
-
-    embedding = _pseudo_embedding(alert_text)
-    index_resolved_incident(alert_text, embedding)
+def fetch_logs() -> list:
+    return api_get("/logs") or []
 
 
 # ----------------------------------------------------------------------------
@@ -365,18 +83,18 @@ st.set_page_config(page_title="Cloud-Surgeon — Dashboard", layout="wide")
 
 st.title("Cloud-Surgeon — Dashboard de simulation")
 st.caption(
-    "Déclenche une panne, regarde l'agent la diagnostiquer et la réparer, "
-    "et prouve que CockroachDB conserve son état même si l'agent est interrompu en plein vol."
+    "Déclenche une panne, regarde l'agent la diagnostiquer et la réparer via une vraie requête HTTP "
+    "vers le backend (rôle d'API Gateway + Lambda), et prouve que la base de données conserve son état "
+    "même si l'agent est interrompu en plein vol."
 )
 
-if DB_MODE:
-    st.success("Connecté à CockroachDB — l'état des incidents et la mémoire RAG sont réellement persistés.")
+st.session_state.pop("_api_error", None)
+health = api_get("/healthz")
+if health and health.get("status") == "ok":
+    st.success(f"Connecté au backend ({API_BASE_URL}) — l'état des incidents est réellement persisté en base.")
 else:
-    reason = st.session_state.get("_db_error")
-    msg = "Mode simulation (aucune base CockroachDB connectée) — tout l'état vit dans cette session."
-    if reason:
-        msg += f" Détail : {reason}"
-    st.warning(msg)
+    reason = st.session_state.get("_api_error", "réponse inattendue du backend")
+    st.error(f"Impossible de joindre le backend sur {API_BASE_URL} : {reason}")
 
 PRESET_SCENARIOS = {
     "Pic d'erreurs 5xx sur le service de paiement (ECS)": "ECS service 'checkout' unhealthy: 5xx spike on /pay endpoint, latency p99 > 4s",
@@ -394,67 +112,60 @@ with st.sidebar:
     crash_choice = st.selectbox(
         "Simuler un crash de la Lambda",
         ["Aucun (exécution normale)", "Après le diagnostic (tour 1)"],
-        help="Démontre que CockroachDB conserve l'état exact même si l'agent est interrompu avant la fin.",
+        help="Démontre que la base conserve l'état exact même si l'agent (le backend) est interrompu avant la fin.",
     )
-    crash_after = 0 if crash_choice.startswith("Après") else None
+    simulate_crash = crash_choice.startswith("Après")
 
     trigger = st.button("Déclencher l'agent", type="primary", use_container_width=True)
-    st.divider()
-    if st.button("Réinitialiser la démo (session locale)", use_container_width=True):
-        st.session_state.sim_incidents = {}
-        st.session_state.sim_vectors = []
-        st.session_state.sim_logs = []
-        st.rerun()
 
 tab_live, tab_incidents, tab_logs = st.tabs(["Diagnostic en direct", "Incidents", "Journal d'exécution"])
 
 with tab_live:
     if trigger:
-        incident = get_or_create_incident(alert_text)
-        fingerprint_short = incident["alert_fingerprint"][:12]
+        with st.spinner("Requête HTTP envoyée au backend (API Gateway → Lambda)…"):
+            incident = trigger_agent(alert_text, simulate_crash)
 
-        already_done = incident["status"] in ("RESOLVED", "FAILED")
-        already_started = len(incident["context_json"].get("turns", [])) > 0
-
-        st.subheader(f"Incident `{incident['incident_id'][:8]}` (empreinte `{fingerprint_short}…`)")
-
-        if already_started or already_done:
-            st.info(
-                f"Incident déjà connu (même empreinte d'alerte) — statut actuel : **{incident['status']}**. "
-                f"L'agent reprend à partir de l'état persisté au lieu de repartir de zéro."
-            )
-
-        if already_done:
-            st.write(f"Cet incident est déjà **{incident['status']}**. Aucune nouvelle action nécessaire.")
+        if incident is None:
+            st.error(f"La requête vers le backend a échoué : {st.session_state.get('_api_error')}")
         else:
-            embedding = _pseudo_embedding(alert_text)
-            similar = find_similar_incident(embedding)
-            if similar:
-                st.info(
-                    f"Incident historique similaire trouvé (distance cosinus = {similar['distance']:.4f}) : "
-                    f"« {similar['error_message_text']} »"
-                )
-            else:
-                st.caption("Aucun incident historique similaire trouvé — première occurrence de ce type de panne.")
+            fingerprint_short = incident["alertFingerprint"][:12]
+            turns = incident["contextJson"].get("turns", [])
 
-            start_turn = len(incident["context_json"].get("turns", []))
-            run_simulated_agent(incident, alert_text, start_turn, crash_after)
+            st.subheader(f"Incident `{incident['incidentId'][:8]}` (empreinte `{fingerprint_short}…`)")
+            st.write(f"**Statut :** `{incident['status']}` — **Étape :** `{incident['currentStep']}`")
+
+            if len(turns) > 0 and incident["status"] not in ("RESOLVED", "FAILED"):
+                st.warning(
+                    "💥 L'agent s'est arrêté avant la fin (crash simulé du backend). L'état a déjà été "
+                    "persisté en base avant ce point — clique de nouveau sur « Déclencher l'agent » avec "
+                    "la même alerte pour prouver la reprise sans perte de contexte."
+                )
+            elif incident["status"] in ("RESOLVED", "FAILED"):
+                st.success(incident["contextJson"].get("finalResponse") or f"Incident {incident['status']}.")
+
+            for turn in turns:
+                with st.expander(f"Tour {turn['turn'] + 1} — {turn['toolName']}", expanded=True):
+                    st.write(f"**Pensée de l'agent :** {turn['thought']}")
+                    st.write(f"**Appel d'outil :** `{turn['toolName']}({turn['toolInput']})`")
+                    st.write(f"**Résultat :** `{turn['toolOutput']}`")
     else:
         st.caption("Choisis un scénario dans la barre latérale et clique sur « Déclencher l'agent ».")
 
 with tab_incidents:
-    incidents = fetch_all_incidents()
+    if st.button("Rafraîchir"):
+        st.rerun()
+    incidents = fetch_incidents()
     if not incidents:
         st.caption("Aucun incident pour l'instant.")
     else:
         st.dataframe(
             [
                 {
-                    "Incident": i["incident_id"][:8],
-                    "Empreinte": i["alert_fingerprint"][:12],
+                    "Incident": i["incidentId"][:8],
+                    "Empreinte": i["alertFingerprint"][:12],
                     "Statut": i["status"],
-                    "Étape": i["current_step"],
-                    "Mis à jour": i["updated_at"],
+                    "Étape": i["currentStep"],
+                    "Mis à jour": i["updatedAt"],
                 }
                 for i in incidents
             ],
@@ -463,17 +174,19 @@ with tab_incidents:
         )
 
 with tab_logs:
-    logs = fetch_all_logs()
+    if st.button("Rafraîchir ", key="refresh_logs"):
+        st.rerun()
+    logs = fetch_logs()
     if not logs:
         st.caption("Aucune action journalisée pour l'instant.")
     else:
         st.dataframe(
             [
                 {
-                    "Incident": l["incident_id"][:8],
-                    "Action": l["action_taken"],
+                    "Incident": l["incidentId"][:8],
+                    "Action": l["actionTaken"],
                     "Résultat": l["result"],
-                    "Horodatage": l["created_at"],
+                    "Horodatage": l["createdAt"],
                 }
                 for l in logs
             ],

@@ -121,26 +121,52 @@ avant l'invocation.
 
 Le dashboard Streamlit permet de déclencher des pannes simulées et de
 regarder l'agent les diagnostiquer/réparer en direct, sans dépendre de vraies
-alertes CloudWatch.
+alertes CloudWatch. Il respecte le flux de communication du projet :
+
+```
+Frontend (Streamlit) --HTTP--> API Gateway / Backend (Lambda) --> Bedrock
+                                                                --> CockroachDB
+Frontend <--- rafraîchit en interrogeant l'état stocké en base ---
+```
+
+Le frontend **n'accède jamais directement à la base** : il envoie une
+requête HTTP au backend, qui seul parle à Bedrock et à CockroachDB, puis
+répond avec l'incident mis à jour. Le frontend rafraîchit ensuite ses
+tableaux en interrogeant à nouveau le backend.
+
+- **Sur AWS (production)** : le backend HTTP est une API Gateway devant la
+  fonction `backend/lambda_function.py`, qui appelle réellement Bedrock
+  (Claude 3.5 Sonnet + Titan) et lit/écrit dans CockroachDB Serverless.
+  Pointer `frontend/app.py` dessus avec :
+  ```bash
+  export API_BASE_URL="https://<id-api-gateway>.execute-api.<region>.amazonaws.com"
+  streamlit run frontend/app.py --server.port 5000
+  ```
+- **Dans ce Repl (démo)** : comme AWS Lambda/Bedrock/CockroachDB Serverless
+  ne sont pas disponibles ici, le rôle de "API Gateway + Lambda" est joué par
+  le service API du monorepo (`artifacts/api-server`, routes
+  `/api/incidents/*` et `/api/logs`, logique dans
+  `artifacts/api-server/src/lib/cloud-surgeon.ts`), qui persiste l'état dans
+  la base Postgres du Repl (extension `pgvector` activée pour émuler le type
+  `VECTOR` de CockroachDB — mêmes tables, même opérateur de similarité
+  cosinus `<=>`). Le raisonnement Claude et les outils sont simulés par un
+  moteur déterministe (pas de credentials AWS nécessaires). C'est la
+  configuration par défaut du workflow **Cloud-Surgeon Dashboard** de ce
+  Repl (`API_BASE_URL` par défaut : `http://localhost:80/api`).
+
+Pour lancer le dashboard seul en local :
 
 ```bash
 pip install -r requirements.txt
-export COCKROACHDB_URL="postgresql://<user>:<password>@<host>:26257/<database>?sslmode=verify-full"
 streamlit run frontend/app.py --server.port 5000
 ```
 
-- Si `COCKROACHDB_URL` est défini et que `database/schema.sql` a déjà été
-  appliqué, le dashboard persiste réellement l'état des incidents, le
-  journal d'exécution et la mémoire vectorielle RAG dans CockroachDB — utile
-  pour prouver visuellement la résilience (bouton "Simuler un crash de la
-  Lambda").
-- Si `COCKROACHDB_URL` n'est pas défini, le dashboard bascule automatiquement
-  en **mode simulation** (tout l'état vit dans la session Streamlit), pour
-  pouvoir enregistrer une démo immédiatement sans configurer d'infrastructure.
-- Le raisonnement de Claude et les résultats d'outils affichés dans le
-  dashboard sont simulés localement (pas d'appel Bedrock réel depuis le
-  frontend) afin de ne pas nécessiter de credentials AWS pour la démo ; le
-  vrai raisonnement Bedrock a lieu côté `backend/lambda_function.py`.
+Le bouton "Simuler un crash de la Lambda" envoie une requête qui arrête le
+backend après le premier tour de raisonnement sans finaliser l'incident.
+L'état déjà écrit en base survit ; cliquer de nouveau sur "Déclencher
+l'agent" avec la même alerte envoie une nouvelle requête HTTP qui reprend
+l'incident exactement où il s'était arrêté — la preuve de résilience que le
+jury va chercher.
 
 ## 5. Publier sur Devpost
 

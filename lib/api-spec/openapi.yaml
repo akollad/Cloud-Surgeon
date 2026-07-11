@@ -10,7 +10,92 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: incidents
+    description: Cloud-Surgeon incident agent operations
 paths:
+  /incidents/trigger:
+    post:
+      operationId: triggerIncident
+      tags: [incidents]
+      summary: Trigger (or resume) the Cloud-Surgeon agent for an alert
+      description: >
+        Plays the role of the AWS API Gateway + Lambda entry point. Looks up
+        (or creates) the incident by a fingerprint derived from the alert
+        text, runs the simulated Claude 3.5 Sonnet tool-calling loop from
+        wherever it last left off, persisting state to CockroachDB/Postgres
+        after every turn, and returns the resulting incident. If
+        `simulateCrash` is true, the loop stops after the first turn without
+        finishing, to demonstrate that the next call resumes instead of
+        restarting.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AlertInput"
+      responses:
+        "200":
+          description: Incident created or resumed and processed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Incident"
+        "400":
+          description: Invalid request body
+  /incidents:
+    get:
+      operationId: listIncidents
+      tags: [incidents]
+      summary: List recent incidents
+      responses:
+        "200":
+          description: Recent incidents, most recently updated first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Incident"
+  /incidents/{incidentId}:
+    get:
+      operationId: getIncident
+      tags: [incidents]
+      summary: Get a single incident by id
+      parameters:
+        - name: incidentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The incident
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Incident"
+        "404":
+          description: Incident not found
+  /logs:
+    get:
+      operationId: listExecutionLogs
+      tags: [incidents]
+      summary: List recent execution log entries
+      parameters:
+        - name: incidentId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Recent execution log entries, most recent first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ExecutionLog"
   /healthz:
     get:
       operationId: healthCheck
@@ -33,4 +118,88 @@ components:
           type: string
       required:
         - status
+    AlertInput:
+      type: object
+      required: [alertText]
+      properties:
+        alertText:
+          type: string
+          minLength: 1
+        simulateCrash:
+          type: boolean
+          description: >
+            If true, stop the agent loop right after the first turn without
+            finishing, to demonstrate resumable state.
+          default: false
+    AgentTurn:
+      type: object
+      required: [turn, thought, toolName, toolInput, toolOutput]
+      properties:
+        turn:
+          type: integer
+        thought:
+          type: string
+        toolName:
+          type: string
+        toolInput:
+          type: object
+          additionalProperties: true
+        toolOutput:
+          type: object
+          additionalProperties: true
+    IncidentContext:
+      type: object
+      properties:
+        alertText:
+          type: string
+        turns:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentTurn"
+        finalResponse:
+          type: ["string", "null"]
+        crashed:
+          type: boolean
+      additionalProperties: true
+    Incident:
+      type: object
+      required:
+        [
+          incidentId,
+          alertFingerprint,
+          status,
+          currentStep,
+          contextJson,
+          updatedAt,
+        ]
+      properties:
+        incidentId:
+          type: string
+        alertFingerprint:
+          type: string
+        status:
+          type: string
+          enum: [TRIGGERED, DIAGNOSING, REPAIRING, RESOLVED, FAILED]
+        currentStep:
+          type: ["string", "null"]
+        contextJson:
+          $ref: "#/components/schemas/IncidentContext"
+        updatedAt:
+          type: string
+          format: date-time
+    ExecutionLog:
+      type: object
+      required: [logId, incidentId, actionTaken, result, createdAt]
+      properties:
+        logId:
+          type: string
+        incidentId:
+          type: string
+        actionTaken:
+          type: string
+        result:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
 
