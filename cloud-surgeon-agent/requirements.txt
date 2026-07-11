@@ -1,0 +1,5 @@
+# Dépendances globales pour le développement local (backend + dashboard).
+# Pour packager uniquement la Lambda, voir backend/requirements.txt.
+boto3>=1.34.0
+psycopg2-binary>=2.9.9
+streamlit>=1.38.0
