@@ -17,8 +17,13 @@ import {
   pseudoEmbedding,
   runAgentLoop,
 } from "../lib/cloud-surgeon";
+import { apiKeyAuth } from "../middleware/apiKeyAuth";
 
 const router: IRouter = Router();
+
+// Toutes les routes incidents/logs exigent la clé API partagée avec le
+// dashboard — voir middleware/apiKeyAuth.ts.
+router.use(apiKeyAuth);
 
 router.post("/incidents/trigger", async (req, res): Promise<void> => {
   const parsed = TriggerIncidentBody.safeParse(req.body);

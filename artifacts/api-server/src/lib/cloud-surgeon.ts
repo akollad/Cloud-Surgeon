@@ -7,6 +7,7 @@ import {
   incidentVectorsTable,
   type IncidentState,
 } from "@workspace/db";
+import { callMcpTool } from "../mcp/client";
 
 // ----------------------------------------------------------------------------
 // Ce module joue le rôle du handler AWS Lambda (`backend/lambda_function.py`)

@@ -43,10 +43,15 @@ import streamlit as st
 # ----------------------------------------------------------------------------
 API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:80/api")
 
+# Clé API partagée avec le backend (voir artifacts/api-server/src/middleware/apiKeyAuth.ts).
+# /healthz reste public ; toutes les routes /incidents et /logs l'exigent.
+_API_KEY = os.environ.get("CLOUD_SURGEON_API_KEY", "")
+_AUTH_HEADERS = {"x-api-key": _API_KEY} if _API_KEY else {}
+
 
 def api_post(path: str, json: dict) -> dict | None:
     try:
-        resp = requests.post(f"{API_BASE_URL}{path}", json=json, timeout=30)
+        resp = requests.post(f"{API_BASE_URL}{path}", json=json, headers=_AUTH_HEADERS, timeout=30)
         resp.raise_for_status()
         return resp.json()
     except requests.RequestException as exc:  # noqa: BLE001
@@ -56,7 +61,7 @@ def api_post(path: str, json: dict) -> dict | None:
 
 def api_get(path: str, params: dict | None = None) -> list | dict | None:
     try:
-        resp = requests.get(f"{API_BASE_URL}{path}", params=params, timeout=15)
+        resp = requests.get(f"{API_BASE_URL}{path}", params=params, headers=_AUTH_HEADERS, timeout=15)
         resp.raise_for_status()
         return resp.json()
     except requests.RequestException as exc:  # noqa: BLE001

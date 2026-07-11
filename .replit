@@ -42,3 +42,8 @@ timeoutMs = 20000
 
 [nix]
 channel = "stable-25_05"
+
+[userenv]
+
+[userenv.shared]
+CLOUD_SURGEON_API_KEY = "3f7a84c782ac9e5114dee48372cd2b42fa25a63e1137f9c3"
