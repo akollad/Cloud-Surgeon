@@ -9,15 +9,14 @@ const router: IRouter = Router();
 
 router.use(healthRouter);
 
-// Webhook CloudWatch/SNS monté AVANT incidentsRouter — ce dernier applique
-// apiKeyAuth à tout ce qui le traverse (pas de préfixe de chemin), donc le
-// webhook serait bloqué s'il était monté après. Le webhook est sécurisé par
-// la validation du format SNS ; l'auth par clé API n'est pas compatible avec
-// les subscriptions HTTP SNS.
+// Webhook CloudWatch/SNS mounted BEFORE incidentsRouter — the latter applies
+// apiKeyAuth to everything that passes through it (no path prefix), so the
+// webhook would be blocked if mounted after. The webhook is secured by
+// SNS format validation; API key auth is not compatible with SNS HTTP subscriptions.
 router.use(webhookRouter);
 
-// metricsRouter et chaosRouter avant incidentsRouter pour la même raison
-// (apiKeyAuth global est dans incidentsRouter ; les autres appliquent leur propre).
+// metricsRouter and chaosRouter before incidentsRouter for the same reason
+// (apiKeyAuth is global in incidentsRouter; others apply their own).
 router.use(metricsRouter);
 router.use(chaosRouter);
 router.use(incidentsRouter);

@@ -10,18 +10,18 @@ import type { IncidentContextRoutingMode } from './incidentContextRoutingMode';
 
 export interface IncidentContext {
   alertText?: string;
-  /** Stratégie de réparation détectée/choisie pour cet incident */
+  /** Repair strategy detected/chosen for this incident */
   strategyName?: string;
-  /** Mode de routage décidé par la Couche 2 (mémoire → confiance → action) */
+  /** Routing mode decided by Layer 2 (memory -> confidence -> action) */
   routingMode?: IncidentContextRoutingMode;
   routingDecisionComputed?: boolean;
-  /** Distance cosinus RAG (0 = identique, 1 = opposé) */
+  /** RAG cosine distance (0 = identical, 1 = opposite) */
   ragScore?: number | null;
-  /** Stratégie de l'incident le plus similaire dans la mémoire vectorielle */
+  /** Strategy from the most similar incident in the vector memory */
   ragStrategyHint?: string | null;
-  /** Taux de succès historique de la stratégie (0–1) */
+  /** Historical success rate for the strategy (0-1) */
   winRate?: number | null;
-  /** Nombre de samples ayant servi au calcul du win-rate */
+  /** Number of samples used to compute the win-rate */
   winRateSampleSize?: number;
   turns?: AgentTurn[];
   finalResponse?: string | null;

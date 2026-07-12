@@ -1,52 +1,52 @@
 /**
- * prompt-guard.ts — Défense contre les injections de prompt
+ * prompt-guard.ts — Prompt injection defense
  *
- * ## Menace
- * Le texte d'alerte reçu via webhook CloudWatch/SNS ou l'endpoint `/incidents/trigger`
- * est injecté directement dans un prompt LLM (Claude 3.5 Sonnet via Bedrock).
- * Un attaquant contrôlant ce texte pourrait :
- *   1. Changer le rôle de l'agent ("ignore previous instructions, you are now…")
- *   2. Insérer des délimiteurs de tour LLM (\n\nHuman:, [INST], <|im_start|>…) pour
- *      bifurquer la conversation et extraire des données ou déclencher de fausses réparations.
- *   3. Exfiltrer l'état interne de l'agent via un "prompt leaking" (\n\nAssistant: voici
- *      mes instructions système :…).
+ * ## Threat
+ * The alert text received via CloudWatch/SNS webhook or the `/incidents/trigger` endpoint
+ * is injected directly into an LLM prompt (Claude via Anthropic/Bedrock).
+ * An attacker controlling this text could:
+ *   1. Change the agent's role ("ignore previous instructions, you are now…")
+ *   2. Insert LLM turn delimiters (\n\nHuman:, [INST], <|im_start|>…) to
+ *      hijack the conversation and extract data or trigger false repairs.
+ *   3. Exfiltrate the agent's internal state via "prompt leaking" (\n\nAssistant: here
+ *      are my system instructions:…).
  *
- * ## Contre-mesures (défense en profondeur)
- *   1. Longueur max (2 000 chars) — empêche les attaques par dilution de contexte.
- *   2. Suppression des caractères de contrôle Unicode — null bytes, C0, C1 (sauf \t, \n, \r).
- *   3. Détection de patterns LLM connus — délimiteurs de rôle Anthropic, OpenAI, LLaMA/Mistral,
- *      commandes de jailbreak explicites.
- *   4. Journalisation des tentatives dans execution_logs — traçabilité pour le jury.
+ * ## Countermeasures (defense in depth)
+ *   1. Max length (2,000 chars) — prevents context dilution attacks.
+ *   2. Removal of Unicode control characters — null bytes, C0, C1 (except \t, \n, \r).
+ *   3. Detection of known LLM patterns — Anthropic, OpenAI, LLaMA/Mistral role delimiters,
+ *      explicit jailbreak commands.
+ *   4. Logging of attempts in execution_logs — traceability for judges.
  *
- * ## Ce qui N'est PAS couvert
- *   - Toutes les formes d'injection sémantique (ex. "décris l'état du cluster en détail")
- *   - WAF/rate-limiting réseau (hors scope Replit)
- *   - Injections via les sorties d'outils MCP (confiance implicite dans les outils internes)
+ * ## What is NOT covered
+ *   - All forms of semantic injection (e.g. "describe the cluster state in detail")
+ *   - WAF/network rate-limiting (out of Replit scope)
+ *   - Injections via MCP tool outputs (implicit trust in internal tools)
  *
  * @module prompt-guard
  */
 
-/** Résultat de la sanitisation d'une alerte. */
+/** Result of alert sanitization. */
 export interface SanitizeResult {
-  /** Texte sanitisé, prêt à être injecté dans le prompt LLM. */
+  /** Sanitized text, ready to be injected into the LLM prompt. */
   sanitized: string;
-  /** `true` si le texte original a été modifié (tronqué ou nettoyé). */
+  /** `true` if the original text was modified (truncated or cleaned). */
   wasModified: boolean;
-  /** `true` si un pattern d'injection connu a été détecté dans le texte original. */
+  /** `true` if a known injection pattern was detected in the original text. */
   injectionDetected: boolean;
-  /** Liste des raisons de modification/détection, pour les logs. */
+  /** List of modification/detection reasons, for logs. */
   reasons: string[];
 }
 
-/** Longueur maximale autorisée pour un texte d'alerte. */
+/** Maximum allowed length for an alert text. */
 export const MAX_ALERT_TEXT_LENGTH = 2_000;
 
 /**
- * Patterns de détection d'injection de prompt (hard-block).
+ * Prompt injection detection patterns (hard-block).
  *
- * Chaque entrée est un objet { pattern, label } pour des messages d'erreur explicites.
- * Ces patterns correspondent aux délimiteurs de rôle des LLMs les plus courants et aux
- * phrases de jailbreak connues — la liste est documentée pour le jury.
+ * Each entry is a { pattern, label } object for explicit error messages.
+ * These patterns correspond to the most common LLM role delimiters and known
+ * jailbreak phrases — the list is documented for judges.
  */
 export const INJECTION_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
   // ── Anthropic Claude ─────────────────────────────────────────────────────
@@ -76,7 +76,7 @@ export const INJECTION_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
     pattern: /<<SYS>>|<<\/SYS>>/i,
     label: "LLaMA-SYS-block",
   },
-  // ── Balises XML de contrôle de rôle ─────────────────────────────────────
+  // ── XML role-control tags ────────────────────────────────────────────────
   {
     pattern: /<\/(s|system|prompt|context|instruction)>/i,
     label: "XML-role-close-tag",
@@ -85,7 +85,7 @@ export const INJECTION_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
     pattern: /<(system|prompt|context|role|instruction)\b[^>]*>/i,
     label: "XML-role-open-tag",
   },
-  // ── Tentatives de jailbreak explicites ──────────────────────────────────
+  // ── Explicit jailbreak attempts ──────────────────────────────────────────
   {
     pattern: /ignore\s+(all\s+)?(previous|prior|above)\s+(instructions?|prompts?|rules?)/i,
     label: "jailbreak-ignore-instructions",
@@ -106,7 +106,7 @@ export const INJECTION_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
     pattern: /act\s+as\s+(if\s+you(\s+are|'re)\s+)?(a\s+|an\s+)?(malicious|unrestricted|evil|hacker|DAN)/i,
     label: "jailbreak-act-as-malicious",
   },
-  // ── Surcharge de contexte système (injection de délimiteurs de section) ──
+  // ── System context override (section delimiter injection) ─────────────────
   {
     pattern: /^---+\s*(new\s+instruction|system\s+prompt|override|admin\s+command)/im,
     label: "section-delimiter-override",
@@ -118,18 +118,18 @@ export const INJECTION_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
 ];
 
 /**
- * Regex correspondant aux caractères de contrôle Unicode à supprimer :
- * C0 (0x00–0x1F sauf \t \n \r) + C1 (0x7F–0x9F) + caractères U+200B–U+200F
- * (zero-width spaces utilisés pour masquer des injections).
+ * Regex matching Unicode control characters to remove:
+ * C0 (0x00–0x1F except \t \n \r) + C1 (0x7F–0x9F) + U+200B–U+200F
+ * (zero-width spaces used to hide injections).
  */
 const CONTROL_CHAR_REGEX =
   /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u200B-\u200F\uFEFF]/g;
 
 /**
- * Sanitise un texte d'alerte avant injection dans un prompt LLM.
+ * Sanitizes an alert text before injection into an LLM prompt.
  *
- * Retourne toujours un objet { sanitized, wasModified, injectionDetected, reasons }.
- * L'appelant décide de bloquer ou de logger selon `injectionDetected`.
+ * Always returns an object { sanitized, wasModified, injectionDetected, reasons }.
+ * The caller decides whether to block or log based on `injectionDetected`.
  *
  * @example
  * const { sanitized, injectionDetected } = sanitizeAlertText(
@@ -142,22 +142,22 @@ export function sanitizeAlertText(raw: string): SanitizeResult {
   let text = raw;
   let injectionDetected = false;
 
-  // ── Étape 1 : suppression des caractères de contrôle ─────────────────
+  // ── Step 1: remove control characters ────────────────────────────────
   const stripped = text.replace(CONTROL_CHAR_REGEX, "");
   if (stripped !== text) {
     reasons.push("stripped-control-characters");
     text = stripped;
   }
 
-  // ── Étape 2 : normalisation des espaces multiples / retours à la ligne
-  //    (4+ newlines consécutifs → 2, pour réduire la surface de dilution)
+  // ── Step 2: normalize multiple spaces / newlines
+  //    (4+ consecutive newlines → 2, to reduce dilution surface)
   const normalizedNewlines = text.replace(/\n{4,}/g, "\n\n");
   if (normalizedNewlines !== text) {
     reasons.push("normalized-excessive-newlines");
     text = normalizedNewlines;
   }
 
-  // ── Étape 3 : détection des patterns d'injection ─────────────────────
+  // ── Step 3: detect injection patterns ────────────────────────────────
   for (const { pattern, label } of INJECTION_PATTERNS) {
     if (pattern.test(text)) {
       injectionDetected = true;
@@ -165,22 +165,22 @@ export function sanitizeAlertText(raw: string): SanitizeResult {
     }
   }
 
-  // ── Étape 4 : troncature ──────────────────────────────────────────────
+  // ── Step 4: truncation ────────────────────────────────────────────────
   if (text.length > MAX_ALERT_TEXT_LENGTH) {
     text = text.slice(0, MAX_ALERT_TEXT_LENGTH);
     reasons.push(`truncated-to-${MAX_ALERT_TEXT_LENGTH}-chars`);
   }
 
-  // Si une injection a été détectée, supprimer les segments problématiques.
-  // On remplace les délimiteurs par un marqueur inoffensif plutôt que de
-  // bloquer entièrement (l'appelant peut encore choisir de bloquer).
+  // If injection detected, remove matching segments.
+  // Replace delimiters with a safe marker rather than blocking entirely
+  // (the caller can still choose to block).
   if (injectionDetected) {
     let cleaned = text;
     for (const { pattern } of INJECTION_PATTERNS) {
-      // Supprimer les segments correspondants (remplacé par un espace)
+      // Remove matching segments (replaced with a space)
       cleaned = cleaned.replace(new RegExp(pattern, pattern.flags.includes("g") ? pattern.flags : pattern.flags + "g"), " [REDACTED] ");
     }
-    // Re-normaliser les espaces générés par la suppression
+    // Re-normalize whitespace generated by removal
     text = cleaned.replace(/\s{3,}/g, " ").trim();
   }
 
@@ -190,15 +190,15 @@ export function sanitizeAlertText(raw: string): SanitizeResult {
 }
 
 /**
- * Valide qu'un texte d'alerte est non vide après sanitisation.
- * Retourne une erreur lisible si la validation échoue.
+ * Validates that an alert text is non-empty after sanitization.
+ * Returns a readable error if validation fails.
  */
 export function validateAlertText(raw: unknown): { ok: true; value: string } | { ok: false; error: string } {
   if (typeof raw !== "string" || raw.trim().length === 0) {
     return { ok: false, error: "alertText must be a non-empty string." };
   }
   if (raw.length > MAX_ALERT_TEXT_LENGTH * 3) {
-    // Rejet dur : texte 6× la limite → vraisemblablement une tentative de dilution
+    // Hard reject: text 6* the limit → likely a dilution attempt
     return {
       ok: false,
       error: `alertText exceeds hard limit of ${MAX_ALERT_TEXT_LENGTH * 3} characters.`,

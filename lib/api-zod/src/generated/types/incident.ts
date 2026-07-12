@@ -15,9 +15,9 @@ export interface Incident {
   /** @nullable */
   currentStep: string | null;
   contextJson: IncidentContext;
-  /** Agent ayant réclamé cet incident via transaction sérialisable */
+  /** Agent that claimed this incident via serializable transaction */
   claimedByAgent?: string | null;
-  /** Incident parent dans la chaîne causale (CTE récursive) */
+  /** Parent incident in the causal chain (recursive CTE) */
   causedByIncidentId?: string | null;
   updatedAt: Date;
 }

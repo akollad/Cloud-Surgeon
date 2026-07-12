@@ -1,20 +1,20 @@
 /**
- * Routes de chaos engineering
+ * Chaos engineering routes
  *
  * POST /api/chaos/sigkill
- *   Tue le process Node en cours avec SIGKILL après un court délai.
- *   Utilisé par le dashboard pour déclencher un vrai crash de process depuis
- *   l'UI, sans manipulation manuelle du terminal — identique à ce que ferait
- *   un OOMKiller ou un orchestrateur ECS/Lambda qui force-kill une tâche.
+ *   Kills the running Node process with SIGKILL after a short delay.
+ *   Used by the dashboard to trigger a real process crash from the UI,
+ *   without manual terminal manipulation — identical to what an OOMKiller
+ *   or ECS/Lambda orchestrator would do when force-killing a task.
  *
- *   Workflow manager Replit redémarre automatiquement le service (comme
- *   l'orchestrateur Lambda redémarrerait une fonction après un crash).
- *   Le dashboard peut ensuite re-déclencher le même incident et prouver
- *   que la reprise depuis CockroachDB est sans perte de contexte.
+ *   The Replit workflow manager automatically restarts the service (like
+ *   a Lambda orchestrator restarting a function after a crash).
+ *   The dashboard can then re-trigger the same incident and prove that
+ *   recovery from CockroachDB is lossless.
  *
- * SÉCURITÉ : cette route est protégée par apiKeyAuth (même clé que toutes
- *   les routes incidents). En production elle serait désactivée ou restreinte
- *   à un réseau interne.
+ * SECURITY: this route is protected by apiKeyAuth (same key as all
+ *   incident routes). In production it would be disabled or restricted
+ *   to an internal network.
  */
 import { Router, type IRouter } from "express";
 import { apiKeyAuth } from "../middleware/apiKeyAuth";
@@ -26,15 +26,15 @@ router.use(apiKeyAuth);
 router.post("/chaos/sigkill", (req, res): void => {
   req.log.warn("CHAOS: SIGKILL requested via dashboard — process will die in 300ms");
 
-  // Répondre immédiatement avant de mourir, pour que le dashboard reçoive
-  // la confirmation avant la coupure de connexion.
+  // Respond immediately before dying, so the dashboard receives
+  // confirmation before the connection drops.
   res.status(202).json({
     message: "SIGKILL scheduled — process will die in ~300ms. Workflow manager will restart it.",
     pid: process.pid,
     note: "Re-trigger the same incident after restart to prove stateful resumption from CockroachDB.",
   });
 
-  // Tuer le process après le délai de réponse
+  // Kill the process after the response delay
   setTimeout(() => {
     process.kill(process.pid, "SIGKILL");
   }, 300);

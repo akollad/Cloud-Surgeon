@@ -1,36 +1,36 @@
 """
-Cloud-Surgeon — Agent DevOps Autonome Serverless
+Cloud-Surgeon — Autonomous Serverless DevOps Agent
 Hackathon CockroachDB x AWS 2026
 
-Ce module implémente un agent autonome exécuté sur AWS Lambda qui:
-  1. Reçoit une alerte d'infrastructure.
-  2. Vectorise l'alerte via Amazon Bedrock (Titan Text Embeddings V2) et
-     recherche l'incident historique le plus proche dans CockroachDB
-     (RAG vectoriel, distance cosinus).
-  3. Fait tourner une boucle d'agent avec Amazon Bedrock (Claude 3.5 Sonnet)
-     capable d'appeler deux outils (`execute_ccloud_command`,
-     `aws_repair_service`) pour diagnostiquer et réparer l'incident.
-  4. Persiste CHAQUE étape (pensée, tool_use, tool_result, changement de
-     statut) dans CockroachDB de manière synchrone et immédiate.
+This module implements an autonomous agent running on AWS Lambda that:
+  1. Receives an infrastructure alert.
+  2. Vectorizes the alert via Amazon Bedrock (Titan Text Embeddings V2) and
+     searches for the closest historical incident in CockroachDB
+     (vector RAG, cosine distance).
+  3. Runs an agent loop with Amazon Bedrock (Claude 3.5 Sonnet)
+     capable of calling two tools (`execute_ccloud_command`,
+     `aws_repair_service`) to diagnose and repair the incident.
+  4. Persists EVERY step (thought, tool_use, tool_result, status change)
+     in CockroachDB synchronously and immediately.
 
-Pourquoi cette écriture "immédiate" est critique pour le jury :
-  AWS Lambda peut être tué à tout moment (timeout, OOM, déploiement,
-  spot reclaim de l'infra sous-jacente, etc.). Ce code ne garde AUCUN état
-  en mémoire vive entre deux étapes de la boucle d'agent : dès qu'un
-  tool_result est obtenu, il est écrit dans `incident_state.context_json`
-  AVANT de rappeler Bedrock. Si le process meurt juste après, la prochaine
-  invocation Lambda relit cet état exact depuis CockroachDB et reprend la
-  conversation Claude au tour suivant, sans rejouer ni perdre les étapes
-  déjà exécutées. CockroachDB est donc la seule source de vérité de l'agent
-  — jamais une variable Python.
+Why this "immediate write" approach is critical for judges:
+  AWS Lambda can be killed at any time (timeout, OOM, deployment,
+  spot reclaim of underlying infra, etc.). This code keeps NO state
+  in memory between agent loop steps: as soon as a tool_result is
+  obtained, it is written to `incident_state.context_json`
+  BEFORE calling Bedrock again. If the process dies just after,
+  the next Lambda invocation reads that exact state from CockroachDB
+  and resumes the Claude conversation at the next turn, without
+  replaying or losing already-executed steps. CockroachDB is thus
+  the sole source of truth for the agent — never a Python variable.
 
-DON'TS respectés :
-  - Aucune librairie d'agent tierce (pas de LangChain/CrewAI) : boucle de
-    tool-calling écrite à la main avec boto3 brut.
-  - Aucune variable d'état globale hors handler : tout est passé en
-    paramètres de fonction et lu/écrit depuis CockroachDB.
-  - Aucune clé AWS en dur : le client boto3 s'authentifie via le rôle
-    d'exécution IAM de la Lambda (credentials résolues automatiquement).
+DON'TS observed:
+  - No third-party agent library (no LangChain/CrewAI): hand-written
+    tool-calling loop using raw boto3.
+  - No global state variables outside the handler: everything is passed
+    as function parameters and read/written from CockroachDB.
+  - No hardcoded AWS keys: the boto3 client authenticates via the
+    Lambda execution IAM role (credentials resolved automatically).
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 # ------------------------------------------------------------------------
-# Configuration (100% via variables d'environnement — aucun secret en dur)
+# Configuration (100% via environment variables — no hardcoded secrets)
 # ------------------------------------------------------------------------
 DATABASE_URL = os.environ["DATABASE_URL"]
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
@@ -62,26 +62,26 @@ TITAN_EMBED_MODEL_ID = os.environ.get(
 )
 MAX_AGENT_TURNS = int(os.environ.get("MAX_AGENT_TURNS", "8"))
 
-# Statuts non terminaux : un incident dans un de ces états doit être repris,
-# pas recréé.
+# Non-terminal statuses: an incident in one of these states must be resumed,
+# not recreated.
 ACTIVE_STATUSES = ("TRIGGERED", "DIAGNOSING", "REPAIRING")
 
 
 # ============================================================================
-# A. CONNEXION À COCKROACHDB
+# A. COCKROACHDB CONNECTION
 # ============================================================================
 def get_db_connection() -> "psycopg2.extensions.connection":
     """
-    Ouvre une connexion à CockroachDB Serverless via DATABASE_URL.
+    Opens a connection to CockroachDB Serverless via DATABASE_URL.
 
-    Utilise RealDictCursor par défaut afin que toutes les lignes retournées
-    soient des dictionnaires (clé = nom de colonne), ce qui simplifie
-    directement le mapping vers context_json / réponses JSON.
+    Uses RealDictCursor by default so that all returned rows are
+    dictionaries (key = column name), which simplifies mapping to
+    context_json / JSON responses.
 
-    Note résilience : on ne réutilise volontairement PAS de connexion globale
-    entre invocations Lambda. Une connexion neuve par invocation évite de
-    travailler sur une connexion "zombie" issue d'un environnement Lambda
-    gelé (freeze/thaw) qui pourrait avoir expiré côté CockroachDB.
+    Resilience note: we intentionally do NOT reuse a global connection
+    between Lambda invocations. A fresh connection per invocation avoids
+    working on a "zombie" connection from a frozen Lambda environment
+    (freeze/thaw) that may have expired on the CockroachDB side.
     """
     try:
         conn = psycopg2.connect(
@@ -93,18 +93,17 @@ def get_db_connection() -> "psycopg2.extensions.connection":
         conn.autocommit = False
         return conn
     except psycopg2.OperationalError as exc:
-        # Base temporairement inaccessible (cold start réseau, cluster qui
-        # scale, etc.) : on lève une exception propre et explicite plutôt que
-        # de laisser fuir un traceback psycopg2 brut.
-        logger.error("Impossible de se connecter à CockroachDB: %s", exc)
+        # DB temporarily unreachable (network cold start, scaling cluster, etc.):
+        # raise a clean, explicit exception rather than leaking a raw psycopg2 traceback.
+        logger.error("Failed to connect to CockroachDB: %s", exc)
         raise RuntimeError(
-            "CockroachDB indisponible : la connexion à DATABASE_URL a échoué."
+            "CockroachDB unavailable: connection to DATABASE_URL failed."
         ) from exc
 
 
 @contextmanager
 def db_cursor(conn: "psycopg2.extensions.connection") -> Iterator[Any]:
-    """Petit helper pour garantir commit/rollback cohérent autour d'un cursor."""
+    """Small helper to guarantee consistent commit/rollback around a cursor."""
     cur = conn.cursor()
     try:
         yield cur
@@ -117,15 +116,15 @@ def db_cursor(conn: "psycopg2.extensions.connection") -> Iterator[Any]:
 
 
 # ============================================================================
-# B. GÉNÉRATION D'EMBEDDINGS (Amazon Titan Text Embeddings V2)
+# B. EMBEDDING GENERATION (Amazon Titan Text Embeddings V2)
 # ============================================================================
 def get_embedding(text: str) -> list[float]:
     """
-    Vectorise `text` avec Amazon Titan Text Embeddings V2 (1024 dimensions),
-    dimension exigée pour matcher la colonne `embedding VECTOR(1024)`.
+    Vectorizes `text` with Amazon Titan Text Embeddings V2 (1024 dimensions),
+    the dimension required to match the `embedding VECTOR(1024)` column.
 
-    Le client bedrock-runtime s'initialise sans credentials en dur : boto3
-    résout automatiquement le rôle IAM attaché à la fonction Lambda.
+    The bedrock-runtime client initializes without hardcoded credentials:
+    boto3 automatically resolves the IAM role attached to the Lambda function.
     """
     try:
         bedrock_runtime = boto3.client("bedrock-runtime", region_name=AWS_REGION)
@@ -139,40 +138,40 @@ def get_embedding(text: str) -> list[float]:
             accept="application/json",
         )
 
-        # boto3 renvoie un StreamingBody à usage unique : il faut le lire et
-        # le décoder explicitement avant de parser le JSON.
+        # boto3 returns a single-use StreamingBody: must be read and
+        # decoded explicitly before parsing the JSON.
         response_body = json.loads(response["body"].read().decode("utf-8"))
         embedding = response_body["embedding"]
 
         if not isinstance(embedding, list) or len(embedding) != 1024:
             raise ValueError(
-                f"Embedding Titan invalide : longueur {len(embedding) if isinstance(embedding, list) else 'N/A'} "
-                "(1024 attendu)."
+                f"Invalid Titan embedding: length {len(embedding) if isinstance(embedding, list) else 'N/A'} "
+                "(1024 expected)."
             )
 
         return embedding
     except (boto3.exceptions.Boto3Error, KeyError, ValueError, json.JSONDecodeError) as exc:
-        logger.error("Échec de la génération d'embedding Titan: %s", exc)
-        raise RuntimeError("Amazon Bedrock (Titan V2) a échoué à vectoriser le texte.") from exc
+        logger.error("Titan embedding generation failed: %s", exc)
+        raise RuntimeError("Amazon Bedrock (Titan V2) failed to vectorize the text.") from exc
 
 
 def _vector_literal(embedding: list[float]) -> str:
-    """Sérialise une liste de floats Python au format littéral VECTOR de CockroachDB, ex: '[0.1,0.2,...]'."""
+    """Serializes a Python float list to CockroachDB VECTOR literal format, e.g. '[0.1,0.2,...]'."""
     return "[" + ",".join(repr(float(x)) for x in embedding) + "]"
 
 
 # ============================================================================
-# C. RECHERCHE VECTORIELLE (RAG SQL)
+# C. VECTOR SEARCH (RAG SQL)
 # ============================================================================
 def find_similar_incident(
     conn: "psycopg2.extensions.connection", embedding: list[float]
 ) -> dict | None:
     """
-    Recherche l'incident historique le plus proche par distance cosinus.
+    Finds the closest historical incident by cosine distance.
 
-    L'opérateur `<=>` est l'opérateur de distance cosinus vectorielle natif
-    de CockroachDB (compatible pgvector). On trie par distance croissante
-    (0 = identique) et on prend le plus proche voisin (LIMIT 1).
+    The `<=>` operator is CockroachDB's native vector cosine distance operator
+    (pgvector-compatible). We sort by ascending distance (0 = identical)
+    and take the nearest neighbor (LIMIT 1).
     """
     try:
         with db_cursor(conn) as cur:
@@ -189,16 +188,16 @@ def find_similar_incident(
             row = cur.fetchone()
             return dict(row) if row else None
     except psycopg2.Error as exc:
-        logger.error("Échec de la recherche vectorielle RAG: %s", exc)
-        raise RuntimeError("La requête de similarité vectorielle CockroachDB a échoué.") from exc
+        logger.error("RAG vector search failed: %s", exc)
+        raise RuntimeError("CockroachDB vector similarity query failed.") from exc
 
 
 def index_resolved_incident(
     conn: "psycopg2.extensions.connection", error_message_text: str, embedding: list[float]
 ) -> None:
     """
-    Enrichit la base RAG avec un incident désormais résolu, afin que les
-    futures alertes similaires bénéficient de ce précédent.
+    Enriches the RAG database with a newly resolved incident, so that
+    future similar alerts can benefit from this precedent.
     """
     try:
         with db_cursor(conn) as cur:
@@ -210,15 +209,15 @@ def index_resolved_incident(
                 (error_message_text, _vector_literal(embedding)),
             )
     except psycopg2.Error as exc:
-        # Non-bloquant pour la résolution de l'incident : on log et on continue.
-        logger.warning("Impossible d'indexer l'incident résolu dans le RAG: %s", exc)
+        # Non-blocking for incident resolution: log and continue.
+        logger.warning("Failed to index resolved incident into RAG: %s", exc)
 
 
 # ============================================================================
-# D. GESTION DE L'ÉTAT (IDEMPOTENCE / SURVIVABILITÉ)
+# D. STATE MANAGEMENT (IDEMPOTENCE / SURVIVABILITY)
 # ============================================================================
 def _fingerprint(alert_text: str) -> str:
-    """Empreinte stable et déterministe d'une alerte, utilisée comme clé d'idempotence."""
+    """Stable, deterministic fingerprint of an alert, used as an idempotency key."""
     return hashlib.sha256(alert_text.strip().encode("utf-8")).hexdigest()
 
 
@@ -226,16 +225,15 @@ def get_or_create_incident(
     conn: "psycopg2.extensions.connection", alert_text: str
 ) -> tuple[str, str, dict]:
     """
-    Point d'entrée de la résilience de l'agent.
+    Entry point for agent resilience.
 
-    - Calcule le fingerprint de l'alerte.
-    - Tente un INSERT en statut 'TRIGGERED'.
-    - Si le fingerprint existe déjà (ON CONFLICT), NE RECRÉE RIEN : on
-      relit l'état existant (status, context_json) tel qu'il a été laissé
-      par la dernière invocation Lambda, potentiellement crashée en plein
-      milieu d'une réparation. C'est ce qui garantit 0% de perte de
-      contexte : une nouvelle Lambda reprend EXACTEMENT là où l'ancienne
-      s'est arrêtée.
+    - Computes the alert fingerprint.
+    - Attempts an INSERT with status 'TRIGGERED'.
+    - If the fingerprint already exists (ON CONFLICT), does NOT recreate:
+      reads the existing state (status, context_json) as left by the
+      last Lambda invocation, which may have crashed mid-repair. This
+      guarantees 0% context loss: a new Lambda resumes EXACTLY where
+      the previous one stopped.
 
     Returns:
         (incident_id, status, context_json)
@@ -256,12 +254,12 @@ def get_or_create_incident(
             row = cur.fetchone()
 
             if row is not None:
-                # Nouvel incident créé : première exécution pour cette alerte.
-                logger.info("Nouvel incident créé (fingerprint=%s)", fingerprint)
+                # New incident created: first execution for this alert.
+                logger.info("New incident created (fingerprint=%s)", fingerprint)
                 return str(row["incident_id"]), row["status"], row["context_json"]
 
-            # Conflit : l'incident existe déjà. On charge son état actuel
-            # pour reprendre l'exécution là où elle s'est arrêtée.
+            # Conflict: incident already exists. Load its current state
+            # to resume execution where it left off.
             cur.execute(
                 """
                 SELECT incident_id, status, context_json
@@ -272,22 +270,21 @@ def get_or_create_incident(
             )
             existing = cur.fetchone()
             if existing is None:
-                # Cas de course extrêmement improbable (ligne supprimée entre
-                # les deux requêtes) : on échoue explicitement plutôt que de
-                # deviner un état.
+                # Extremely unlikely race condition (row deleted between the two queries):
+                # fail explicitly rather than guessing a state.
                 raise RuntimeError(
-                    f"Incident avec fingerprint={fingerprint} introuvable après conflit d'insertion."
+                    f"Incident with fingerprint={fingerprint} not found after insert conflict."
                 )
 
             logger.info(
-                "Incident existant repris (incident_id=%s, status=%s) — reprise après crash possible.",
+                "Existing incident resumed (incident_id=%s, status=%s) — resuming after possible crash.",
                 existing["incident_id"],
                 existing["status"],
             )
             return str(existing["incident_id"]), existing["status"], existing["context_json"]
     except psycopg2.Error as exc:
-        logger.error("Échec de get_or_create_incident: %s", exc)
-        raise RuntimeError("Impossible de lire/écrire l'état de l'incident dans CockroachDB.") from exc
+        logger.error("get_or_create_incident failed: %s", exc)
+        raise RuntimeError("Failed to read/write incident state in CockroachDB.") from exc
 
 
 def persist_incident_state(
@@ -298,11 +295,11 @@ def persist_incident_state(
     context: dict,
 ) -> None:
     """
-    Écrit IMMÉDIATEMENT l'état complet de l'incident dans CockroachDB.
+    Writes the full incident state IMMEDIATELY to CockroachDB.
 
-    Appelée après CHAQUE tour de la boucle d'agent (avant de rappeler
-    Bedrock), afin que l'état visible en base soit toujours à jour, quelle
-    que soit l'étape à laquelle la Lambda pourrait être interrompue.
+    Called after EVERY agent loop turn (before calling Bedrock again),
+    so that the state visible in the database is always up to date,
+    regardless of the step at which the Lambda might be interrupted.
     """
     try:
         with db_cursor(conn) as cur:
@@ -318,14 +315,14 @@ def persist_incident_state(
                 (status, current_step, json.dumps(context), incident_id),
             )
     except psycopg2.Error as exc:
-        logger.error("Échec de la persistance de l'état de l'incident: %s", exc)
-        raise RuntimeError("Impossible de sauvegarder l'état de l'incident dans CockroachDB.") from exc
+        logger.error("Failed to persist incident state: %s", exc)
+        raise RuntimeError("Failed to save incident state to CockroachDB.") from exc
 
 
 def log_execution(
     conn: "psycopg2.extensions.connection", incident_id: str, action_taken: str, result: str
 ) -> None:
-    """Ajoute une ligne immuable dans le journal d'exécution chronologique."""
+    """Appends an immutable row to the chronological execution journal."""
     try:
         with db_cursor(conn) as cur:
             cur.execute(
@@ -336,36 +333,35 @@ def log_execution(
                 (incident_id, action_taken, result),
             )
     except psycopg2.Error as exc:
-        # Le logging ne doit jamais faire échouer la boucle métier ; on
-        # journalise l'erreur côté Lambda et on continue.
-        logger.warning("Échec de l'écriture dans execution_logs: %s", exc)
+        # Logging must never fail the business loop; log the error on the Lambda side and continue.
+        logger.warning("Failed to write to execution_logs: %s", exc)
 
 
 # ============================================================================
-# E. OUTILS DE L'AGENT (Tool Calling)
+# E. AGENT TOOLS (Tool Calling)
 #
-# Ces fonctions SIMULENT les actions réelles (CLI ccloud / API AWS). Dans un
-# environnement de production, `execute_ccloud_command` invoquerait le
-# binaire `ccloud` via subprocess dans une sandbox contrôlée, et
-# `aws_repair_service` appellerait les SDK boto3 correspondants (ecs, rds,
-# lambda, etc.). Le mode "Safe-by-default" est respecté : ces outils
-# n'exécutent jamais de SQL arbitraire ni ne modifient le schéma des tables
-# de mémoire de l'agent (incident_state / incident_vectors / execution_logs).
+# These functions SIMULATE real actions (ccloud CLI / AWS API). In a
+# production environment, `execute_ccloud_command` would invoke the `ccloud`
+# binary via subprocess in a controlled sandbox, and `aws_repair_service`
+# would call the corresponding boto3 SDKs (ecs, rds, lambda, etc.).
+# The "Safe-by-default" mode is enforced: these tools never execute
+# arbitrary SQL or modify the schema of the agent memory tables
+# (incident_state / incident_vectors / execution_logs).
 # ============================================================================
 TOOL_DEFINITIONS = [
     {
         "name": "execute_ccloud_command",
         "description": (
-            "Exécute une commande en lecture/diagnostic sur le cluster CockroachDB Cloud "
-            "via la CLI `ccloud` (ex: vérifier l'état d'un cluster, lister les métriques). "
-            "N'altère jamais le schéma des tables de mémoire de l'agent."
+            "Executes a read/diagnostic command on the CockroachDB Cloud cluster "
+            "via the `ccloud` CLI (e.g. check cluster status, list metrics). "
+            "Never alters the schema of the agent memory tables."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "command_json": {
                     "type": "string",
-                    "description": "Commande ccloud sérialisée en JSON, ex: '{\"action\": \"cluster:status\", \"cluster_id\": \"...\"}'",
+                    "description": "ccloud command serialized as JSON, e.g. '{\"action\": \"cluster:status\", \"cluster_id\": \"...\"}'",
                 }
             },
             "required": ["command_json"],
@@ -374,19 +370,19 @@ TOOL_DEFINITIONS = [
     {
         "name": "aws_repair_service",
         "description": (
-            "Déclenche une action de réparation sur un service AWS (ex: redémarrer une tâche "
-            "ECS, relancer une fonction Lambda, forcer un failover RDS)."
+            "Triggers a repair action on an AWS service (e.g. restart an ECS task, "
+            "re-invoke a Lambda function, force an RDS failover)."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "service_name": {
                     "type": "string",
-                    "description": "Nom du service AWS ciblé, ex: 'ecs-cluster-prod', 'rds-primary'.",
+                    "description": "Name of the targeted AWS service, e.g. 'ecs-cluster-prod', 'rds-primary'.",
                 },
                 "action": {
                     "type": "string",
-                    "description": "Action de réparation à exécuter, ex: 'restart', 'failover', 'scale_up'.",
+                    "description": "Repair action to execute, e.g. 'restart', 'failover', 'scale_up'.",
                 },
             },
             "required": ["service_name", "action"],
@@ -397,49 +393,48 @@ TOOL_DEFINITIONS = [
 
 def execute_ccloud_command(command_json: str) -> str:
     """
-    Simule l'exécution d'une commande ccloud (CockroachDB Cloud CLI).
+    Simulates execution of a ccloud command (CockroachDB Cloud CLI).
 
-    En production, ce point d'entrée invoquerait la CLI `ccloud` en
-    sous-processus (subprocess.run) avec une liste blanche stricte de
-    sous-commandes autorisées (safe-by-default), jamais de SQL brut fourni
-    par le modèle.
+    In production, this entry point would invoke the `ccloud` CLI as a
+    subprocess (subprocess.run) with a strict allowlist of permitted
+    subcommands (safe-by-default) — never raw SQL provided by the model.
     """
-    logger.info("[TOOL] execute_ccloud_command appelé avec: %s", command_json)
+    logger.info("[TOOL] execute_ccloud_command called with: %s", command_json)
     try:
         parsed = json.loads(command_json)
     except json.JSONDecodeError:
-        return json.dumps({"success": False, "error": "command_json invalide (JSON malformé)."})
+        return json.dumps({"success": False, "error": "Invalid command_json (malformed JSON)."})
 
     action = parsed.get("action", "unknown")
     # --- Simulation ---
     simulated_result = {
         "success": True,
         "action": action,
-        "output": f"[SIMULATION] Commande ccloud '{action}' exécutée avec succès sur le cluster.",
+        "output": f"[SIMULATION] ccloud command '{action}' executed successfully on the cluster.",
     }
-    logger.info("[TOOL] execute_ccloud_command résultat: %s", simulated_result)
+    logger.info("[TOOL] execute_ccloud_command result: %s", simulated_result)
     return json.dumps(simulated_result)
 
 
 def aws_repair_service(service_name: str, action: str) -> str:
     """
-    Simule une action de réparation AWS (ex: redémarrage d'un service ECS).
+    Simulates an AWS repair action (e.g. ECS service restart).
 
-    En production, ce point d'entrée router ait vers le bon client boto3
-    (ecs, rds, lambda, autoscaling...) en fonction de `service_name`, avec
-    des permissions IAM strictement scoppées (principe du moindre privilège).
+    In production, this entry point would route to the appropriate boto3
+    client (ecs, rds, lambda, autoscaling...) based on `service_name`,
+    with strictly scoped IAM permissions (least privilege principle).
     """
     logger.info(
-        "[TOOL] aws_repair_service appelé avec service_name=%s action=%s", service_name, action
+        "[TOOL] aws_repair_service called with service_name=%s action=%s", service_name, action
     )
     # --- Simulation ---
     simulated_result = {
         "success": True,
         "service_name": service_name,
         "action": action,
-        "output": f"[SIMULATION] Action '{action}' appliquée avec succès au service AWS '{service_name}'.",
+        "output": f"[SIMULATION] Action '{action}' successfully applied to AWS service '{service_name}'.",
     }
-    logger.info("[TOOL] aws_repair_service résultat: %s", simulated_result)
+    logger.info("[TOOL] aws_repair_service result: %s", simulated_result)
     return json.dumps(simulated_result)
 
 
@@ -452,29 +447,29 @@ TOOL_DISPATCH = {
 
 
 # ============================================================================
-# E. BOUCLE D'AGENT (Claude 3.5 Sonnet via Bedrock Messages API)
+# F. AGENT LOOP (Claude 3.5 Sonnet via Bedrock Messages API)
 # ============================================================================
-SYSTEM_PROMPT = """Tu es Cloud-Surgeon, un agent DevOps autonome responsable du diagnostic et de la
-réparation d'incidents d'infrastructure cloud.
+SYSTEM_PROMPT = """You are Cloud-Surgeon, an autonomous DevOps agent responsible for diagnosing and
+repairing cloud infrastructure incidents.
 
-Tu disposes de deux outils :
-- execute_ccloud_command : pour diagnostiquer l'état d'un cluster CockroachDB Cloud.
-- aws_repair_service : pour réparer un service AWS.
+You have two tools:
+- execute_ccloud_command: to diagnose the state of a CockroachDB Cloud cluster.
+- aws_repair_service: to repair an AWS service.
 
-Règles strictes :
-- N'utilise ces outils que pour du diagnostic ou de la réparation d'infrastructure.
-- N'émets jamais de commande visant à modifier le schéma d'une base de données de mémoire d'agent.
-- Une fois le problème résolu, réponds en langage naturel en commençant par "RESOLVED:" suivi d'un
-  résumé de l'action corrective.
-- Si tu ne peux pas résoudre le problème après investigation, réponds en commençant par "FAILED:"
-  suivi de la raison.
+Strict rules:
+- Only use these tools for infrastructure diagnostics or repair.
+- Never issue commands that modify the schema of agent memory tables.
+- Once the problem is resolved, respond in natural language starting with "RESOLVED:" followed by
+  a summary of the corrective action.
+- If you cannot resolve the problem after investigation, respond starting with "FAILED:"
+  followed by the reason.
 """
 
 
 def _invoke_claude(messages: list[dict]) -> dict:
     """
-    Appelle Claude 3.5 Sonnet via l'API Bedrock Messages (invoke_model) avec
-    les définitions d'outils. Parse le StreamingBody retourné par boto3.
+    Calls Claude 3.5 Sonnet via the Bedrock Messages API (invoke_model) with
+    tool definitions. Parses the StreamingBody returned by boto3.
     """
     bedrock_runtime = boto3.client("bedrock-runtime", region_name=AWS_REGION)
 
@@ -495,11 +490,11 @@ def _invoke_claude(messages: list[dict]) -> dict:
             contentType="application/json",
             accept="application/json",
         )
-        # Lecture explicite du StreamingBody, requise par boto3 (usage unique).
+        # Explicit StreamingBody read — required by boto3 (single-use).
         return json.loads(response["body"].read().decode("utf-8"))
     except (boto3.exceptions.Boto3Error, json.JSONDecodeError, KeyError) as exc:
-        logger.error("Échec de l'appel à Claude 3.5 Sonnet via Bedrock: %s", exc)
-        raise RuntimeError("Amazon Bedrock (Claude 3.5 Sonnet) a échoué à répondre.") from exc
+        logger.error("Claude 3.5 Sonnet call via Bedrock failed: %s", exc)
+        raise RuntimeError("Amazon Bedrock (Claude 3.5 Sonnet) failed to respond.") from exc
 
 
 def run_agent_loop(
@@ -510,18 +505,18 @@ def run_agent_loop(
     alert_text: str,
 ) -> dict:
     """
-    Fait tourner la boucle de raisonnement/action de l'agent jusqu'à
-    résolution, échec, ou atteinte de MAX_AGENT_TURNS.
+    Runs the agent reasoning/action loop until resolution, failure,
+    or MAX_AGENT_TURNS is reached.
 
-    Contrat de résilience : après CHAQUE tour (qu'il s'agisse d'un tool_use
-    ou de la réponse finale), l'état complet (messages, statut, étape) est
-    réécrit dans CockroachDB via persist_incident_state AVANT de continuer.
-    Si la Lambda meurt juste après un write, la prochaine invocation relit
-    `context["messages"]` tel quel et reprend la conversation Bedrock au
-    tour suivant, sans repartir de zéro.
+    Resilience contract: after EVERY turn (whether a tool_use or the
+    final response), the full state (messages, status, step) is written
+    back to CockroachDB via persist_incident_state BEFORE continuing.
+    If the Lambda dies just after a write, the next invocation reads
+    `context["messages"]` as-is and resumes the Bedrock conversation at
+    the next turn, without starting over.
     """
     messages: list[dict] = context.get("messages") or [
-        {"role": "user", "content": f"Nouvelle alerte d'infrastructure à diagnostiquer: {alert_text}"}
+        {"role": "user", "content": f"New infrastructure alert to diagnose: {alert_text}"}
     ]
 
     status = current_status if current_status in ACTIVE_STATUSES else "DIAGNOSING"
@@ -533,8 +528,8 @@ def run_agent_loop(
         try:
             claude_response = _invoke_claude(messages)
         except RuntimeError as exc:
-            # Échec d'appel Bedrock : on marque l'incident FAILED plutôt que
-            # de rester bloqué indéfiniment, et on persiste l'erreur.
+            # Bedrock call failure: mark the incident FAILED rather than
+            # staying blocked indefinitely, and persist the error.
             context["messages"] = messages
             context["error"] = str(exc)
             persist_incident_state(conn, incident_id, "FAILED", current_step, context)
@@ -544,8 +539,8 @@ def run_agent_loop(
         stop_reason = claude_response.get("stop_reason")
         content_blocks = claude_response.get("content", [])
 
-        # On ajoute la réponse de l'assistant à l'historique de conversation
-        # AVANT tout traitement, pour ne rien perdre si un tool échoue ensuite.
+        # Add the assistant response to the conversation history
+        # BEFORE any processing, so nothing is lost if a tool fails afterwards.
         messages.append({"role": "assistant", "content": content_blocks})
 
         if stop_reason == "tool_use":
@@ -563,12 +558,12 @@ def run_agent_loop(
                 handler = TOOL_DISPATCH.get(tool_name)
                 if handler is None:
                     tool_output = json.dumps(
-                        {"success": False, "error": f"Outil inconnu: {tool_name}"}
+                        {"success": False, "error": f"Unknown tool: {tool_name}"}
                     )
                 else:
                     try:
                         tool_output = handler(tool_input)
-                    except Exception as exc:  # noqa: BLE001 - on veut capturer toute erreur d'outil
+                    except Exception as exc:  # noqa: BLE001 - catch all tool errors
                         tool_output = json.dumps({"success": False, "error": str(exc)})
 
                 log_execution(conn, incident_id, f"{tool_name}({json.dumps(tool_input)})", tool_output)
@@ -583,15 +578,15 @@ def run_agent_loop(
 
             messages.append({"role": "user", "content": tool_result_blocks})
 
-            # ÉCRITURE IMMÉDIATE : c'est ici que la résilience se joue.
-            # Le résultat de l'outil est en base AVANT le prochain appel à
-            # Claude ; un crash juste après ce point ne perd aucune
-            # information, la prochaine Lambda repartira de cet état.
+            # IMMEDIATE WRITE: this is where resilience happens.
+            # The tool result is in the DB BEFORE the next Claude call;
+            # a crash just after this point loses no information —
+            # the next Lambda restarts from this exact state.
             context["messages"] = messages
             persist_incident_state(conn, incident_id, status, current_step, context)
             continue
 
-        # stop_reason != "tool_use" -> Claude a rendu sa réponse finale.
+        # stop_reason != "tool_use" -> Claude returned its final response.
         final_text = "".join(
             block.get("text", "") for block in content_blocks if block.get("type") == "text"
         )
@@ -603,8 +598,8 @@ def run_agent_loop(
         elif final_text.strip().upper().startswith("FAILED"):
             status = "FAILED"
         else:
-            # Réponse ambiguë : on la traite comme un échec explicite plutôt
-            # que de deviner un succès.
+            # Ambiguous response: treat as explicit failure rather than
+            # guessing a success.
             status = "FAILED"
 
         persist_incident_state(conn, incident_id, status, "FINALIZED", context)
@@ -614,58 +609,57 @@ def run_agent_loop(
                 embedding = get_embedding(alert_text)
                 index_resolved_incident(conn, alert_text, embedding)
             except RuntimeError as exc:
-                logger.warning("Indexation RAG post-résolution ignorée: %s", exc)
+                logger.warning("Post-resolution RAG indexing skipped: %s", exc)
 
         return {"status": status, "final_response": final_text}
 
-    # Nombre maximal de tours atteint sans résolution ni échec explicite.
+    # Max turns reached without resolution or explicit failure.
     context["messages"] = messages
-    context["error"] = f"MAX_AGENT_TURNS ({MAX_AGENT_TURNS}) atteint sans résolution."
+    context["error"] = f"MAX_AGENT_TURNS ({MAX_AGENT_TURNS}) reached without resolution."
     persist_incident_state(conn, incident_id, "FAILED", "MAX_TURNS_REACHED", context)
     return {"status": "FAILED", "reason": context["error"]}
 
 
 # ============================================================================
-# HANDLER LAMBDA
+# LAMBDA HANDLER
 # ============================================================================
 def lambda_handler(event: dict, _lambda_context: Any) -> dict:
     """
-    Point d'entrée AWS Lambda.
+    AWS Lambda entry point.
 
-    Événement attendu (ex. déclenché par une alerte CloudWatch / SNS) :
+    Expected event (e.g. triggered by a CloudWatch / SNS alert):
         { "alert_text": "ECS service 'checkout' unhealthy: 5xx spike on /pay" }
 
-    Aucun état n'est conservé entre invocations en dehors de CockroachDB :
-    à chaque appel, on ouvre une connexion fraîche, on lit/crée l'incident,
-    on vectorise l'alerte pour le RAG, puis on fait tourner (ou reprend) la
-    boucle d'agent.
+    No state is kept between invocations outside CockroachDB:
+    on each call, we open a fresh connection, read/create the incident,
+    vectorize the alert for RAG, then run (or resume) the agent loop.
     """
     alert_text = event.get("alert_text")
     if not alert_text or not isinstance(alert_text, str):
         return {
             "statusCode": 400,
-            "body": json.dumps({"error": "Champ 'alert_text' (string) requis dans l'événement."}),
+            "body": json.dumps({"error": "Field 'alert_text' (string) required in event."}),
         }
 
     conn = None
     try:
         conn = get_db_connection()
 
-        # --- Idempotence / reprise après crash ---
+        # --- Idempotence / resume after crash ---
         incident_id, status, context = get_or_create_incident(conn, alert_text)
 
         if status in ("RESOLVED", "FAILED"):
-            # Alerte déjà traitée précédemment (même fingerprint) : on
-            # renvoie l'état final sans relancer inutilement l'agent.
-            logger.info("Incident %s déjà terminé (status=%s), aucune action supplémentaire.", incident_id, status)
+            # Alert already processed (same fingerprint): return the final
+            # state without unnecessarily rerunning the agent.
+            logger.info("Incident %s already terminal (status=%s), no further action.", incident_id, status)
             return {
                 "statusCode": 200,
                 "body": json.dumps(
-                    {"incident_id": incident_id, "status": status, "note": "Incident déjà traité."}
+                    {"incident_id": incident_id, "status": status, "note": "Incident already processed."}
                 ),
             }
 
-        # --- RAG vectoriel : recherche du précédent le plus proche ---
+        # --- Vector RAG: search for the closest historical precedent ---
         try:
             embedding = get_embedding(alert_text)
             similar = find_similar_incident(conn, embedding)
@@ -676,18 +670,18 @@ def lambda_handler(event: dict, _lambda_context: Any) -> dict:
                     "distance": float(similar["distance"]),
                 }
                 logger.info(
-                    "Incident historique similaire trouvé (distance=%.4f): %s",
+                    "Similar historical incident found (distance=%.4f): %s",
                     similar["distance"],
                     similar["error_message_text"][:120],
                 )
         except RuntimeError as exc:
-            # Le RAG est une aide au diagnostic, pas une dépendance dure :
-            # on continue sans contexte historique plutôt que d'échouer.
-            logger.warning("RAG vectoriel indisponible, poursuite sans contexte historique: %s", exc)
+            # RAG is a diagnostic aid, not a hard dependency:
+            # continue without historical context rather than failing.
+            logger.warning("Vector RAG unavailable, continuing without historical context: %s", exc)
 
         persist_incident_state(conn, incident_id, "DIAGNOSING", "RAG_LOOKUP_DONE", context)
 
-        # --- Boucle d'agent (diagnostic + réparation via tool calling) ---
+        # --- Agent loop (diagnosis + repair via tool calling) ---
         result = run_agent_loop(conn, incident_id, status, context, alert_text)
 
         return {
@@ -696,12 +690,12 @@ def lambda_handler(event: dict, _lambda_context: Any) -> dict:
         }
 
     except RuntimeError as exc:
-        # Erreur métier propre (DB indisponible, Bedrock en échec, etc.)
-        logger.error("Échec contrôlé du handler Cloud-Surgeon: %s", exc)
+        # Clean business error (DB unavailable, Bedrock failure, etc.)
+        logger.error("Controlled Cloud-Surgeon handler failure: %s", exc)
         return {"statusCode": 500, "body": json.dumps({"error": str(exc)})}
-    except Exception as exc:  # noqa: BLE001 - dernier filet de sécurité du handler
-        logger.exception("Erreur inattendue dans le handler Cloud-Surgeon")
-        return {"statusCode": 500, "body": json.dumps({"error": f"Erreur interne: {exc}"})}
+    except Exception as exc:  # noqa: BLE001 - last safety net for the handler
+        logger.exception("Unexpected error in Cloud-Surgeon handler")
+        return {"statusCode": 500, "body": json.dumps({"error": f"Internal error: {exc}"})}
     finally:
         if conn is not None:
             conn.close()

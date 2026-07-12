@@ -1,37 +1,37 @@
 /**
- * chaos.ts — Chaos engineering à la couche application
+ * chaos.ts — Application-layer chaos engineering
  *
- * ## Portée et limites
- * Replit ne donne pas accès aux primitives réseau OS (iptables, tc netem,
- * network namespaces), donc le chaos est injecté dans la couche applicative :
- *   - LATENCY  : délai synchrone avant chaque écriture DB persistante
- *   - PARTITION: simulation d'un timeout DB (N opérations "échouent" avec un
- *                délai de timeout, puis la connexion se rétablit — exactement
- *                ce que produit un split-brain bref ou un restart de nœud DB)
+ * ## Scope and limitations
+ * Replit does not expose OS network primitives (iptables, tc netem,
+ * network namespaces), so chaos is injected at the application layer:
+ *   - LATENCY  : synchronous delay before each persistent DB write
+ *   - PARTITION: simulated DB timeout (N operations "fail" with a timeout
+ *                delay, then the connection recovers — exactly what a brief
+ *                split-brain or DB node restart produces)
  *
- * ## Ce que ça démontre
+ * ## What it demonstrates
  *
- * LATENCY — "Même avec 500 ms de latence DB ajoutée à chaque write, l'agent
- *   complète en ~1.5 s de latence totale ajoutée. CockroachDB absorbe la
- *   lenteur ; la résilience n'est pas sensible à la performance réseau."
+ * LATENCY — "Even with 500 ms of DB latency injected before each write, the
+ *   agent completes with ~1.5 s total added latency. CockroachDB absorbs the
+ *   slowness; resilience is not sensitive to network performance."
  *
- * PARTITION — "Après 2 écritures DB simulées comme perdues (ECONNRESET), le
- *   contexte persisted avant la partition est relu sans perte. L'agent reprend
- *   exactement au turn suivant — pas de duplication, pas d'incohérence."
+ * PARTITION — "After 2 DB writes simulated as lost (ECONNRESET), the context
+ *   persisted before the partition is read back without loss. The agent
+ *   resumes exactly at the next turn — no duplication, no inconsistency."
  *
  * ## Out of scope
- * - Chaos au niveau OS (iptables, tc) — non disponible dans Replit
- * - Partition CockroachDB réelle (nécessite cluster multi-nœuds)
- * - Tests de montée en charge
+ * - OS-level chaos (iptables, tc) — not available in Replit
+ * - Real CockroachDB partition (requires multi-node cluster)
+ * - Load testing
  */
 
-/** Mode de chaos à injecter pendant la boucle d'agent. */
+/** Chaos mode to inject during the agent loop. */
 export type ChaosMode = "none" | "latency" | "partition";
 
 /**
- * Erreur levée lors d'une partition simulée.
- * Propagée vers `persistWithChaosRetry()` qui la capture, logue l'événement,
- * attend la "recovery", puis retente l'écriture DB.
+ * Error thrown during a simulated partition.
+ * Propagated to `persistWithChaosRetry()` which catches it, logs the event,
+ * waits for "recovery", then retries the DB write.
  */
 export class ChaosPartitionError extends Error {
   constructor(phase: number) {
@@ -44,19 +44,19 @@ export class ChaosPartitionError extends Error {
 }
 
 /**
- * Configuration du chaos pour un incident.
- * Mutable intentionnellement : le compteur `_partitionFailuresLeft` est
- * décrémenté à chaque tentative simulée pour revenir à zéro.
+ * Chaos configuration for an incident.
+ * Intentionally mutable: the `_partitionFailuresLeft` counter is
+ * decremented on each simulated attempt until it reaches zero.
  */
 export interface ChaosConfig {
   mode: ChaosMode;
-  /** Délai en ms injecté avant chaque write DB (mode latency). Défaut : 500. */
+  /** Delay in ms injected before each DB write (latency mode). Default: 500. */
   latencyMs: number;
-  /** Nombre d'opérations à simuler comme timeout (mode partition). Défaut : 2. */
+  /** Number of operations to simulate as timeout (partition mode). Default: 2. */
   _partitionFailuresLeft: number;
 }
 
-/** Crée une ChaosConfig depuis un chaosMode string reçu de l'API. */
+/** Creates a ChaosConfig from a chaosMode string received from the API. */
 export function createChaosConfig(
   mode: string | undefined,
   latencyMs = 500,
@@ -71,28 +71,28 @@ export function createChaosConfig(
   };
 }
 
-/** Résultat d'une injection de chaos (pour logging). */
+/** Result of a chaos injection (for logging). */
 export interface ChaosEvent {
   mode: ChaosMode;
-  /** Délai effectivement attendu, en ms. */
+  /** Actual delay waited, in ms. */
   delayMs: number;
-  /** `true` si c'était une partition simulée (failure + recovery). */
+  /** `true` if this was a simulated partition (failure + recovery). */
   wasPartition: boolean;
-  /** Tour agent concerné (0 = Diagnostician, 1 = Remediator, 2 = Auditor). */
+  /** Agent phase affected (0 = Diagnostician, 1 = Remediator, 2 = Auditor). */
   atPhase: number;
 }
 
 /**
- * Injecte le chaos configuré avant une opération DB.
+ * Injects the configured chaos before a DB operation.
  *
- * - NONE    : no-op, retourne null
- * - LATENCY : attend `latencyMs` ms (simule réseau DB lent) puis retourne un event
- * - PARTITION: si `_partitionFailuresLeft > 0`, décrémente le compteur et lève
- *              `ChaosPartitionError` — l'appelant DOIT catcher cette erreur,
- *              journaliser l'événement, attendre la "recovery", puis retenter
- *              l'opération DB (qui réussira car le compteur est maintenant < 1).
+ * - NONE    : no-op, returns null
+ * - LATENCY : waits `latencyMs` ms (simulates slow DB network) then returns an event
+ * - PARTITION: if `_partitionFailuresLeft > 0`, decrements the counter and throws
+ *              `ChaosPartitionError` — the caller MUST catch this error,
+ *              log the event, wait for "recovery", then retry
+ *              the DB operation (which will succeed since the counter is now < 1).
  *
- * L'appel normal ressemble à :
+ * Normal call pattern:
  *   try { await injectChaos(chaos, phase); }
  *   catch (err) { if (err instanceof ChaosPartitionError) { ... retry ... } else throw err; }
  *   await persistIncidentState(...);

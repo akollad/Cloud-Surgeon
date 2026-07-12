@@ -1,14 +1,15 @@
 """
-Cloud-Surgeon — Dashboard de simulation (Streamlit)
+Cloud-Surgeon — Simulation Dashboard (Streamlit)
 
-Architecture à 3 couches :
-  Couche 1 — Mémoire causale et évaluée (RAG vectoriel + win-rate par stratégie)
-  Couche 2 — La mémoire décide (routage AUTONOMOUS / PENDING_APPROVAL / EXPLORATORY)
-  Couche 3 — Coordination multi-agents via transactions sérialisables CockroachDB
+3-Layer Architecture:
+  Layer 1 — Causal memory (vector RAG + SQL win-rate per strategy)
+  Layer 2 — Memory decides (AUTONOMOUS / PENDING_APPROVAL / EXPLORATORY routing)
+  Layer 3 — Multi-agent coordination via CockroachDB serializable transactions
 """
 
 from __future__ import annotations
 
+import hmac
 import os
 import time
 
@@ -101,51 +102,79 @@ def correct_incident(incident_id: str, suggested_strategy: str) -> dict | None:
     return api_post(f"/incidents/{incident_id}/correct", {"suggestedStrategy": suggested_strategy})
 
 
-# ── Scénarios prédéfinis ─────────────────────────────────────────────────────
+# ── Password authentication ───────────────────────────────────────────────────
+
+def _check_password() -> bool:
+    """
+    Returns True if the dashboard is accessible (no password set, or already
+    authenticated this session).  Returns False and renders a login form when
+    DASHBOARD_PASSWORD is set and the user has not yet logged in.
+    """
+    expected = os.environ.get("DASHBOARD_PASSWORD", "")
+    if not expected:
+        return True  # No password configured — dev mode, allow access.
+    if st.session_state.get("_auth_ok"):
+        return True  # Already authenticated this session.
+
+    # Show login form.
+    with st.form("dashboard_login"):
+        st.markdown("### 🔐 Cloud-Surgeon Dashboard — Login")
+        pwd = st.text_input("Password", type="password", placeholder="Enter dashboard password")
+        submitted = st.form_submit_button("Login", type="primary")
+    if submitted:
+        if hmac.compare_digest(pwd, expected):
+            st.session_state["_auth_ok"] = True
+            st.rerun()
+        else:
+            st.error("Incorrect password. Please try again.")
+    return False
+
+
+# ── Preset scenarios ──────────────────────────────────────────────────────────
 
 PRESET_SCENARIOS = {
-    "Pic d'erreurs 5xx sur le service de paiement (ECS)": (
+    "Payment service 5xx spike (ECS)": (
         "ECS service 'checkout' unhealthy: 5xx spike on /pay endpoint, latency p99 > 4s",
         "ecs_service_restart",
     ),
-    "Saturation CPU sur la base primaire (RDS)": (
+    "Primary DB CPU saturation (RDS)": (
         "RDS primary instance 'orders-db' CPU utilization at 98% for 10 minutes",
         "rds_cpu_throttle",
     ),
-    "Throttling Lambda en cascade": (
+    "Cascading Lambda throttling": (
         "Lambda function 'order-processor' throttled: ConcurrentExecutions limit reached",
         "lambda_concurrency_scale",
     ),
-    "Disque plein sur un nœud de calcul": (
+    "Worker node disk full": (
         "EC2 instance 'worker-03' disk usage at 95%, risk of service crash",
         "disk_cleanup",
     ),
-    "Fuite mémoire JVM (service de recommandations)": (
+    "JVM memory leak (recommendation service)": (
         "JVM heap exhaustion on 'recommendation-service' pod: GC overhead limit exceeded, "
         "OOMKiller triggered, pod restarting every 3 minutes",
         "jvm_heap_restart",
     ),
-    "Pool de connexions DB saturé (Postgres RDS)": (
+    "DB connection pool exhausted (Postgres RDS)": (
         "RDS 'catalog-db' max_connections reached (500/500): new connections refused, "
         "pg_stat_activity shows 320 idle-in-transaction sessions older than 30s",
         "db_connection_pool_reset",
     ),
-    "Latence cross-région > SLA (API Gateway us-east-1 → eu-west-1)": (
+    "Cross-region latency > SLA (API Gateway us-east-1 → eu-west-1)": (
         "API Gateway p99 latency degraded: us-east-1 → eu-west-1 cross-region calls "
         "averaging 2800ms (SLA: 500ms), likely BGP route flap or transit gateway saturation",
         "network_route_failover",
     ),
-    "Credential AWS expiré (accès S3 depuis ECS)": (
+    "Expired AWS credential (S3 access from ECS)": (
         "ECS task 'data-export' failing: AccessDeniedException on s3:PutObject to "
         "s3://prod-exports — IAM role credential rotation missed, token expired 2h ago",
         "iam_credential_rotation",
     ),
-    "Dépendance externe down (Stripe API)": (
+    "External dependency down (Stripe API)": (
         "Payment gateway degraded: Stripe API returning 503 on /v1/charges for 8 minutes, "
         "checkout conversion rate dropped from 94% to 12%, revenue impact ~$4200/min",
         "external_dependency_circuit_break",
     ),
-    "Incident inconnu (scénario exploratoire)": (
+    "Unknown incident (exploratory scenario)": (
         "Kubernetes node pool scaling event detected: 12 pods evicted due to node pressure, "
         "admission webhook timeout 30s, control plane latency 8000ms",
         "default_repair",
@@ -153,10 +182,10 @@ PRESET_SCENARIOS = {
 }
 
 ROUTING_MODE_LABELS = {
-    "AUTONOMOUS": ("🟢 AUTONOME", "La mémoire vectorielle a une confiance élevée. L'agent agit seul."),
-    "PENDING_APPROVAL": ("🟡 APPROBATION REQUISE", "Score RAG moyen ou win-rate < 80%. Validation humaine requise."),
-    "EXPLORATORY": ("🔵 EXPLORATOIRE", "Stratégie inconnue ou aucun match RAG. L'agent documente et apprend."),
-    "REJECTED": ("🔴 REJETÉ", "L'opérateur a choisi de ne pas appliquer la stratégie."),
+    "AUTONOMOUS": ("🟢 AUTONOMOUS", "Vector memory has high confidence. Agent acts alone."),
+    "PENDING_APPROVAL": ("🟡 APPROVAL REQUIRED", "Average RAG score or win-rate < 80%. Human validation required."),
+    "EXPLORATORY": ("🔵 EXPLORATORY", "Unknown strategy or no RAG match. Agent documents and learns."),
+    "REJECTED": ("🔴 REJECTED", "Operator chose not to apply the strategy."),
 }
 
 AGENT_EMOJIS = {
@@ -170,52 +199,64 @@ AGENT_EMOJIS = {
 
 st.set_page_config(page_title="Cloud-Surgeon — Dashboard", layout="wide", page_icon="☁️")
 
-st.title("☁️🔪 Cloud-Surgeon — Architecture à 3 couches")
+# ── Password gate ──────────────────────────────────────────────────────────────
+# Authenticate before rendering any data. If DASHBOARD_PASSWORD is unset,
+# a dev-mode warning is shown but access is not blocked.
+if not _check_password():
+    st.stop()
+
+if not os.environ.get("DASHBOARD_PASSWORD"):
+    st.warning(
+        "⚠️ **DASHBOARD_PASSWORD is not set** — the dashboard is unprotected. "
+        "Set this environment variable to enable password protection before deploying."
+    )
+
+st.title("☁️🔪 Cloud-Surgeon — 3-Layer Architecture")
 st.caption(
-    "Couche 1: mémoire causale (RAG + win-rate SQL) · "
-    "Couche 2: routage par confiance (AUTONOMOUS/PENDING/EXPLORATORY) · "
-    "Couche 3: coordination multi-agents via transactions sérialisables CockroachDB"
+    "Layer 1: causal memory (RAG + SQL win-rate) · "
+    "Layer 2: confidence-based routing (AUTONOMOUS/PENDING/EXPLORATORY) · "
+    "Layer 3: multi-agent coordination via CockroachDB serializable transactions"
 )
 
 st.session_state.pop("_api_error", None)
 health = api_get("/healthz")
 if health and health.get("status") == "ok":
-    st.success(f"✅ Backend connecté ({API_BASE_URL}) — état persisté en CockroachDB Serverless")
+    st.success(f"✅ Backend connected ({API_BASE_URL}) — state persisted in CockroachDB Serverless")
 else:
-    reason = st.session_state.get("_api_error", "réponse inattendue")
-    st.error(f"❌ Backend inaccessible sur {API_BASE_URL} : {reason}")
+    reason = st.session_state.get("_api_error", "unexpected response")
+    st.error(f"❌ Backend unreachable at {API_BASE_URL}: {reason}")
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 
 with st.sidebar:
-    st.header("🚨 Déclencher une panne")
+    st.header("🚨 Trigger an Incident")
 
-    scenario_label = st.selectbox("Scénario prédéfini", list(PRESET_SCENARIOS.keys()))
+    scenario_label = st.selectbox("Preset scenario", list(PRESET_SCENARIOS.keys()))
     selected_alert_text, selected_strategy = PRESET_SCENARIOS[scenario_label]
-    st.caption(f"Stratégie : `{selected_strategy}`")
+    st.caption(f"Strategy: `{selected_strategy}`")
 
     custom_text = st.text_area(
-        "Ou décris ta propre alerte",
+        "Or describe your own alert",
         value="",
-        placeholder="Ex: latence réseau anormale sur le VPC prod",
+        placeholder="E.g.: abnormal network latency on prod VPC",
     )
     alert_text = custom_text.strip() or selected_alert_text
 
     st.divider()
-    st.subheader("💥 Chaos engineering")
+    st.subheader("💥 Chaos Engineering")
 
     chaos_choice = st.selectbox(
-        "Mode chaos",
+        "Chaos mode",
         [
-            "Aucun (exécution normale)",
-            "🌐 Latence réseau (500 ms / write DB)",
-            "🔌 Partition DB (timeout simulé × 2)",
-            "💀 Crash SIGKILL après diagnostic",
+            "None (normal execution)",
+            "🌐 Network latency (500 ms / DB write)",
+            "🔌 DB partition (simulated timeout x 2)",
+            "💀 SIGKILL crash after diagnostic",
         ],
         help=(
-            "Latence : injecte 500 ms avant chaque écriture DB — prouve que l'agent résiste à un réseau lent.\n"
-            "Partition : simule 2 timeouts DB qui se rétablissent — prouve la reprise sans perte de contexte.\n"
-            "SIGKILL : tue le process au tour 1 — déclenche à nouveau pour prouver la reprise post-crash."
+            "Latency: injects 500 ms before each DB write — proves the agent survives a slow network.\n"
+            "Partition: simulates 2 DB timeouts that self-recover — proves context-free resumption.\n"
+            "SIGKILL: kills the process at turn 1 — re-trigger to prove post-crash recovery."
         ),
     )
     simulate_crash = chaos_choice.startswith("💀")
@@ -225,32 +266,32 @@ with st.sidebar:
         else "none"
     )
 
-    trigger = st.button("⚡ Déclencher l'agent", type="primary", use_container_width=True)
+    trigger = st.button("⚡ Trigger Agent", type="primary", use_container_width=True)
 
     st.divider()
-    st.subheader("☠️ Vrai crash de process")
+    st.subheader("☠️ Real Process Crash")
     st.caption(
-        "Envoie SIGKILL au process Node (comme un OOMKiller AWS). "
-        "Le workflow manager le redémarre automatiquement. "
-        "Déclenche ensuite le même incident pour prouver la reprise depuis CockroachDB."
+        "Sends SIGKILL to the Node process (like an AWS OOMKiller). "
+        "The workflow manager restarts it automatically. "
+        "Then re-trigger the same incident to prove recovery from CockroachDB."
     )
-    if st.button("💀 SIGKILL le serveur API", use_container_width=True, type="secondary"):
+    if st.button("💀 SIGKILL the API server", use_container_width=True, type="secondary"):
         kill_result = api_post_chaos_sigkill()
         if kill_result:
             st.warning(
-                f"⚡ SIGKILL envoyé (PID {kill_result.get('pid')}) — "
-                "le serveur redémarre dans ~2 s. "
-                "Re-déclenche le même scénario pour prouver la reprise."
+                f"⚡ SIGKILL sent (PID {kill_result.get('pid')}) — "
+                "server restarting in ~2 s. "
+                "Re-trigger the same scenario to prove recovery."
             )
         else:
-            st.error(f"Erreur : {st.session_state.get('_api_error')}")
+            st.error(f"Error: {st.session_state.get('_api_error')}")
 
     st.divider()
-    st.subheader("🌐 Webhook CloudWatch")
-    st.caption("Simule une alarme CloudWatch → SNS → `POST /api/webhook/cloudwatch`.")
+    st.subheader("🌐 CloudWatch Webhook")
+    st.caption("Simulates a CloudWatch alarm → SNS → `POST /api/webhook/cloudwatch`.")
     wh_alarm_name = st.text_input("AlarmName", value="checkout-5xx-spike")
     wh_reason = st.text_input("NewStateReason", value="Threshold Crossed: 3 datapoints > 10.")
-    if st.button("📡 Simuler webhook CloudWatch", use_container_width=True):
+    if st.button("📡 Simulate CloudWatch webhook", use_container_width=True):
         result = api_post(
             "/webhook/cloudwatch",
             {
@@ -261,100 +302,247 @@ with st.sidebar:
             },
         )
         if result:
-            st.success(f"Webhook accepté — incident `{result.get('incidentId', '')[:8]}` ({result.get('status')})")
+            st.success(f"Webhook accepted — incident `{result.get('incidentId', '')[:8]}` ({result.get('status')})")
         else:
-            st.error(f"Erreur : {st.session_state.get('_api_error')}")
+            st.error(f"Error: {st.session_state.get('_api_error')}")
 
     st.divider()
-    st.subheader("🌱 Mémoire vectorielle")
-    if st.button("Réinitialiser le seed", use_container_width=True, help="Insère les 9 incidents synthétiques si absent."):
+    st.subheader("🌱 Vector Memory")
+    if st.button("Reset seed", use_container_width=True, help="Inserts the 9 synthetic incidents if absent."):
         seed_result = api_post("/metrics/seed", {})
         if seed_result:
             if seed_result.get("seeded"):
-                st.success(f"Seed inséré : {seed_result.get('count')} incidents")
+                st.success(f"Seed inserted: {seed_result.get('count')} incidents")
             else:
-                st.info(f"Seed déjà présent : {seed_result.get('count')} entrées")
+                st.info(f"Seed already present: {seed_result.get('count')} entries")
         else:
             st.error(st.session_state.get("_api_error"))
+
+
+# ── Auto-refreshing fragments ──────────────────────────────────────────────────
+# Each fragment re-renders its section independently so data stays live
+# without requiring a full page reload or a manual refresh button.
+
+@st.fragment(run_every=3)
+def _live_status_widget() -> None:
+    """Polls active incidents every 3 s and shows a progress indicator."""
+    active = [
+        i for i in (api_get("/incidents") or [])
+        if i["status"] in ("TRIGGERED", "DIAGNOSING", "REPAIRING")
+    ]
+    if active:
+        st.caption(f"🔄 **{len(active)} incident(s) in progress** — auto-refreshing every 3 s")
+        progress_map = {"TRIGGERED": 0.1, "DIAGNOSING": 0.4, "REPAIRING": 0.75}
+        for inc in active[:5]:
+            ctx = inc.get("contextJson", {})
+            pct = progress_map.get(inc["status"], 0.5)
+            step = inc.get("currentStep") or inc["status"]
+            agent = inc.get("claimedByAgent") or "—"
+            st.progress(pct, text=f"`{inc['incidentId'][:8]}` · **{inc['status']}** · step: {step} · agent: {agent}")
+            strategy = ctx.get("strategyName")
+            if strategy:
+                st.caption(f"  Strategy: `{strategy}` | Mode: `{ctx.get('routingMode', '—')}`")
+    else:
+        st.caption("✅ No active incidents right now — trigger a scenario from the sidebar.")
+
+
+@st.fragment(run_every=5)
+def _incidents_tab_content() -> None:
+    """Incidents tab — auto-refreshes every 5 s."""
+    col_r, col_a = st.columns([1, 5])
+    with col_r:
+        if st.button("🔄 Refresh", key="refresh_incidents_btn"):
+            st.rerun()
+
+    incidents = fetch_incidents()
+    if not incidents:
+        st.caption("No incidents yet.")
+        return
+
+    # Separate PENDING_APPROVAL incidents to highlight them
+    pending = [i for i in incidents if i["status"] == "PENDING_APPROVAL"]
+    others = [i for i in incidents if i["status"] != "PENDING_APPROVAL"]
+
+    # Available strategies for human correction
+    _all_strategies = sorted({v[1] for v in PRESET_SCENARIOS.values()})
+
+    if pending:
+        st.warning(f"🟡 {len(pending)} incident(s) awaiting human approval")
+        for inc in pending:
+            ctx = inc.get("contextJson", {})
+            strategy = ctx.get("strategyName", "?")
+            rag = ctx.get("ragScore")
+            wr = ctx.get("winRate")
+            rag_str = f"{rag:.3f}" if rag is not None else "—"
+            wr_str = f"{wr * 100:.0f}%" if wr is not None else "—"
+            inc_key = inc["incidentId"]
+
+            with st.container(border=True):
+                st.markdown(
+                    f"**`{inc_key[:8]}`** · proposed strategy: `{strategy}` · "
+                    f"RAG: `{rag_str}` · win-rate: `{wr_str}`"
+                )
+                st.caption(f"Alert: {ctx.get('alertText', '')[:120]}")
+
+                # ── Row 1: Approve / Reject ──────────────────────────────
+                col_ap, col_rj, _ = st.columns([1, 1, 3])
+                with col_ap:
+                    if st.button("✅ Approve", key=f"approve_{inc_key}", type="primary"):
+                        result = approve_incident(inc_key)
+                        if result:
+                            st.success("Approved — agent resuming in AUTONOMOUS mode")
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.error(st.session_state.get("_api_error"))
+                with col_rj:
+                    if st.button("❌ Reject", key=f"reject_{inc_key}"):
+                        result = reject_incident(inc_key)
+                        if result:
+                            st.warning(
+                                "Rejected — negative signal (x0.5) recorded in memory. "
+                                "The win-rate for `" + strategy + "` has decreased."
+                            )
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.error(st.session_state.get("_api_error"))
+
+                # ── Row 2: Correct (alternative strategy) ─────────────────
+                with st.expander("✏️ Suggest an alternative strategy…", expanded=False):
+                    st.caption(
+                        "Memory will receive a negative signal (x0.5) for `" + strategy + "` "
+                        "and a positive signal (x0.5) for the chosen strategy — "
+                        "without waiting for the incident to finish."
+                    )
+                    alt_strategies = [s for s in _all_strategies if s != strategy]
+                    suggested = st.selectbox(
+                        "Alternative strategy",
+                        alt_strategies,
+                        key=f"suggest_{inc_key}",
+                    )
+                    if st.button(
+                        f"✅ Confirm: use `{suggested}`",
+                        key=f"correct_{inc_key}",
+                        type="secondary",
+                    ):
+                        result = correct_incident(inc_key, suggested)
+                        if result:
+                            st.success(
+                                f"Correction recorded — "
+                                f"signal −0.5 for `{strategy}`, "
+                                f"signal +0.5 for `{suggested}`. "
+                                "Calibration updated."
+                            )
+                            time.sleep(1.5)
+                            st.rerun()
+                        else:
+                            st.error(st.session_state.get("_api_error"))
+
+    st.dataframe(
+        [
+            {
+                "Incident": i["incidentId"][:8],
+                "Status": i["status"],
+                "Strategy": (i.get("contextJson") or {}).get("strategyName", "—"),
+                "Mode": (i.get("contextJson") or {}).get("routingMode", "—"),
+                "Agent": i.get("claimedByAgent") or "—",
+                "Step": i["currentStep"],
+                "Updated": i["updatedAt"],
+            }
+            for i in (pending + others)
+        ],
+        use_container_width=True,
+        hide_index=True,
+    )
 
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 
 tab_live, tab_decision, tab_incidents, tab_memory, tab_calibration, tab_impact, tab_logs = st.tabs([
-    "🔴 Diagnostic en direct",
-    "🧠 Pourquoi cette décision ?",
+    "🔴 Live Diagnostic",
+    "🧠 Why this decision?",
     "📋 Incidents",
-    "📊 Mémoire & Win-rates",
+    "📊 Memory & Win-rates",
     "🎯 Calibration",
-    "💰 Impact MTTR & Coût",
-    "📜 Journal d'exécution",
+    "💰 MTTR & Cost Impact",
+    "📜 Execution Log",
 ])
 
 
 def render_incident_turns(incident: dict) -> None:
-    """Affiche les tours de l'agent avec badge agent + source de pensée."""
+    """Renders agent turns with agent badge and thought source."""
     ctx = incident.get("contextJson", {})
     turns = ctx.get("turns", [])
     for turn in turns:
         agent = turn.get("agent", "unknown")
         emoji = AGENT_EMOJIS.get(agent, "🤖")
         source = turn.get("thoughtSource", "simulated")
-        source_badge = "🧠 Bedrock" if source == "bedrock" else "🤖 Simulé"
-        label = f"Tour {turn['turn'] + 1} — {emoji} {agent.capitalize()} · {turn['toolName']} ({source_badge})"
+        if source == "bedrock":
+            source_badge = "🧠 Bedrock"
+        elif source == "anthropic":
+            source_badge = "🧠 Anthropic"
+        else:
+            source_badge = "🤖 Simulated"
+        label = f"Turn {turn['turn'] + 1} — {emoji} {agent.capitalize()} · {turn['toolName']} ({source_badge})"
         with st.expander(label, expanded=True):
-            st.write(f"**Pensée ({source_badge}) :** {turn['thought']}")
-            st.write(f"**Appel d'outil :** `{turn['toolName']}({turn['toolInput']})`")
-            st.write(f"**Résultat :** `{turn['toolOutput']}`")
+            st.write(f"**Thought ({source_badge}):** {turn['thought']}")
+            st.write(f"**Tool call:** `{turn['toolName']}({turn['toolInput']})`")
+            st.write(f"**Result:** `{turn['toolOutput']}`")
 
 
 with tab_live:
+    # Live status: auto-refreshes every 3 s to track in-progress agents.
+    _live_status_widget()
+    st.divider()
+
     if trigger:
         spinner_msg = {
-            "none": "Exécution de la boucle d'agent (Diagnostician → Remediator → Auditor)…",
-            "latency": "🌐 Mode latence activé — 500 ms injectés avant chaque write DB…",
-            "partition": "🔌 Mode partition activé — 2 timeouts DB simulés, reprise automatique…",
-        }.get(chaos_mode, "Exécution…")
+            "none": "Running agent loop (Diagnostician → Remediator → Auditor)…",
+            "latency": "🌐 Latency mode active — 500 ms injected before each DB write…",
+            "partition": "🔌 Partition mode active — 2 simulated DB timeouts, auto-recovery…",
+        }.get(chaos_mode, "Running…")
         with st.spinner(spinner_msg):
             incident = trigger_agent(alert_text, simulate_crash, chaos_mode)
 
         if incident is None:
-            st.error(f"La requête a échoué : {st.session_state.get('_api_error')}")
+            st.error(f"Request failed: {st.session_state.get('_api_error')}")
         else:
             ctx = incident.get("contextJson", {})
             fp_short = incident["alertFingerprint"][:12]
             routing_mode = ctx.get("routingMode", "—")
             claimed_by = incident.get("claimedByAgent", "—")
 
-            st.subheader(f"Incident `{incident['incidentId'][:8]}` · empreinte `{fp_short}…`")
+            st.subheader(f"Incident `{incident['incidentId'][:8]}` · fingerprint `{fp_short}…`")
 
             col1, col2, col3 = st.columns(3)
-            col1.metric("Statut", incident["status"])
-            col2.metric("Mode de routage", routing_mode or "—")
-            col3.metric("Agent en charge", claimed_by or "libéré")
+            col1.metric("Status", incident["status"])
+            col2.metric("Routing mode", routing_mode or "—")
+            col3.metric("Agent in charge", claimed_by or "released")
 
-            # Alertes contextuelles selon le statut
+            # Contextual alerts based on status
             if incident["status"] == "PENDING_APPROVAL":
                 st.warning(
-                    "🟡 **APPROBATION REQUISE** — L'agent attend une décision humaine. "
-                    "Va dans l'onglet **📋 Incidents** pour approuver ou rejeter."
+                    "🟡 **APPROVAL REQUIRED** — Agent is waiting for a human decision. "
+                    "Go to the **📋 Incidents** tab to approve or reject."
                 )
             elif incident["status"] in ("DIAGNOSING", "REPAIRING") and ctx.get("crashed"):
                 st.warning(
-                    "💥 **Crash simulé** — L'agent s'est arrêté avant la fin. L'état a été persisté. "
-                    "Re-déclenche le même scénario pour prouver la reprise sans perte de contexte."
+                    "💥 **Simulated crash** — Agent stopped before completion. State has been persisted. "
+                    "Re-trigger the same scenario to prove context-free recovery."
                 )
             elif incident["status"] == "RESOLVED":
-                st.success(ctx.get("finalResponse") or "Incident résolu.")
+                st.success(ctx.get("finalResponse") or "Incident resolved.")
             elif incident["status"] == "FAILED":
-                st.error(ctx.get("finalResponse") or "Incident échoué.")
+                st.error(ctx.get("finalResponse") or "Incident failed.")
 
             render_incident_turns(incident)
 
-            # Affichage des handoffs
+            # Handoffs display
             handoffs = fetch_handoffs(incident["incidentId"])
             if handoffs:
                 st.divider()
-                st.subheader("🔄 Passations entre agents")
+                st.subheader("🔄 Agent Handoffs")
                 for h in handoffs:
                     mode = h.get("decisionMode") or ""
                     mode_label = f" [{mode}]" if mode else ""
@@ -366,71 +554,71 @@ with tab_live:
                         unsafe_allow_html=True,
                     )
     else:
-        st.caption("Choisis un scénario dans la barre latérale et clique sur « ⚡ Déclencher l'agent ».")
+        st.caption("Choose a scenario in the sidebar and click « ⚡ Trigger Agent ».")
 
 
 with tab_decision:
-    st.header("🧠 Pourquoi cette décision ?")
+    st.header("🧠 Why this decision?")
     st.caption(
-        "Pour chaque incident, la Couche 2 consulte la Couche 1 (RAG + win-rate) avant d'agir. "
-        "Cette vue explique le raisonnement de l'agent."
+        "For each incident, Layer 2 consults Layer 1 (RAG + win-rate) before acting. "
+        "This view explains the agent's reasoning."
     )
 
     incidents_list = fetch_incidents()
     if not incidents_list:
-        st.info("Aucun incident. Déclenche un scénario dans la barre latérale.")
+        st.info("No incidents yet. Trigger a scenario from the sidebar.")
     else:
         incident_options = {
             f"{i['incidentId'][:8]} — {i['status']} ({i.get('currentStep', '?')})": i
             for i in incidents_list
         }
-        selected_label = st.selectbox("Sélectionne un incident", list(incident_options.keys()))
+        selected_label = st.selectbox("Select an incident", list(incident_options.keys()))
         selected_incident = incident_options[selected_label]
         ctx = selected_incident.get("contextJson", {})
 
-        # ── Métriques de décision ───────────────────────────────────────────
+        # ── Decision metrics ────────────────────────────────────────────────
         col1, col2, col3, col4 = st.columns(4)
 
         routing_mode = ctx.get("routingMode")
         routing_label, routing_desc = ROUTING_MODE_LABELS.get(
-            routing_mode, ("⚪ —", "Routage non encore calculé.")
+            routing_mode, ("⚪ —", "Routing not yet computed.")
         )
-        col1.metric("Mode de routage", routing_label)
+        col1.metric("Routing mode", routing_label)
 
         rag_score = ctx.get("ragScore")
         if rag_score is not None:
-            col2.metric("Score RAG (distance cosinus)", f"{rag_score:.3f}", help="0 = identique, 1 = opposé")
+            col2.metric("RAG score (cosine distance)", f"{rag_score:.3f}", help="0 = identical, 1 = opposite")
         else:
-            col2.metric("Score RAG", "—")
+            col2.metric("RAG score", "—")
 
         win_rate = ctx.get("winRate")
         sample_size = ctx.get("winRateSampleSize", 0)
         if win_rate is not None:
             col3.metric(
-                "Win-rate stratégie",
+                "Strategy win-rate",
                 f"{win_rate * 100:.0f}%",
                 delta=f"{sample_size} samples",
                 delta_color="off",
             )
         else:
-            col3.metric("Win-rate stratégie", "—" if sample_size == 0 else f"n={sample_size}")
+            col3.metric("Strategy win-rate", "—" if sample_size == 0 else f"n={sample_size}")
 
         strategy = ctx.get("strategyName", "—")
-        col4.metric("Stratégie choisie", strategy)
+        col4.metric("Chosen strategy", strategy)
 
         st.info(routing_desc)
 
-        # ── Explication textuelle ───────────────────────────────────────────
-        with st.expander("📖 Logique de routage (Couche 2)", expanded=True):
+        # ── Textual explanation ─────────────────────────────────────────────
+        with st.expander("📖 Routing logic (Layer 2)", expanded=True):
             st.markdown("""
 | Condition | Mode |
 |-----------|------|
-| Distance RAG < 0.15 **ET** win-rate > 80% | 🟢 **AUTONOMOUS** — agit seul |
-| Distance 0.15–0.8 **OU** win-rate ≤ 80% | 🟡 **PENDING_APPROVAL** — attend l'humain |
-| Aucun match RAG (distance > 0.8) ou 0 sample | 🔵 **EXPLORATORY** — apprend en documentant |
+| RAG distance < 0.15 **AND** win-rate > 80% | 🟢 **AUTONOMOUS** — acts alone |
+| Distance 0.15–0.8 **OR** win-rate ≤ 80% | 🟡 **PENDING_APPROVAL** — waits for human |
+| No RAG match (distance > 0.8) or 0 samples | 🔵 **EXPLORATORY** — learns by documenting |
 
-La mémoire vectorielle (`incident_vectors`) stocke chaque incident résolu avec sa stratégie
-et son résultat (`outcome_success`). Le win-rate est calculé par une simple agrégation SQL :
+The vector memory (`incident_vectors`) stores each resolved incident with its strategy
+and result (`outcome_success`). Win-rate is computed by a simple SQL aggregation:
 
 ```sql
 SELECT strategy_name,
@@ -440,8 +628,8 @@ GROUP BY strategy_name
 ```
 """)
 
-        # ── Handoffs ────────────────────────────────────────────────────────
-        st.subheader("🔄 Chaîne de responsabilité (Couche 3)")
+        # ── Handoffs ─────────────────────────────────────────────────────────
+        st.subheader("🔄 Responsibility chain (Layer 3)")
         handoffs = fetch_handoffs(selected_incident["incidentId"])
         if handoffs:
             for h in handoffs:
@@ -452,167 +640,57 @@ GROUP BY strategy_name
                 st.markdown(
                     f"{emoji} **{agent.capitalize()}**{mode_label} — {h.get('note', '')}",
                 )
-                st.caption(f"Réclamé à : {h.get('createdAt', '')}")
+                st.caption(f"Claimed at: {h.get('createdAt', '')}")
         else:
-            st.caption("Aucune passation enregistrée pour cet incident.")
+            st.caption("No handoffs recorded for this incident.")
 
-        # ── Chaîne causale ──────────────────────────────────────────────────
-        st.subheader("🔗 Chaîne causale (CTE récursive)")
+        # ── Causal chain ──────────────────────────────────────────────────────
+        st.subheader("🔗 Causal chain (recursive CTE)")
         chain_data = fetch_causal_chain(selected_incident["incidentId"])
         if chain_data and chain_data.get("chain"):
             chain = chain_data["chain"]
             if len(chain) == 1:
-                st.caption("Cet incident n'a pas de parent causal identifié.")
+                st.caption("This incident has no identified causal parent.")
             else:
                 for node in chain:
                     depth_indent = "→ " * (max(0, len(chain) - 1 - node["depth"]))
                     st.markdown(
                         f"{depth_indent}`{node['incidentId'][:8]}` "
-                        f"**{node['status']}** — profondeur {node['depth']}"
+                        f"**{node['status']}** — depth {node['depth']}"
                     )
             st.caption(chain_data.get("note", ""))
         else:
-            st.caption("Impossible de récupérer la chaîne causale.")
+            st.caption("Unable to retrieve causal chain.")
 
 
 with tab_incidents:
-    col_r, col_a = st.columns([1, 5])
-    with col_r:
-        if st.button("🔄 Rafraîchir"):
-            st.rerun()
-
-    incidents = fetch_incidents()
-    if not incidents:
-        st.caption("Aucun incident pour l'instant.")
-    else:
-        # Séparer les incidents PENDING_APPROVAL pour les mettre en avant
-        pending = [i for i in incidents if i["status"] == "PENDING_APPROVAL"]
-        others = [i for i in incidents if i["status"] != "PENDING_APPROVAL"]
-
-        # Liste des stratégies disponibles pour la correction humaine
-        _all_strategies = sorted({v[1] for v in PRESET_SCENARIOS.values()})
-
-        if pending:
-            st.warning(f"🟡 {len(pending)} incident(s) en attente d'approbation humaine")
-            for inc in pending:
-                ctx = inc.get("contextJson", {})
-                strategy = ctx.get("strategyName", "?")
-                rag = ctx.get("ragScore")
-                wr = ctx.get("winRate")
-                rag_str = f"{rag:.3f}" if rag is not None else "—"
-                wr_str = f"{wr * 100:.0f}%" if wr is not None else "—"
-                inc_key = inc["incidentId"]
-
-                with st.container(border=True):
-                    st.markdown(
-                        f"**`{inc_key[:8]}`** · stratégie proposée : `{strategy}` · "
-                        f"RAG: `{rag_str}` · win-rate: `{wr_str}`"
-                    )
-                    st.caption(f"Alerte : {ctx.get('alertText', '')[:120]}")
-
-                    # ── Ligne 1 : Approuver / Rejeter ───────────────────
-                    col_ap, col_rj, _ = st.columns([1, 1, 3])
-                    with col_ap:
-                        if st.button(
-                            "✅ Approuver",
-                            key=f"approve_{inc_key}",
-                            type="primary",
-                        ):
-                            result = approve_incident(inc_key)
-                            if result:
-                                st.success("Approuvé — l'agent reprend en mode AUTONOMOUS")
-                                time.sleep(1)
-                                st.rerun()
-                            else:
-                                st.error(st.session_state.get("_api_error"))
-                    with col_rj:
-                        if st.button(
-                            "❌ Rejeter",
-                            key=f"reject_{inc_key}",
-                        ):
-                            result = reject_incident(inc_key)
-                            if result:
-                                st.warning(
-                                    "Rejeté — signal négatif (×0.5) enregistré dans la mémoire. "
-                                    "Le win-rate de `" + strategy + "` a baissé."
-                                )
-                                time.sleep(1)
-                                st.rerun()
-                            else:
-                                st.error(st.session_state.get("_api_error"))
-
-                    # ── Ligne 2 : Corriger (stratégie alternative) ──────
-                    with st.expander("✏️ Suggérer une stratégie alternative…", expanded=False):
-                        st.caption(
-                            "La mémoire recevra un signal négatif (×0.5) pour `" + strategy + "` "
-                            "et un signal positif (×0.5) pour la stratégie choisie — "
-                            "sans attendre la fin d'un incident."
-                        )
-                        alt_strategies = [s for s in _all_strategies if s != strategy]
-                        suggested = st.selectbox(
-                            "Stratégie alternative",
-                            alt_strategies,
-                            key=f"suggest_{inc_key}",
-                        )
-                        if st.button(
-                            f"✅ Confirmer : utiliser `{suggested}`",
-                            key=f"correct_{inc_key}",
-                            type="secondary",
-                        ):
-                            result = correct_incident(inc_key, suggested)
-                            if result:
-                                st.success(
-                                    f"Correction enregistrée — "
-                                    f"signal −0.5 pour `{strategy}`, "
-                                    f"signal +0.5 pour `{suggested}`. "
-                                    "La calibration a été mise à jour."
-                                )
-                                time.sleep(1.5)
-                                st.rerun()
-                            else:
-                                st.error(st.session_state.get("_api_error"))
-
-        st.dataframe(
-            [
-                {
-                    "Incident": i["incidentId"][:8],
-                    "Statut": i["status"],
-                    "Stratégie": (i.get("contextJson") or {}).get("strategyName", "—"),
-                    "Mode": (i.get("contextJson") or {}).get("routingMode", "—"),
-                    "Agent": i.get("claimedByAgent") or "—",
-                    "Étape": i["currentStep"],
-                    "Mis à jour": i["updatedAt"],
-                }
-                for i in (pending + others)
-            ],
-            use_container_width=True,
-            hide_index=True,
-        )
+    # Auto-refreshes every 5 s — pending-approval incidents surface immediately.
+    _incidents_tab_content()
 
 
 with tab_memory:
-    st.header("📊 Mémoire évaluée — Couche 1")
+    st.header("📊 Evaluated Memory — Layer 1")
     st.caption(
-        "Taux de succès par stratégie de résolution. Calculé par agrégation SQL pure sur "
-        "`incident_vectors` — un bandit contextuel porté par CockroachDB, sans service ML externe."
+        "Success rate by resolution strategy. Computed by pure SQL aggregation on "
+        "`incident_vectors` — a contextual bandit powered by CockroachDB, no external ML service."
     )
 
-    if st.button("🔄 Rafraîchir les métriques"):
+    if st.button("🔄 Refresh metrics"):
         st.rerun()
 
     wr_data = fetch_win_rates()
     if wr_data and wr_data.get("winRates"):
         rates = wr_data["winRates"]
 
-        # Tableau principal
+        # Main table
         st.dataframe(
             [
                 {
-                    "Stratégie": r["strategyName"],
+                    "Strategy": r["strategyName"],
                     "Win-rate": f"{r['winRate'] * 100:.0f}%",
-                    "Succès": r["successCount"],
+                    "Successes": r["successCount"],
                     "Total": r["totalCount"],
-                    "Échecs": r["totalCount"] - r["successCount"],
+                    "Failures": r["totalCount"] - r["successCount"],
                 }
                 for r in rates
             ],
@@ -620,91 +698,91 @@ with tab_memory:
             hide_index=True,
         )
 
-        # Visualisation barre
+        # Bar chart
         import pandas as pd
         df = pd.DataFrame([
-            {"Stratégie": r["strategyName"], "Win-rate (%)": round(r["winRate"] * 100, 1)}
+            {"Strategy": r["strategyName"], "Win-rate (%)": round(r["winRate"] * 100, 1)}
             for r in rates
         ])
-        st.bar_chart(df.set_index("Stratégie"), y="Win-rate (%)", use_container_width=True)
+        st.bar_chart(df.set_index("Strategy"), y="Win-rate (%)", use_container_width=True)
 
         st.caption(
-            "SQL : `SELECT strategy_name, COUNT(*) FILTER (WHERE outcome_success) * 1.0 / COUNT(*) AS win_rate "
+            "SQL: `SELECT strategy_name, COUNT(*) FILTER (WHERE outcome_success) * 1.0 / COUNT(*) AS win_rate "
             "FROM incident_vectors GROUP BY strategy_name`"
         )
 
         st.divider()
-        st.subheader("📐 Seuils de routage (Couche 2)")
+        st.subheader("📐 Routing thresholds (Layer 2)")
         st.markdown("""
-- **Win-rate > 80% + distance RAG < 0.15** → `AUTONOMOUS` (l'agent agit seul)
-- **Win-rate ≤ 80% ou distance 0.15–0.8** → `PENDING_APPROVAL` (validation humaine)
-- **Distance > 0.8 ou 0 sample** → `EXPLORATORY` (nouvelle stratégie, mode apprentissage)
+- **Win-rate > 80% + RAG distance < 0.15** → `AUTONOMOUS` (agent acts alone)
+- **Win-rate ≤ 80% or distance 0.15–0.8** → `PENDING_APPROVAL` (human validation)
+- **Distance > 0.8 or 0 samples** → `EXPLORATORY` (new strategy, learning mode)
 """)
     else:
-        st.info("Aucune donnée dans la mémoire vectorielle. Déclenche quelques incidents d'abord.")
+        st.info("No data in vector memory. Trigger some incidents first.")
 
 
 with tab_calibration:
-    st.header("🎯 Calibration automatique & feedback humain")
+    st.header("🎯 Automatic Calibration & Human Feedback")
     st.caption(
-        "La **Couche 1** enregistre le win-rate prédit vs observé et auto-corrige les décisions futures. "
-        "La **Couche 2** ferme ici sa boucle d'apprentissage : chaque rejet ou correction humaine "
-        "injecte un signal pondéré (×0.5) directement dans `incident_vectors` — sans attendre la fin d'un incident. "
-        "Entièrement porté par **CockroachDB**, aucun service ML externe."
+        "**Layer 1** records predicted vs observed win-rate and auto-corrects future decisions. "
+        "**Layer 2** closes its learning loop here: each human rejection or correction "
+        "injects a weighted signal (x0.5) directly into `incident_vectors` — without waiting for an incident to finish. "
+        "Fully powered by **CockroachDB**, no external ML service."
     )
 
     col_r_cal, col_recal, _ = st.columns([1, 2, 4])
     with col_r_cal:
-        if st.button("🔄 Rafraîchir", key="refresh_calibration"):
+        if st.button("🔄 Refresh", key="refresh_calibration"):
             st.rerun()
     with col_recal:
-        if st.button("⚙️ Recalibrer toutes les stratégies", key="recalibrate_all"):
+        if st.button("⚙️ Recalibrate all strategies", key="recalibrate_all"):
             result = recalibrate_all()
             if result:
-                st.success(result.get("message", "Recalibration terminée."))
+                st.success(result.get("message", "Recalibration complete."))
             else:
                 st.error(st.session_state.get("_api_error"))
 
     cal_data = fetch_calibration()
     if not cal_data:
-        st.error(f"Impossible de charger la calibration : {st.session_state.get('_api_error')}")
+        st.error(f"Unable to load calibration: {st.session_state.get('_api_error')}")
     else:
         rows = cal_data.get("calibration", [])
         threshold = cal_data.get("threshold", 0.15)
 
         if not rows:
             st.info(
-                "Aucune donnée de calibration pour l'instant. "
-                "Déclenche plusieurs incidents et reviens ici — les prédictions s'accumulent automatiquement."
+                "No calibration data yet. "
+                "Trigger several incidents and come back — predictions accumulate automatically."
             )
         else:
-            # ── Métriques résumées ──────────────────────────────────────────
+            # ── Summary metrics ──────────────────────────────────────────────
             n_downgraded = sum(1 for r in rows if r["status"] == "downgraded")
             n_upgraded   = sum(1 for r in rows if r["status"] == "upgraded")
             n_calibrated = sum(1 for r in rows if r["status"] == "calibrated")
             n_no_data    = sum(1 for r in rows if r["status"] == "no_data")
 
             mc1, mc2, mc3, mc4 = st.columns(4)
-            mc1.metric("🟢 Bien calibrées",  n_calibrated, help="Écart ≤ 15% — aucune correction nécessaire")
-            mc2.metric("🔴 Dégradées",        n_downgraded, help="Observed < Predicted de > 15% — facteur < 1 appliqué")
-            mc3.metric("🔵 Améliorées",        n_upgraded,   help="Observed > Predicted de > 15% — facteur > 1 appliqué")
-            mc4.metric("⚪ Sans données",      n_no_data,    help="Aucune donnée observée encore disponible")
+            mc1.metric("🟢 Well calibrated",  n_calibrated, help="Deviation ≤ 15% — no correction needed")
+            mc2.metric("🔴 Degraded",          n_downgraded, help="Observed < Predicted by > 15% — factor < 1 applied")
+            mc3.metric("🔵 Improved",          n_upgraded,   help="Observed > Predicted by > 15% — factor > 1 applied")
+            mc4.metric("⚪ No data",           n_no_data,    help="No observed data available yet")
 
-            # ── Tableau principal ───────────────────────────────────────────
+            # ── Main table ──────────────────────────────────────────────────
             STATUS_LABELS = {
-                "calibrated": "🟢 Calibrée",
-                "downgraded": "🔴 Dégradée",
-                "upgraded":   "🔵 Améliorée",
-                "no_data":    "⚪ Sans données",
+                "calibrated": "🟢 Calibrated",
+                "downgraded": "🔴 Degraded",
+                "upgraded":   "🔵 Improved",
+                "no_data":    "⚪ No data",
             }
 
             total_human_signals = sum(r.get("humanSignalCount", 0) for r in rows)
             if total_human_signals > 0:
                 st.info(
-                    f"🧑‍💻 **{total_human_signals} signal(s) humain(s) intégré(s)** dans la mémoire vectorielle "
-                    f"(rejets + corrections, poids ×0.5 chacun). "
-                    "Les stratégies rejetées ont vu leur win-rate baisser ; "
-                    "les stratégies suggérées ont vu leur win-rate monter."
+                    f"🧑‍💻 **{total_human_signals} human signal(s) integrated** into vector memory "
+                    f"(rejections + corrections, weight x0.5 each). "
+                    "Rejected strategies saw their win-rate decrease; "
+                    "suggested strategies saw their win-rate increase."
                 )
 
             table_rows = []
@@ -715,35 +793,35 @@ with tab_calibration:
                 deviation = r["deviation"]
                 human_n   = r.get("humanSignalCount", 0)
                 table_rows.append({
-                    "Stratégie":              r["strategyName"],
-                    "Prédit (avg)":           f"{predicted * 100:.1f}%",
-                    "Observé (réel)":         f"{observed * 100:.1f}%" if observed is not None else "—",
-                    "Écart":                  (
+                    "Strategy":              r["strategyName"],
+                    "Predicted (avg)":       f"{predicted * 100:.1f}%",
+                    "Observed (real)":       f"{observed * 100:.1f}%" if observed is not None else "—",
+                    "Deviation":             (
                         f"{'+' if deviation >= 0 else ''}{deviation * 100:.1f}%"
                         if deviation is not None else "—"
                     ),
-                    "Facteur correction":     f"×{factor:.3f}" if factor != 1.0 else "×1.000 (neutre)",
-                    "Signaux humains":        human_n if human_n > 0 else "—",
-                    "Décisions enregistrées": r["predictionCount"],
-                    "Statut":                 STATUS_LABELS.get(r["status"], r["status"]),
+                    "Correction factor":     f"x{factor:.3f}" if factor != 1.0 else "x1.000 (neutral)",
+                    "Human signals":         human_n if human_n > 0 else "—",
+                    "Recorded decisions":    r["predictionCount"],
+                    "Status":                STATUS_LABELS.get(r["status"], r["status"]),
                 })
 
             st.dataframe(table_rows, use_container_width=True, hide_index=True)
 
-            # ── Explication du mécanisme ────────────────────────────────────
-            with st.expander("📖 Comment fonctionne la calibration ?", expanded=False):
+            # ── Mechanism explanation ────────────────────────────────────────
+            with st.expander("📖 How does calibration work?", expanded=False):
                 st.markdown(f"""
-### Bandit auto-correctif — CockroachDB, 0 service ML externe
+### Self-correcting bandit — CockroachDB, 0 external ML services
 
-**Pourquoi ?** Un win-rate historique peut surestimer la fiabilité d'une stratégie si les
-derniers incidents révèlent une dégradation (infra changée, scénarios plus complexes, etc.).
-La calibration détecte cette dérive et applique une correction *avant* que la prochaine
-décision de routage ne soit prise.
+**Why?** A historical win-rate can overestimate a strategy's reliability if recent incidents
+reveal degradation (changed infra, more complex scenarios, etc.).
+Calibration detects this drift and applies a correction *before* the next
+routing decision is made.
 
-**Comment ?**
+**How?**
 
-1. À chaque décision de routage, le win-rate prédit est enregistré dans `strategy_calibration`
-   via un **UPSERT SQL** qui maintient une moyenne glissante pondérée :
+1. At each routing decision, the predicted win-rate is recorded in `strategy_calibration`
+   via a **SQL UPSERT** that maintains a weighted rolling average:
 
 ```sql
 INSERT INTO strategy_calibration (strategy_name, avg_predicted_win_rate, prediction_count)
@@ -755,33 +833,33 @@ ON CONFLICT (strategy_name) DO UPDATE
       prediction_count = prediction_count + 1
 ```
 
-2. Après chaque incident résolu, la requête de recalibration compare :
-   - **Prédit** = `avg_predicted_win_rate` (ce qu'on croyait)
-   - **Observé** = `COUNT(*) FILTER (WHERE outcome_success) / COUNT(*)` depuis `incident_vectors`
+2. After each resolved incident, the recalibration query compares:
+   - **Predicted** = `avg_predicted_win_rate` (what was expected)
+   - **Observed** = `COUNT(*) FILTER (WHERE outcome_success) / COUNT(*)` from `incident_vectors`
 
-3. Si `|observé − prédit| > {threshold * 100:.0f}%` → facteur de correction =
-   `clamp(observé / prédit, 0.1, 1.5)`
+3. If `|observed − predicted| > {threshold * 100:.0f}%` → correction factor =
+   `clamp(observed / predicted, 0.1, 1.5)`
 
-4. Les décisions suivantes utilisent : `win-rate effectif = win-rate brut × facteur`
+4. Subsequent decisions use: `effective win-rate = raw win-rate x factor`
 
-| Situation | Facteur | Effet |
-|-----------|---------|-------|
-| Observé < prédit de > {threshold * 100:.0f}% | **< 1.0** | Stratégie **rétrogradée** → PENDING_APPROVAL même si win-rate historique > 80% |
-| Observé > prédit de > {threshold * 100:.0f}% | **> 1.0** | Stratégie **promue** → AUTONOMOUS plus facilement |
-| Écart ≤ {threshold * 100:.0f}% | **1.0** | Neutre — aucune correction |
+| Situation | Factor | Effect |
+|-----------|--------|--------|
+| Observed < predicted by > {threshold * 100:.0f}% | **< 1.0** | Strategy **demoted** → PENDING_APPROVAL even if historical win-rate > 80% |
+| Observed > predicted by > {threshold * 100:.0f}% | **> 1.0** | Strategy **promoted** → AUTONOMOUS more easily |
+| Deviation ≤ {threshold * 100:.0f}% | **1.0** | Neutral — no correction |
 """)
 
-            # ── SQL expliqué pour le jury ─────────────────────────────────
-            with st.expander("🔧 Requête SQL de recalibration (portée par CockroachDB)", expanded=False):
+            # ── SQL for judges ───────────────────────────────────────────────
+            with st.expander("🔧 Recalibration SQL query (powered by CockroachDB)", expanded=False):
                 st.code("""
--- Calcul du win-rate observé depuis incident_vectors
+-- Compute observed win-rate from incident_vectors
 SELECT
     COUNT(*) FILTER (WHERE outcome_success)::float
     / NULLIF(COUNT(*), 0)  AS observed_win_rate
 FROM incident_vectors
 WHERE strategy_name = $1;
 
--- Mise à jour du facteur de correction
+-- Update correction factor
 UPDATE strategy_calibration
 SET observed_win_rate    = $observed,
     correction_factor    =
@@ -796,22 +874,22 @@ WHERE strategy_name = $1;
 
 
 with tab_impact:
-    st.header("💰 Impact MTTR & Coût — Agent vs. Humain d'astreinte")
+    st.header("💰 MTTR & Cost Impact — Agent vs. On-call Engineer")
     st.caption(
-        "Chaque incident enregistre son timestamp de déclenchement (`triggered_at`) et de résolution "
-        "(`resolved_at`) dans CockroachDB. Le MTTR est calculé en SQL pur. "
-        "Le coût en Request Units est estimé à partir du modèle de facturation CockroachDB Serverless."
+        "Each incident records its trigger timestamp (`triggered_at`) and resolution timestamp "
+        "(`resolved_at`) in CockroachDB. MTTR is computed in pure SQL. "
+        "The Request Unit cost is estimated from the CockroachDB Serverless billing model."
     )
 
     col_r_imp, _ = st.columns([1, 5])
     with col_r_imp:
-        if st.button("🔄 Rafraîchir", key="refresh_impact"):
+        if st.button("🔄 Refresh", key="refresh_impact"):
             st.rerun()
 
     impact = fetch_impact()
 
     if impact is None:
-        st.error(f"Impossible de charger les métriques : {st.session_state.get('_api_error')}")
+        st.error(f"Unable to load metrics: {st.session_state.get('_api_error')}")
     else:
         resolved = impact.get("incidentsResolved", 0)
         mttr = impact.get("mttrStats", {})
@@ -822,49 +900,49 @@ with tab_impact:
         human_baseline = mttr.get("humanBaselineSeconds", 1200)
         reduction_pct = mttr.get("reductionPct")
 
-        # ── Ligne 1 : métriques MTTR ────────────────────────────────────────
+        # ── Row 1: MTTR metrics ──────────────────────────────────────────────
         st.subheader("⏱️ MTTR — Mean Time To Resolve")
         c1, c2, c3, c4 = st.columns(4)
         if mttr_avg is not None:
             c1.metric(
-                "MTTR Agent (mesuré)",
+                "Agent MTTR (measured)",
                 f"{mttr_avg:.1f} s",
-                delta=f"−{reduction_pct}% vs humain" if reduction_pct else None,
+                delta=f"−{reduction_pct}% vs human" if reduction_pct else None,
                 delta_color="normal",
-                help="Calculé depuis triggered_at → resolved_at dans CockroachDB",
+                help="Computed from triggered_at → resolved_at in CockroachDB",
             )
         else:
-            c1.metric("MTTR Agent (mesuré)", "—", help="Résoudre au moins un incident pour voir le MTTR.")
+            c1.metric("Agent MTTR (measured)", "—", help="Resolve at least one incident to see MTTR.")
         c2.metric(
-            "Baseline humaine estimée",
+            "Estimated human baseline",
             f"{human_baseline} s ({human_baseline // 60} min)",
-            help="Source : Atlassian State of Incidents 2023 — MTTR médian P1 cloud = 18–22 min.",
+            help="Source: Atlassian State of Incidents 2023 — median P1 cloud MTTR = 18–22 min.",
         )
         c3.metric(
-            "Incidents résolus",
+            "Resolved incidents",
             resolved,
-            delta=f"{impact.get('incidentsFailed', 0)} échoués",
+            delta=f"{impact.get('incidentsFailed', 0)} failed",
             delta_color="off",
         )
         c4.metric(
-            "Incidents actifs",
+            "Active incidents",
             impact.get("incidentsActive", 0) + impact.get("incidentsPending", 0),
-            help="En cours + en attente d'approbation humaine",
+            help="In progress + awaiting human approval",
         )
 
         if mttr_avg is not None and reduction_pct is not None:
             speedup = human_baseline / mttr_avg if mttr_avg > 0 else 0
             st.success(
-                f"✅ **L'agent est {speedup:.0f}× plus rapide** qu'un SRE humain d'astreinte "
-                f"({mttr_avg:.1f} s vs {human_baseline} s), soit **{reduction_pct}% de réduction du MTTR**."
+                f"✅ **The agent is {speedup:.0f}x faster** than a human on-call SRE "
+                f"({mttr_avg:.1f} s vs {human_baseline} s), a **{reduction_pct}% MTTR reduction**."
             )
         elif resolved == 0:
-            st.info("💡 Déclenche quelques incidents dans la barre latérale pour mesurer le MTTR.")
+            st.info("💡 Trigger some incidents from the sidebar to measure MTTR.")
 
         st.divider()
 
-        # ── Ligne 2 : coût ──────────────────────────────────────────────────
-        st.subheader("💵 Coût — Agent vs. SRE d'astreinte")
+        # ── Row 2: cost ──────────────────────────────────────────────────────
+        st.subheader("💵 Cost — Agent vs. On-call SRE")
         cc1, cc2, cc3, cc4 = st.columns(4)
         agent_cost = cost.get("estimatedAgentCostUsd", 0)
         human_total = cost.get("humanTotalCostIfManual", 0)
@@ -872,40 +950,40 @@ with tab_impact:
         total_ru = cost.get("totalRuConsumed", 0)
 
         cc1.metric(
-            "Coût agent estimé (RU CockroachDB)",
+            "Estimated agent cost (CockroachDB RU)",
             f"${agent_cost:.4f}",
-            help=f"{total_ru} RU × $1/million = ${agent_cost:.6f}",
+            help=f"{total_ru} RU x $1/million = ${agent_cost:.6f}",
         )
         cc2.metric(
-            "Coût humain équivalent",
+            "Equivalent human cost",
             f"${human_total:.2f}",
-            help=f"{resolved} incidents × ${cost.get('humanBaselineCostUsdPerIncident', 35):.0f}/incident",
+            help=f"{resolved} incidents x ${cost.get('humanBaselineCostUsdPerIncident', 35):.0f}/incident",
         )
         cc3.metric(
-            "Économies estimées",
+            "Estimated savings",
             f"${savings:.2f}",
             delta=f"−{round((1 - agent_cost / human_total) * 100) if human_total > 0 else 100}%",
             delta_color="normal",
         )
         cc4.metric(
-            "RU CockroachDB consommées",
+            "CockroachDB RU consumed",
             f"{total_ru:,}",
             delta=f"~{cost.get('avgRuPerIncident', 42):.0f} RU/incident",
             delta_color="off",
         )
 
-        with st.expander("📋 Hypothèses de coût", expanded=False):
+        with st.expander("📋 Cost assumptions", expanded=False):
             for h in cost.get("hypotheses", []):
                 st.markdown(f"- {h}")
             st.caption(
-                "Ces estimations sont conservatrices et documentées pour la transparence envers le jury. "
-                "En production avec Bedrock activé, le coût Sonnet 3.5 (~3 $/1M tokens) s'ajouterait."
+                "These estimates are conservative and documented for transparency toward judges. "
+                "In production with Bedrock enabled, Sonnet 3.5 cost (~$3/1M tokens) would be added."
             )
 
         st.divider()
 
-        # ── Ligne 3 : autonomie ─────────────────────────────────────────────
-        st.subheader("🤖 Répartition par mode de routage (Couche 2)")
+        # ── Row 3: autonomy ──────────────────────────────────────────────────
+        st.subheader("🤖 Routing mode breakdown (Layer 2)")
         ac1, ac2, ac3, ac4 = st.columns(4)
         total_all = max(1, sum(autonomy.values()))
         ac1.metric(
@@ -913,31 +991,31 @@ with tab_impact:
             autonomy.get("autonomous", 0),
             delta=f"{autonomy.get('autonomous', 0) / total_all * 100:.0f}%",
             delta_color="off",
-            help="Agent a agi seul : win-rate > 80% sur stratégie connue",
+            help="Agent acted alone: win-rate > 80% on known strategy",
         )
         ac2.metric(
             "🟡 PENDING_APPROVAL",
             autonomy.get("pendingApproval", 0),
             delta=f"{autonomy.get('pendingApproval', 0) / total_all * 100:.0f}%",
             delta_color="off",
-            help="Win-rate ≤ 80% : validation humaine requise",
+            help="Win-rate ≤ 80%: human validation required",
         )
         ac3.metric(
             "🔵 EXPLORATORY",
             autonomy.get("exploratory", 0),
             delta=f"{autonomy.get('exploratory', 0) / total_all * 100:.0f}%",
             delta_color="off",
-            help="Stratégie inconnue : l'agent documente et apprend",
+            help="Unknown strategy: agent documents and learns",
         )
         ac4.metric(
             "🔴 REJECTED",
             autonomy.get("rejected", 0),
             delta=f"{autonomy.get('rejected', 0) / total_all * 100:.0f}%",
             delta_color="off",
-            help="Rejeté par l'humain avant exécution",
+            help="Rejected by human before execution",
         )
 
-        # Visualisation barre autonomie
+        # Autonomy bar chart
         import pandas as pd
         autonomy_df = pd.DataFrame([
             {"Mode": "AUTONOMOUS", "Incidents": autonomy.get("autonomous", 0)},
@@ -947,20 +1025,20 @@ with tab_impact:
         ])
         st.bar_chart(autonomy_df.set_index("Mode"), use_container_width=True)
 
-        # ── MTTR par stratégie ───────────────────────────────────────────────
+        # ── MTTR by strategy ─────────────────────────────────────────────────
         mttr_by_strategy = impact.get("mttrByStrategy", [])
         if mttr_by_strategy:
             st.divider()
-            st.subheader("⏱️ MTTR par stratégie de réparation")
-            st.caption("Uniquement les incidents RESOLVED avec resolved_at enregistré.")
+            st.subheader("⏱️ MTTR by repair strategy")
+            st.caption("Only RESOLVED incidents with recorded resolved_at.")
             mttr_df = pd.DataFrame([
                 {
-                    "Stratégie": r["strategyName"] or "—",
+                    "Strategy": r["strategyName"] or "—",
                     "Incidents": r["incidentCount"],
-                    "MTTR moy. (s)": round(r["mttrAvgSeconds"], 1) if r.get("mttrAvgSeconds") else "—",
-                    "MTTR min (s)": round(r["mttrMinSeconds"], 1) if r.get("mttrMinSeconds") else "—",
-                    "MTTR max (s)": round(r["mttrMaxSeconds"], 1) if r.get("mttrMaxSeconds") else "—",
-                    "vs humain": (
+                    "Avg MTTR (s)": round(r["mttrAvgSeconds"], 1) if r.get("mttrAvgSeconds") else "—",
+                    "Min MTTR (s)": round(r["mttrMinSeconds"], 1) if r.get("mttrMinSeconds") else "—",
+                    "Max MTTR (s)": round(r["mttrMaxSeconds"], 1) if r.get("mttrMaxSeconds") else "—",
+                    "vs human": (
                         f"−{round((1 - r['mttrAvgSeconds'] / human_baseline) * 100)}%"
                         if r.get("mttrAvgSeconds") else "—"
                     ),
@@ -971,7 +1049,7 @@ with tab_impact:
 
             # Chart
             chart_df = pd.DataFrame([
-                {"Stratégie": r["strategyName"] or "—", "MTTR (s)": r.get("mttrAvgSeconds") or 0}
+                {"Strategy": r["strategyName"] or "—", "MTTR (s)": r.get("mttrAvgSeconds") or 0}
                 for r in mttr_by_strategy if r.get("mttrAvgSeconds")
             ])
             if not chart_df.empty:
@@ -980,16 +1058,16 @@ with tab_impact:
                     pd.DataFrame([{"MTTR (s)": human_baseline}])
                 ).mark_rule(color="red", strokeDash=[6, 4]).encode(y="MTTR (s):Q")
                 bars = alt.Chart(chart_df).mark_bar().encode(
-                    x=alt.X("Stratégie:N", sort="-y"),
+                    x=alt.X("Strategy:N", sort="-y"),
                     y=alt.Y("MTTR (s):Q"),
                     color=alt.value("#4C8BF5"),
-                    tooltip=["Stratégie:N", "MTTR (s):Q"],
+                    tooltip=["Strategy:N", "MTTR (s):Q"],
                 )
                 st.altair_chart(bars + baseline_line, use_container_width=True)
-                st.caption("🔴 Ligne rouge = baseline humaine (1 200 s). Toutes les barres en dessous = l'agent est plus rapide.")
+                st.caption("🔴 Red line = human baseline (1,200 s). All bars below = agent is faster.")
 
         # SQL hint
-        with st.expander("🔍 SQL de calcul MTTR", expanded=False):
+        with st.expander("🔍 MTTR computation SQL", expanded=False):
             st.code("""
 SELECT
   context_json->>'strategyName' AS strategy_name,
@@ -1006,20 +1084,20 @@ ORDER BY mttr_avg_seconds ASC;
 with tab_logs:
     col_r2, _ = st.columns([1, 5])
     with col_r2:
-        if st.button("🔄 Rafraîchir", key="refresh_logs"):
+        if st.button("🔄 Refresh", key="refresh_logs"):
             st.rerun()
 
     logs = fetch_logs()
     if not logs:
-        st.caption("Aucune action journalisée pour l'instant.")
+        st.caption("No actions logged yet.")
     else:
         st.dataframe(
             [
                 {
                     "Incident": l["incidentId"][:8],
                     "Action": l["actionTaken"][:80],
-                    "Résultat": (l["result"] or "")[:120],
-                    "Horodatage": l["createdAt"],
+                    "Result": (l["result"] or "")[:120],
+                    "Timestamp": l["createdAt"],
                 }
                 for l in logs
             ],

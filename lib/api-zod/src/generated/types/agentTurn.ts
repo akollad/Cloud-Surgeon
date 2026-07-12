@@ -11,7 +11,7 @@ import type { AgentTurnToolOutput } from './agentTurnToolOutput';
 
 export interface AgentTurn {
   turn: number;
-  /** Nom de l'agent ayant exécuté ce tour (diagnostician/remediator/auditor) */
+  /** Name of the agent that executed this turn (diagnostician/remediator/auditor) */
   agent?: string;
   thought: string;
   thoughtSource?: AgentTurnThoughtSource;

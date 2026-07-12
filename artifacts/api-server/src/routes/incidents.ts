@@ -26,11 +26,11 @@ import { apiKeyAuth } from "../middleware/apiKeyAuth";
 
 const router: IRouter = Router();
 
-// Toutes les routes incidents/logs exigent la clé API partagée avec le
-// dashboard — voir middleware/apiKeyAuth.ts.
+// All incident/log routes require the shared API key with the
+// dashboard — see middleware/apiKeyAuth.ts.
 router.use(apiKeyAuth);
 
-// ── Déclenchement / reprise ───────────────────────────────────────────────
+// ── Trigger / resume ──────────────────────────────────────────────────────
 
 router.post("/incidents/trigger", async (req, res): Promise<void> => {
   const parsed = TriggerIncidentBody.safeParse(req.body);
@@ -41,7 +41,7 @@ router.post("/incidents/trigger", async (req, res): Promise<void> => {
 
   const { alertText: rawAlertText, simulateCrash } = parsed.data;
 
-  // ── Défense contre l'injection de prompt (Couche 0) ────────────────────
+  // ── Prompt injection defense (Layer 0) ─────────────────────────────────
   // Validate before any DB write to avoid creating incidents from malicious input.
   const validation = validateAlertText(rawAlertText);
   if (!validation.ok) {
@@ -107,12 +107,12 @@ router.post("/incidents/trigger", async (req, res): Promise<void> => {
   res.json(TriggerIncidentResponse.parse(result));
 });
 
-// ── Approbation / rejet humain (Couche 2) ────────────────────────────────
+// ── Human approval / rejection (Layer 2) ─────────────────────────────────
 
 /**
- * Approuve un incident en attente (PENDING_APPROVAL).
- * Change le routingMode en AUTONOMOUS, réinitialise le statut pour permettre
- * la reprise, puis relance la boucle d'agent de façon asynchrone.
+ * Approves a pending incident (PENDING_APPROVAL).
+ * Changes routingMode to AUTONOMOUS, resets status to allow resumption,
+ * then asynchronously restarts the agent loop.
  */
 router.post("/incidents/:incidentId/approve", async (req, res): Promise<void> => {
   const params = GetIncidentParams.safeParse(req.params);
@@ -135,16 +135,16 @@ router.post("/incidents/:incidentId/approve", async (req, res): Promise<void> =>
   }
 
   const context = incident.contextJson as IncidentContext;
-  // L'humain approuve : on remplace le mode par AUTONOMOUS pour que le
-  // Remediator procède sans nouvelle vérification.
+  // Human approves: replace mode with AUTONOMOUS so the Remediator
+  // proceeds without a new validation check.
   context.routingMode = "AUTONOMOUS";
 
   const [updated] = await db
     .update(incidentStateTable)
     .set({
-      status: "DIAGNOSING",        // statut qui permet la reprise
+      status: "DIAGNOSING",        // status that allows resumption
       currentStep: "HUMAN_APPROVED",
-      claimedByAgent: null,        // libérer au cas où un agent avait réclamé
+      claimedByAgent: null,        // release in case an agent had claimed it
       contextJson: context,
     })
     .where(eq(incidentStateTable.incidentId, incident.incidentId))
@@ -152,7 +152,7 @@ router.post("/incidents/:incidentId/approve", async (req, res): Promise<void> =>
 
   req.log.info({ incidentId: incident.incidentId }, "Incident approved by human");
 
-  // Réponse immédiate, puis reprise asynchrone de la boucle
+  // Immediate response, then async loop resumption
   res.json({ status: "approved", incidentId: incident.incidentId });
 
   const alertText = (context.alertText as string | undefined) ?? "";
@@ -162,9 +162,9 @@ router.post("/incidents/:incidentId/approve", async (req, res): Promise<void> =>
 });
 
 /**
- * Rejette un incident en attente (PENDING_APPROVAL).
- * Marque l'incident comme FAILED et indexe le résultat négatif dans la mémoire
- * vectorielle — le win-rate de la stratégie sera ajusté à la baisse.
+ * Rejects a pending incident (PENDING_APPROVAL).
+ * Marks the incident as FAILED and indexes the negative result in vector
+ * memory — the strategy win-rate will be adjusted downward.
  */
 router.post("/incidents/:incidentId/reject", async (req, res): Promise<void> => {
   const params = GetIncidentParams.safeParse(req.params);
@@ -188,7 +188,7 @@ router.post("/incidents/:incidentId/reject", async (req, res): Promise<void> => 
 
   const context = incident.contextJson as IncidentContext;
   context.routingMode = "REJECTED";
-  context.finalResponse = `FAILED [rejeté par l'humain]: L'opérateur a décidé de ne pas appliquer la stratégie '${context.strategyName ?? "unknown"}'. Incident clôturé sans action corrective.`;
+  context.finalResponse = `FAILED [rejected by human]: Operator decided not to apply strategy '${context.strategyName ?? "unknown"}'. Incident closed without corrective action.`;
 
   const [updated] = await db
     .update(incidentStateTable)
@@ -198,8 +198,8 @@ router.post("/incidents/:incidentId/reject", async (req, res): Promise<void> => 
       claimedByAgent: null,
       contextJson: context,
       resolvedAt: new Date(),
-      // Un rejet humain consomme moins de RU qu'un incident complet
-      // (1 diagnostic + routage + rejet = ~25 RU)
+      // A human rejection consumes fewer RU than a full incident
+      // (1 diagnostic + routing + rejection = ~25 RU)
       ruConsumed: 25,
     })
     .where(eq(incidentStateTable.incidentId, incident.incidentId))
@@ -207,9 +207,9 @@ router.post("/incidents/:incidentId/reject", async (req, res): Promise<void> => 
 
   req.log.info({ incidentId: incident.incidentId }, "Incident rejected by human");
 
-  // Enregistrer le signal humain (Couche 2 → Couche 1) :
-  // Le rejet pèse 0.5 au lieu de 1.0 — la mémoire reste prudente sur
-  // les jugements humains par rapport à un vrai échec d'incident.
+  // Record human signal (Layer 2 → Layer 1):
+  // Rejection weighs 0.5 instead of 1.0 — memory stays cautious about
+  // human judgments compared to a true incident failure.
   const alertText = (context.alertText as string | undefined) ?? "";
   if (alertText && context.strategyName) {
     await recordHumanFeedback(
@@ -224,15 +224,14 @@ router.post("/incidents/:incidentId/reject", async (req, res): Promise<void> => 
 });
 
 /**
- * Corrige un incident en attente (PENDING_APPROVAL) en suggérant une
- * stratégie alternative.
+ * Corrects a pending incident (PENDING_APPROVAL) by suggesting an
+ * alternative strategy.
  *
- * La Couche 2 ferme ici sa boucle d'apprentissage :
- *  - Signal négatif (w=0.5) pour la stratégie originale → son win-rate baisse
- *  - Signal positif (w=0.5) pour la stratégie suggérée → son win-rate monte
- * Les deux signaux sont marqués `signal_source = "human"` dans
- * `incident_vectors` pour distinguer le feedback humain des outcomes
- * automatiques.
+ * Layer 2 closes its learning loop here:
+ *  - Negative signal (w=0.5) for the original strategy → win-rate decreases
+ *  - Positive signal (w=0.5) for the suggested strategy → win-rate increases
+ * Both signals are marked `signal_source = "human"` in `incident_vectors`
+ * to distinguish human feedback from automatic outcomes.
  */
 router.post("/incidents/:incidentId/correct", async (req, res): Promise<void> => {
   const params = GetIncidentParams.safeParse(req.params);
@@ -269,10 +268,10 @@ router.post("/incidents/:incidentId/correct", async (req, res): Promise<void> =>
 
   context.routingMode = "REJECTED";
   context.finalResponse =
-    `HUMAN_CORRECTED: L'opérateur a rejeté la stratégie '${originalStrategy}' ` +
-    `et suggéré '${suggestedStrategy}'. ` +
-    `Les deux signaux ont été intégrés dans la mémoire vectorielle (signal humain, poids 0.5). ` +
-    `Le win-rate de '${originalStrategy}' a baissé ; celui de '${suggestedStrategy}' a monté.`;
+    `HUMAN_CORRECTED: Operator rejected strategy '${originalStrategy}' ` +
+    `and suggested '${suggestedStrategy}'. ` +
+    `Both signals integrated into vector memory (human signal, weight 0.5). ` +
+    `Win-rate for '${originalStrategy}' decreased; win-rate for '${suggestedStrategy}' increased.`;
 
   const [updated] = await db
     .update(incidentStateTable)
@@ -306,13 +305,12 @@ router.post("/incidents/:incidentId/correct", async (req, res): Promise<void> =>
   res.json(GetIncidentResponse.parse(updated));
 });
 
-// ── Chaîne causale (CTE récursive) ───────────────────────────────────────
+// ── Causal chain (recursive CTE) ─────────────────────────────────────────
 
 /**
- * Remonte la chaîne causale d'un incident via une CTE récursive CockroachDB.
- * Un incident B causé par les effets de bord de la réparation de A est
- * retrouvé par WITH RECURSIVE — ce qu'un simple vector store ne peut pas
- * faire.
+ * Walks the causal chain of an incident via a CockroachDB recursive CTE.
+ * An incident B caused by side effects of repairing A is found by
+ * WITH RECURSIVE — something a simple vector store cannot do.
  */
 router.get("/incidents/:incidentId/causal-chain", async (req, res): Promise<void> => {
   const params = GetIncidentParams.safeParse(req.params);
@@ -333,7 +331,7 @@ router.get("/incidents/:incidentId/causal-chain", async (req, res): Promise<void
     depth: number;
   }>(sql`
     WITH RECURSIVE causal_chain AS (
-      -- Ancre : l'incident demandé
+      -- Anchor: the requested incident
       SELECT
         incident_id, alert_fingerprint, status, current_step,
         caused_by_incident_id, updated_at, 0 AS depth
@@ -342,7 +340,7 @@ router.get("/incidents/:incidentId/causal-chain", async (req, res): Promise<void
 
       UNION ALL
 
-      -- Récursion : remonter vers les incidents parents
+      -- Recursion: walk up to parent incidents
       SELECT
         p.incident_id, p.alert_fingerprint, p.status, p.current_step,
         p.caused_by_incident_id, p.updated_at, c.depth + 1
@@ -364,11 +362,11 @@ router.get("/incidents/:incidentId/causal-chain", async (req, res): Promise<void
       updatedAt: r.updated_at,
       depth: r.depth,
     })),
-    note: "Chaîne causale remontée par CTE récursive (WITH RECURSIVE) — fonctionnalité SQL native CockroachDB.",
+    note: "Causal chain walked via recursive CTE (WITH RECURSIVE) — native CockroachDB SQL feature.",
   });
 });
 
-// ── Handoffs d'un incident ────────────────────────────────────────────────
+// ── Incident handoffs ─────────────────────────────────────────────────────
 
 router.get("/incidents/:incidentId/handoffs", async (req, res): Promise<void> => {
   const params = GetIncidentParams.safeParse(req.params);
@@ -388,7 +386,7 @@ router.get("/incidents/:incidentId/handoffs", async (req, res): Promise<void> =>
   })));
 });
 
-// ── Liste / détail ────────────────────────────────────────────────────────
+// ── List / detail ─────────────────────────────────────────────────────────
 
 router.get("/incidents", async (_req, res): Promise<void> => {
   const incidents = await db
@@ -416,7 +414,7 @@ router.get("/incidents/:incidentId", async (req, res): Promise<void> => {
   res.json(GetIncidentResponse.parse(incident));
 });
 
-// ── Logs d'exécution ─────────────────────────────────────────────────────
+// ── Execution logs ────────────────────────────────────────────────────────
 
 router.get("/logs", async (req, res): Promise<void> => {
   const query = ListExecutionLogsQueryParams.safeParse(req.query);
@@ -441,7 +439,7 @@ router.get("/logs", async (req, res): Promise<void> => {
   res.json(ListExecutionLogsResponse.parse(rows));
 });
 
-// ── Handoffs globaux ──────────────────────────────────────────────────────
+// ── Global handoffs ───────────────────────────────────────────────────────
 
 router.get("/handoffs", async (_req, res): Promise<void> => {
   const { asc } = await import("drizzle-orm");

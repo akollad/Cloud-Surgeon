@@ -1,57 +1,56 @@
-# Cloud-Surgeon — Agent DevOps Autonome Serverless
+# Cloud-Surgeon — Autonomous Serverless DevOps Agent
 
-Agent IA autonome pour le Hackathon CockroachDB x AWS 2026. Détecte des alertes
-d'infrastructure, diagnostique via RAG vectoriel (Amazon Bedrock Titan +
-CockroachDB Vector Search), et répare via un agent Claude 3.5 Sonnet capable
-de "tool calling". L'intégralité de l'état de l'agent vit dans CockroachDB,
-jamais en mémoire vive Lambda — une invocation peut mourir à tout moment et
-la suivante reprend exactement là où elle s'est arrêtée.
+Autonomous AI agent for the CockroachDB x AWS 2026 Hackathon. Detects infrastructure
+alerts, diagnoses via vector RAG (Amazon Bedrock Titan + CockroachDB Vector Search),
+and repairs via a Claude 3.5 Sonnet agent capable of tool calling. The entire agent
+state lives in CockroachDB, never in Lambda memory — an invocation can die at any
+time and the next one resumes exactly where it left off.
 
-**Vidéo de démonstration (Devpost) :** _[à compléter avant soumission]_
+**Demo video (Devpost):** _[to be added before submission]_
 
-## Structure du projet
+## Project structure
 
 ```
 cloud-surgeon-agent/
 │
-├── README.md               # Ce guide
-├── requirements.txt         # Dépendances globales pour le développement local
+├── README.md               # This guide
+├── requirements.txt         # Global dependencies for local development
 │
 ├── database/
-│   └── schema.sql            # incident_state, incident_vectors (+ index vectoriel), execution_logs
+│   └── schema.sql            # incident_state, incident_vectors (+ vector index), execution_logs
 │
-├── backend/                  # Le cœur de l'agent, déployé sur AWS Lambda
-│   ├── lambda_function.py    # Handler Lambda : Bedrock (Claude 3.5 + Titan), RAG, tool calling
-│   └── requirements.txt      # Dépendances à packager pour la Lambda
+├── backend/                  # The agent core, deployed on AWS Lambda
+│   ├── lambda_function.py    # Lambda handler: Bedrock (Claude 3.5 + Titan), RAG, tool calling
+│   └── requirements.txt      # Dependencies to package for the Lambda
 │
 └── frontend/
-    └── app.py                 # Dashboard Streamlit interactif pour simuler des pannes
+    └── app.py                 # Interactive Streamlit dashboard to simulate failures
 ```
 
-## 1. Créer le cluster CockroachDB Serverless
+## 1. Create the CockroachDB Serverless cluster
 
-1. Créer un compte sur [cockroachlabs.cloud](https://cockroachlabs.cloud) et
-   provisionner un cluster **Serverless**.
-2. Récupérer la chaîne de connexion (`Connect` → `Connection string`), format :
+1. Create an account on [cockroachlabs.cloud](https://cockroachlabs.cloud) and
+   provision a **Serverless** cluster.
+2. Retrieve the connection string (`Connect` → `Connection string`), format:
    ```
    postgresql://<user>:<password>@<host>:26257/<database>?sslmode=verify-full
    ```
-3. Appliquer le schéma :
+3. Apply the schema:
    ```bash
    psql "$COCKROACHDB_URL" -f database/schema.sql
    ```
-   (ou via le SQL shell intégré à la console CockroachDB Cloud).
+   (or via the SQL shell built into the CockroachDB Cloud console).
 
-## 2. Activer l'accès à Amazon Bedrock (pour le backend Lambda)
+## 2. Enable Amazon Bedrock access (for the Lambda backend)
 
-1. Dans la console AWS, région où Bedrock est disponible (ex. `us-east-1`),
-   activer l'accès aux modèles :
+1. In the AWS console, in the region where Bedrock is available (e.g. `us-east-1`),
+   enable access to the models:
    - `anthropic.claude-3-5-sonnet-20240620-v1:0`
    - `amazon.titan-embed-text-v2:0`
    (Bedrock → Model access → Manage model access).
-2. Aucune clé API à générer : la Lambda s'authentifie via son rôle IAM.
+2. No API key to generate: the Lambda authenticates via its IAM role.
 
-## 3. Déployer le backend sur AWS Lambda
+## 3. Deploy the backend on AWS Lambda
 
 ```bash
 mkdir build && cp backend/lambda_function.py build/
@@ -66,12 +65,11 @@ aws lambda create-function \
   --memory-size 512 \
   --role arn:aws:iam::<ACCOUNT_ID>:role/cloud-surgeon-execution-role \
   --zip-file fileb://cloud-surgeon.zip \
-  --environment "Variables={DATABASE_URL=<votre_connection_string_cockroachdb>,AWS_REGION=us-east-1}"
+  --environment "Variables={DATABASE_URL=<your_cockroachdb_connection_string>,AWS_REGION=us-east-1}"
 ```
 
-Le rôle IAM `cloud-surgeon-execution-role` doit inclure, au minimum, la
-politique managée `AWSLambdaBasicExecutionRole` (logs CloudWatch) et une
-politique custom autorisant :
+The IAM role `cloud-surgeon-execution-role` must include, at minimum, the managed
+policy `AWSLambdaBasicExecutionRole` (CloudWatch logs) and a custom policy allowing:
 
 ```json
 {
@@ -84,20 +82,20 @@ politique custom autorisant :
 }
 ```
 
-### Variables d'environnement du backend Lambda
+### Lambda backend environment variables
 
-| Variable               | Description                                                       | Obligatoire |
+| Variable               | Description                                                       | Required    |
 | ---------------------- | ------------------------------------------------------------------ | ----------- |
-| `DATABASE_URL`         | Chaîne de connexion CockroachDB Serverless                        | Oui         |
-| `AWS_REGION`           | Région AWS pour Bedrock (défaut `us-east-1`)                      | Non         |
-| `CLAUDE_MODEL_ID`      | Override du modèle Claude (défaut Sonnet 3.5)                     | Non         |
-| `TITAN_EMBED_MODEL_ID` | Override du modèle Titan (défaut `amazon.titan-embed-text-v2:0`)  | Non         |
-| `MAX_AGENT_TURNS`      | Nombre max de tours de la boucle d'agent (défaut `8`)              | Non         |
+| `DATABASE_URL`         | CockroachDB Serverless connection string                          | Yes         |
+| `AWS_REGION`           | AWS region for Bedrock (default `us-east-1`)                      | No          |
+| `CLAUDE_MODEL_ID`      | Claude model override (default Sonnet 3.5)                        | No          |
+| `TITAN_EMBED_MODEL_ID` | Titan model override (default `amazon.titan-embed-text-v2:0`)     | No          |
+| `MAX_AGENT_TURNS`      | Max agent loop turns (default `8`)                                 | No          |
 
-Ne jamais committer `DATABASE_URL` en dur : la configurer via les variables
-d'environnement Lambda (ou AWS Secrets Manager + résolution au cold start).
+Never commit `DATABASE_URL` in plain text: configure it via Lambda environment
+variables (or AWS Secrets Manager + cold-start resolution).
 
-### Tester le backend
+### Testing the backend
 
 ```bash
 aws lambda invoke \
@@ -108,119 +106,110 @@ aws lambda invoke \
 cat response.json
 ```
 
-Pour valider la résilience : invoquer une seconde fois avec le **même**
-`alert_text`. L'agent doit reconnaître le `alert_fingerprint` existant,
-recharger `context_json` depuis `incident_state`, et reprendre (ou constater
-que l'incident est déjà `RESOLVED`/`FAILED`) sans repartir de zéro.
+To validate resilience: invoke a second time with the **same** `alert_text`.
+The agent must recognize the existing `alert_fingerprint`, reload `context_json`
+from `incident_state`, and resume (or confirm the incident is already
+`RESOLVED`/`FAILED`) without starting over.
 
-En production, déclencher la Lambda via une alarme CloudWatch → SNS → Lambda,
-ou EventBridge, en transformant le message d'alarme en `{"alert_text": "..."}`
-avant l'invocation.
+In production, trigger the Lambda via a CloudWatch alarm → SNS → Lambda,
+or EventBridge, transforming the alarm message into `{"alert_text": "..."}`
+before invocation.
 
-## 4. Lancer le dashboard de démonstration (frontend/app.py)
+## 4. Launch the demo dashboard (frontend/app.py)
 
-Le dashboard Streamlit permet de déclencher des pannes simulées et de
-regarder l'agent les diagnostiquer/réparer en direct, sans dépendre de vraies
-alertes CloudWatch. Il respecte le flux de communication du projet :
+The Streamlit dashboard lets you trigger simulated failures and watch the agent
+diagnose/repair them live, without depending on real CloudWatch alerts. It follows
+the project communication flow:
 
 ```
 Frontend (Streamlit) --HTTP--> API Gateway / Backend (Lambda) --> Bedrock
                                                                 --> CockroachDB
-Frontend <--- rafraîchit en interrogeant l'état stocké en base ---
+Frontend <--- refreshes by polling the state stored in the DB ---
 ```
 
-Le frontend **n'accède jamais directement à la base** : il envoie une
-requête HTTP au backend, qui seul parle à Bedrock et à CockroachDB, puis
-répond avec l'incident mis à jour. Le frontend rafraîchit ensuite ses
-tableaux en interrogeant à nouveau le backend.
+The frontend **never talks directly to the database**: it sends an HTTP request
+to the backend, which alone talks to Bedrock and CockroachDB, then responds with
+the updated incident. The frontend then refreshes its views by querying the backend again.
 
-- **Sur AWS (production)** : le backend HTTP est une API Gateway devant la
-  fonction `backend/lambda_function.py`, qui appelle réellement Bedrock
-  (Claude 3.5 Sonnet + Titan) et lit/écrit dans CockroachDB Serverless.
-  Pointer `frontend/app.py` dessus avec :
+- **On AWS (production)**: the HTTP backend is an API Gateway in front of the
+  `backend/lambda_function.py` function, which actually calls Bedrock
+  (Claude 3.5 Sonnet + Titan) and reads/writes to CockroachDB Serverless.
+  Point `frontend/app.py` at it with:
   ```bash
-  export API_BASE_URL="https://<id-api-gateway>.execute-api.<region>.amazonaws.com"
+  export API_BASE_URL="https://<api-gateway-id>.execute-api.<region>.amazonaws.com"
   streamlit run frontend/app.py --server.port 5000
   ```
-- **Dans ce Repl (démo)** : comme AWS Lambda/Bedrock ne sont pas disponibles
-  ici, le rôle de "API Gateway + Lambda" est joué par le service API du
-  monorepo (`artifacts/api-server`, routes `/api/incidents/*` et
-  `/api/logs`, logique dans `artifacts/api-server/src/lib/cloud-surgeon.ts`).
-  Ce service se connecte à un **vrai cluster CockroachDB Serverless**
-  (secret `COCKROACHDB_URL`, voir `lib/db/src/index.ts`) — ce n'est pas un
-  Postgres de substitution : les tables `incident_state`, `incident_vectors`
-  (avec son `CREATE VECTOR INDEX` natif CockroachDB, pas une extension
-  pgvector) et `execution_logs` vivent sur CockroachDB Cloud. Le raisonnement
-  Claude et les outils sont simulés par un moteur déterministe (pas de
-  credentials AWS nécessaires pour la démo), mais **toute la persistance
-  d'état, la déduplication par empreinte, et la recherche RAG par similarité
-  cosinus tournent contre CockroachDB réel**. C'est la configuration par
-  défaut du workflow **Cloud-Surgeon Dashboard** de ce Repl (`API_BASE_URL`
-  par défaut : `http://localhost:80/api`).
-  - Le schéma est appliqué directement avec `psql "$COCKROACHDB_URL&sslrootcert=system" -f database/schema.sql`
-    plutôt que `drizzle-kit push`, car l'introspection de `drizzle-kit push`
-    n'est pas garantie compatible avec le dialecte CockroachDB (le SQL du
-    fichier `schema.sql`, lui, est écrit et testé pour CockroachDB).
+- **In this Repl (demo)**: since AWS Lambda/Bedrock are not available here, the
+  "API Gateway + Lambda" role is played by the monorepo API service
+  (`artifacts/api-server`, routes `/api/incidents/*` and `/api/logs`, logic in
+  `artifacts/api-server/src/lib/cloud-surgeon.ts`). This service connects to a
+  **real CockroachDB Serverless cluster** (secret `COCKROACHDB_URL`, see
+  `lib/db/src/index.ts`) — not a Postgres substitute: the tables `incident_state`,
+  `incident_vectors` (with its native CockroachDB `CREATE VECTOR INDEX`, not a
+  pgvector extension) and `execution_logs` live on CockroachDB Cloud. The Claude
+  reasoning and tools are simulated by a deterministic engine (no AWS credentials
+  needed for the demo), but **all state persistence, fingerprint-based deduplication,
+  and cosine-similarity RAG search run against real CockroachDB**. This is the
+  default configuration of the **Cloud-Surgeon Dashboard** workflow in this Repl
+  (default `API_BASE_URL`: `http://localhost:80/api`).
+  - The schema is applied directly with
+    `psql "$COCKROACHDB_URL&sslrootcert=system" -f database/schema.sql`
+    rather than `drizzle-kit push`, because `drizzle-kit push` introspection is
+    not guaranteed to be compatible with the CockroachDB dialect (the SQL in
+    `schema.sql` is written and tested for CockroachDB).
 
-### Authentification, outils MCP, Bedrock réel
+### Authentication, MCP tools, real Bedrock
 
-- **Authentification** : toutes les routes `/api/incidents/*` et `/api/logs`
-  exigent un header `x-api-key` (secret partagé `CLOUD_SURGEON_API_KEY`,
-  déjà envoyé automatiquement par le dashboard Streamlit). `/api/healthz`
-  reste public. Voir `artifacts/api-server/src/middleware/apiKeyAuth.ts`.
-- **Serveur MCP réel** : les outils `execute_ccloud_command` et
-  `aws_repair_service` ne sont plus des fonctions appelées en dur — ils
-  sont exposés par un vrai serveur MCP (`src/mcp/server.ts`, protocole
-  standard Anthropic) lancé en sous-processus stdio, et appelés par
-  l'agent via un client MCP (`src/mcp/client.ts`). N'importe quel autre
-  client MCP (Claude Desktop, etc.) pourrait se connecter à ce même serveur.
-- **Appel Bedrock réel** : le raisonnement ("thought") de chaque tour est
-  généré par un vrai appel à Amazon Bedrock (Claude Haiku 4.5, via
-  `src/lib/bedrock.ts`) quand `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`
-  sont configurées. **Dans cet environnement Replit, l'appel échoue
-  actuellement avec une erreur géographique renvoyée par Anthropic**
-  ("Access to Anthropic models is not allowed from unsupported countries,
-  regions, or territories") — limitation de la région du datacenter, pas un
-  bug côté agent. Chaque tour indique honnêtement sa source
-  (`thoughtSource: "bedrock" | "simulated"`) : aucune simulation n'est
-  jamais présentée comme un vrai appel réussi.
-- **Appel CockroachDB Cloud API réel** : `execute_ccloud_command` interroge
-  `GET /api/v1/clusters/{id}` avec `COCKROACH_CLOUD_API_KEY` /
-  `COCKROACH_CLOUD_CLUSTER_ID`. Fonctionne en production — la clé de service
-  account a un rôle (Cluster Admin/Read) assigné sur ce cluster dans la
-  console CockroachDB Cloud. Chaque tour de diagnostic renvoie désormais le
-  vrai état du cluster (`simulated: false`).
-- **Action AWS reste volontairement simulée** : `aws_repair_service` n'exécute
-  jamais de vraie action corrective (restart, scaling...) — un LLM qui
-  déclenche automatiquement des actions destructives sur une vraie
-  infrastructure sans garde-fou d'approbation humaine est un risque
-  délibérément écarté de cette démo.
-- **Vrai test de crash (SIGKILL)** : `scripts/real-crash-test.sh` déclenche un
-  incident, attend l'écriture en base du 1er tour, puis tue *réellement* le
-  process serveur (`kill -9`, pas un early return simulé dans le même appel
-  HTTP). Après redémarrage du service, renvoyer la même alerte reprend
-  l'agent exactement au tour suivant, sans dupliquer le tour déjà exécuté —
-  validé manuellement le 12/07/2026. C'est la preuve de résilience à un vrai
-  crash de process, complémentaire à l'option "simulate crash" du dashboard
-  (qui reste un raccourci pédagogique in-process).
+- **Authentication**: all `/api/incidents/*` and `/api/logs` routes require an
+  `x-api-key` header (shared secret `CLOUD_SURGEON_API_KEY`, sent automatically
+  by the Streamlit dashboard). `/api/healthz` remains public. See
+  `artifacts/api-server/src/middleware/apiKeyAuth.ts`.
+- **Real MCP server**: the `execute_ccloud_command` and `aws_repair_service` tools
+  are no longer hardcoded function calls — they are exposed by a real MCP server
+  (`src/mcp/server.ts`, standard Anthropic protocol) launched as a stdio subprocess,
+  and called by the agent via an MCP client (`src/mcp/client.ts`). Any other MCP
+  client (Claude Desktop, etc.) could connect to this same server.
+- **Real Bedrock call**: the reasoning ("thought") for each turn is generated by a
+  real Amazon Bedrock call (Claude Haiku 4.5, via `src/lib/bedrock.ts`) when
+  `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` are configured. **In this Replit
+  environment, the call currently fails with a geographic error from Anthropic**
+  ("Access to Anthropic models is not allowed from unsupported countries, regions,
+  or territories") — a datacenter region limitation, not an agent-side bug. Each
+  turn honestly reports its source (`thoughtSource: "bedrock" | "simulated"`): no
+  simulation is ever presented as a successful real call.
+- **Real CockroachDB Cloud API call**: `execute_ccloud_command` queries
+  `GET /api/v1/clusters/{id}` with `COCKROACH_CLOUD_API_KEY` /
+  `COCKROACH_CLOUD_CLUSTER_ID`. Works in production — the service account key has
+  a role (Cluster Admin/Read) assigned on this cluster in the CockroachDB Cloud
+  console. Each diagnostic turn now returns the actual cluster state (`simulated: false`).
+- **AWS action intentionally simulated**: `aws_repair_service` never executes a
+  real corrective action (restart, scaling...) — an LLM that automatically triggers
+  destructive actions on real infrastructure without a human approval guardrail is a
+  risk deliberately excluded from this demo.
+- **Real crash test (SIGKILL)**: `scripts/real-crash-test.sh` triggers an incident,
+  waits for the first turn to be written to the DB, then *actually* kills the server
+  process (`kill -9`, not a simulated early return within the same HTTP call). After
+  restarting the service, sending the same alert resumes the agent exactly at the
+  next turn, without duplicating the already-executed turn — validated manually on
+  2026-07-12. This proves resilience against a real process crash, complementing
+  the "simulate crash" option in the dashboard (which remains an in-process
+  pedagogical shortcut).
 
-Pour lancer le dashboard seul en local :
+To launch the dashboard alone locally:
 
 ```bash
 pip install -r requirements.txt
 streamlit run frontend/app.py --server.port 5000
 ```
 
-Le bouton "Simuler un crash de la Lambda" envoie une requête qui arrête le
-backend après le premier tour de raisonnement sans finaliser l'incident.
-L'état déjà écrit en base survit ; cliquer de nouveau sur "Déclencher
-l'agent" avec la même alerte envoie une nouvelle requête HTTP qui reprend
-l'incident exactement où il s'était arrêté — la preuve de résilience que le
-jury va chercher.
+The "Simulate Lambda crash" button sends a request that stops the backend after the
+first reasoning turn without finalizing the incident. The state already written to
+the DB survives; clicking "Trigger agent" again with the same alert sends a new HTTP
+request that resumes the incident exactly where it stopped — the resilience proof
+judges will look for.
 
-## 5. Publier sur Devpost
+## 5. Publish on Devpost
 
-1. Enregistrer une vidéo de démo montrant : déclenchement d'une panne →
-   diagnostic RAG → réparation → résolution, puis la reprise après un crash
-   simulé (bouton dédié dans le dashboard).
-2. Ajouter le lien de la vidéo en haut de ce README.
+1. Record a demo video showing: triggering a failure → RAG diagnosis → repair →
+   resolution, then resumption after a simulated crash (dedicated button in the dashboard).
+2. Add the video link at the top of this README.

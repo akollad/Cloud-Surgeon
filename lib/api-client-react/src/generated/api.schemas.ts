@@ -31,7 +31,7 @@ export type AgentTurnToolOutput = { [key: string]: unknown };
 
 export interface AgentTurn {
   turn: number;
-  /** Nom de l'agent ayant exécuté ce tour (diagnostician/remediator/auditor) */
+  /** Name of the agent that executed this turn (diagnostician/remediator/auditor) */
   agent?: string;
   thought: string;
   thoughtSource?: AgentTurnThoughtSource;
@@ -41,7 +41,7 @@ export interface AgentTurn {
 }
 
 /**
- * Mode de routage décidé par la Couche 2 (mémoire → confiance → action)
+ * Routing mode decided by Layer 2 (memory -> confidence -> action)
  */
 export type IncidentContextRoutingMode = typeof IncidentContextRoutingMode[keyof typeof IncidentContextRoutingMode];
 
@@ -55,18 +55,18 @@ export const IncidentContextRoutingMode = {
 
 export interface IncidentContext {
   alertText?: string;
-  /** Stratégie de réparation détectée/choisie pour cet incident */
+  /** Repair strategy detected/chosen for this incident */
   strategyName?: string;
-  /** Mode de routage décidé par la Couche 2 (mémoire → confiance → action) */
+  /** Routing mode decided by Layer 2 (memory -> confidence -> action) */
   routingMode?: IncidentContextRoutingMode;
   routingDecisionComputed?: boolean;
-  /** Distance cosinus RAG (0 = identique, 1 = opposé) */
+  /** RAG cosine distance (0 = identical, 1 = opposite) */
   ragScore?: number | null;
-  /** Stratégie de l'incident le plus similaire dans la mémoire vectorielle */
+  /** Strategy from the most similar incident in the vector memory */
   ragStrategyHint?: string | null;
-  /** Taux de succès historique de la stratégie (0–1) */
+  /** Historical success rate for the strategy (0-1) */
   winRate?: number | null;
-  /** Nombre de samples ayant servi au calcul du win-rate */
+  /** Number of samples used to compute the win-rate */
   winRateSampleSize?: number;
   turns?: AgentTurn[];
   finalResponse?: string | null;
@@ -93,9 +93,9 @@ export interface Incident {
   /** @nullable */
   currentStep: string | null;
   contextJson: IncidentContext;
-  /** Agent ayant réclamé cet incident via transaction sérialisable */
+  /** Agent that claimed this incident via serializable transaction */
   claimedByAgent?: string | null;
-  /** Incident parent dans la chaîne causale (CTE récursive) */
+  /** Parent incident in the causal chain (recursive CTE) */
   causedByIncidentId?: string | null;
   updatedAt: string;
 }

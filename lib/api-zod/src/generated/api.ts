@@ -27,16 +27,16 @@ export const TriggerIncidentResponse = zod.object({
   "currentStep": zod.string().nullable(),
   "contextJson": zod.object({
   "alertText": zod.string().optional(),
-  "strategyName": zod.string().optional().describe('Stratégie de réparation détectée\/choisie pour cet incident'),
-  "routingMode": zod.enum(['AUTONOMOUS', 'PENDING_APPROVAL', 'EXPLORATORY', 'REJECTED']).optional().describe('Mode de routage décidé par la Couche 2 (mémoire → confiance → action)'),
+  "strategyName": zod.string().optional().describe('Repair strategy detected/chosen for this incident'),
+  "routingMode": zod.enum(['AUTONOMOUS', 'PENDING_APPROVAL', 'EXPLORATORY', 'REJECTED']).optional().describe('Routing mode decided by Layer 2 (memory -> confidence -> action)'),
   "routingDecisionComputed": zod.boolean().optional(),
-  "ragScore": zod.number().nullish().describe('Distance cosinus RAG (0 = identique, 1 = opposé)'),
-  "ragStrategyHint": zod.string().nullish().describe('Stratégie de l\'incident le plus similaire dans la mémoire vectorielle'),
-  "winRate": zod.number().nullish().describe('Taux de succès historique de la stratégie (0–1)'),
-  "winRateSampleSize": zod.number().optional().describe('Nombre de samples ayant servi au calcul du win-rate'),
+  "ragScore": zod.number().nullish().describe('RAG cosine distance (0 = identical, 1 = opposite)'),
+  "ragStrategyHint": zod.string().nullish().describe('Strategy from the most similar incident in the vector memory'),
+  "winRate": zod.number().nullish().describe('Historical success rate for the strategy (0-1)'),
+  "winRateSampleSize": zod.number().optional().describe('Number of samples used to compute the win-rate'),
   "turns": zod.array(zod.object({
   "turn": zod.number(),
-  "agent": zod.string().optional().describe('Nom de l\'agent ayant exécuté ce tour (diagnostician\/remediator\/auditor)'),
+  "agent": zod.string().optional().describe('Name of the agent that executed this turn (diagnostician\/remediator\/auditor)'),
   "thought": zod.string(),
   "thoughtSource": zod.enum(['anthropic', 'bedrock', 'simulated']).optional(),
   "toolName": zod.string(),
@@ -46,8 +46,8 @@ export const TriggerIncidentResponse = zod.object({
   "finalResponse": zod.string().nullish(),
   "crashed": zod.boolean().optional()
 }),
-  "claimedByAgent": zod.string().nullish().describe('Agent ayant réclamé cet incident via transaction sérialisable'),
-  "causedByIncidentId": zod.string().nullish().describe('Incident parent dans la chaîne causale (CTE récursive)'),
+  "claimedByAgent": zod.string().nullish().describe('Agent that claimed this incident via serializable transaction'),
+  "causedByIncidentId": zod.string().nullish().describe('Parent incident in the causal chain (recursive CTE)'),
   "updatedAt": zod.coerce.date()
 })
 
@@ -62,16 +62,16 @@ export const ListIncidentsResponseItem = zod.object({
   "currentStep": zod.string().nullable(),
   "contextJson": zod.object({
   "alertText": zod.string().optional(),
-  "strategyName": zod.string().optional().describe('Stratégie de réparation détectée\/choisie pour cet incident'),
-  "routingMode": zod.enum(['AUTONOMOUS', 'PENDING_APPROVAL', 'EXPLORATORY', 'REJECTED']).optional().describe('Mode de routage décidé par la Couche 2 (mémoire → confiance → action)'),
+  "strategyName": zod.string().optional().describe('Repair strategy detected/chosen for this incident'),
+  "routingMode": zod.enum(['AUTONOMOUS', 'PENDING_APPROVAL', 'EXPLORATORY', 'REJECTED']).optional().describe('Routing mode decided by Layer 2 (memory -> confidence -> action)'),
   "routingDecisionComputed": zod.boolean().optional(),
-  "ragScore": zod.number().nullish().describe('Distance cosinus RAG (0 = identique, 1 = opposé)'),
-  "ragStrategyHint": zod.string().nullish().describe('Stratégie de l\'incident le plus similaire dans la mémoire vectorielle'),
-  "winRate": zod.number().nullish().describe('Taux de succès historique de la stratégie (0–1)'),
-  "winRateSampleSize": zod.number().optional().describe('Nombre de samples ayant servi au calcul du win-rate'),
+  "ragScore": zod.number().nullish().describe('RAG cosine distance (0 = identical, 1 = opposite)'),
+  "ragStrategyHint": zod.string().nullish().describe('Strategy from the most similar incident in the vector memory'),
+  "winRate": zod.number().nullish().describe('Historical success rate for the strategy (0-1)'),
+  "winRateSampleSize": zod.number().optional().describe('Number of samples used to compute the win-rate'),
   "turns": zod.array(zod.object({
   "turn": zod.number(),
-  "agent": zod.string().optional().describe('Nom de l\'agent ayant exécuté ce tour (diagnostician\/remediator\/auditor)'),
+  "agent": zod.string().optional().describe('Name of the agent that executed this turn (diagnostician\/remediator\/auditor)'),
   "thought": zod.string(),
   "thoughtSource": zod.enum(['anthropic', 'bedrock', 'simulated']).optional(),
   "toolName": zod.string(),
@@ -81,8 +81,8 @@ export const ListIncidentsResponseItem = zod.object({
   "finalResponse": zod.string().nullish(),
   "crashed": zod.boolean().optional()
 }),
-  "claimedByAgent": zod.string().nullish().describe('Agent ayant réclamé cet incident via transaction sérialisable'),
-  "causedByIncidentId": zod.string().nullish().describe('Incident parent dans la chaîne causale (CTE récursive)'),
+  "claimedByAgent": zod.string().nullish().describe('Agent that claimed this incident via serializable transaction'),
+  "causedByIncidentId": zod.string().nullish().describe('Parent incident in the causal chain (recursive CTE)'),
   "updatedAt": zod.coerce.date()
 })
 export const ListIncidentsResponse = zod.array(ListIncidentsResponseItem)
@@ -102,16 +102,16 @@ export const GetIncidentResponse = zod.object({
   "currentStep": zod.string().nullable(),
   "contextJson": zod.object({
   "alertText": zod.string().optional(),
-  "strategyName": zod.string().optional().describe('Stratégie de réparation détectée\/choisie pour cet incident'),
-  "routingMode": zod.enum(['AUTONOMOUS', 'PENDING_APPROVAL', 'EXPLORATORY', 'REJECTED']).optional().describe('Mode de routage décidé par la Couche 2 (mémoire → confiance → action)'),
+  "strategyName": zod.string().optional().describe('Repair strategy detected/chosen for this incident'),
+  "routingMode": zod.enum(['AUTONOMOUS', 'PENDING_APPROVAL', 'EXPLORATORY', 'REJECTED']).optional().describe('Routing mode decided by Layer 2 (memory -> confidence -> action)'),
   "routingDecisionComputed": zod.boolean().optional(),
-  "ragScore": zod.number().nullish().describe('Distance cosinus RAG (0 = identique, 1 = opposé)'),
-  "ragStrategyHint": zod.string().nullish().describe('Stratégie de l\'incident le plus similaire dans la mémoire vectorielle'),
-  "winRate": zod.number().nullish().describe('Taux de succès historique de la stratégie (0–1)'),
-  "winRateSampleSize": zod.number().optional().describe('Nombre de samples ayant servi au calcul du win-rate'),
+  "ragScore": zod.number().nullish().describe('RAG cosine distance (0 = identical, 1 = opposite)'),
+  "ragStrategyHint": zod.string().nullish().describe('Strategy from the most similar incident in the vector memory'),
+  "winRate": zod.number().nullish().describe('Historical success rate for the strategy (0-1)'),
+  "winRateSampleSize": zod.number().optional().describe('Number of samples used to compute the win-rate'),
   "turns": zod.array(zod.object({
   "turn": zod.number(),
-  "agent": zod.string().optional().describe('Nom de l\'agent ayant exécuté ce tour (diagnostician\/remediator\/auditor)'),
+  "agent": zod.string().optional().describe('Name of the agent that executed this turn (diagnostician\/remediator\/auditor)'),
   "thought": zod.string(),
   "thoughtSource": zod.enum(['anthropic', 'bedrock', 'simulated']).optional(),
   "toolName": zod.string(),
@@ -121,8 +121,8 @@ export const GetIncidentResponse = zod.object({
   "finalResponse": zod.string().nullish(),
   "crashed": zod.boolean().optional()
 }),
-  "claimedByAgent": zod.string().nullish().describe('Agent ayant réclamé cet incident via transaction sérialisable'),
-  "causedByIncidentId": zod.string().nullish().describe('Incident parent dans la chaîne causale (CTE récursive)'),
+  "claimedByAgent": zod.string().nullish().describe('Agent that claimed this incident via serializable transaction'),
+  "causedByIncidentId": zod.string().nullish().describe('Parent incident in the causal chain (recursive CTE)'),
   "updatedAt": zod.coerce.date()
 })
 

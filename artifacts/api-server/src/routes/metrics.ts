@@ -1,19 +1,18 @@
 /**
- * Métriques de la Couche 1 et d'Impact
+ * Layer 1 and Impact Metrics
  *
  * GET /api/metrics/win-rates
- *   Taux de succès par stratégie de résolution, calculé par agrégation SQL
- *   pure sur `incident_vectors` — le "bandit contextuel" porté par CockroachDB
- *   sans service ML externe.
+ *   Success rate by resolution strategy, computed by pure SQL aggregation
+ *   on `incident_vectors` — the "contextual bandit" powered by CockroachDB
+ *   with no external ML service.
  *
  * GET /api/metrics/impact
- *   MTTR (Mean Time To Resolve) et coût estimé par incident, avec comparaison
- *   au coût d'un ingénieur d'astreinte humain. Les hypothèses de coût sont
- *   documentées inline.
+ *   MTTR (Mean Time To Resolve) and estimated cost per incident, with comparison
+ *   to the cost of a human on-call engineer. Cost assumptions are documented inline.
  *
  * POST /api/metrics/seed
- *   Déclenche l'initialisation de la mémoire vectorielle avec des incidents
- *   synthétiques (un par scénario connu). Idempotent.
+ *   Triggers initialization of vector memory with synthetic incidents
+ *   (one per known scenario). Idempotent.
  */
 
 import { Router, type IRouter } from "express";
@@ -32,39 +31,39 @@ const router: IRouter = Router();
 
 router.use(apiKeyAuth);
 
-// ── Win-rates (Couche 1 — bandit contextuel) ──────────────────────────────
+// ── Win-rates (Layer 1 — contextual bandit) ───────────────────────────────
 
 router.get("/metrics/win-rates", async (_req, res): Promise<void> => {
   const rates = await getAllStrategyWinRates();
   res.json({
     winRates: rates,
     note:
-      "Bandit contextuel porté par CockroachDB — aucun service ML externe. " +
-      "win_rate = COUNT(*) FILTER (WHERE outcome_success) / COUNT(*) par stratégie.",
+      "Contextual bandit powered by CockroachDB — no external ML service. " +
+      "win_rate = COUNT(*) FILTER (WHERE outcome_success) / COUNT(*) per strategy.",
   });
 });
 
-// ── Impact (MTTR + coût) ──────────────────────────────────────────────────
+// ── Impact (MTTR + cost) ──────────────────────────────────────────────────
 
 /**
- * Hypothèses de coût documentées :
+ * Documented cost assumptions:
  *
- * BASELINE HUMAIN (20 min = 1 200 s de MTTR)
- *   Source : Atlassian "State of Incident Management 2023" — MTTR médian
- *   pour un incident cloud P1 détecté via alerting = 18–22 min.
- *   Coût : taux SRE médian (USA) ≈ $105/h → 20 min = $35/incident.
- *   Avec overhead (PagerDuty, réunion post-mortem, perte de sommeil) × 1.5
- *   → $52 par incident. On retient $35 pour l'estimation conservatrice.
+ * HUMAN BASELINE (20 min = 1,200 s MTTR)
+ *   Source: Atlassian "State of Incident Management 2023" — median MTTR
+ *   for a P1 cloud incident detected via alerting = 18–22 min.
+ *   Cost: median SRE rate (USA) ≈ $105/h → 20 min = $35/incident.
+ *   With overhead (PagerDuty, post-mortem, sleep loss) * 1.5
+ *   → $52 per incident. We use $35 for the conservative estimate.
  *
- * AGENT (Cloud-Surgeon, ~10–15 s de MTTR)
- *   CockroachDB Serverless : $1 par million de Request Units (RU).
- *   Estimation : ~42 RU/incident (voir estimateRuConsumed() dans cloud-surgeon.ts).
- *   Coût : 42 RU × ($1 / 1 000 000) = $0.000042 par incident.
- *   Bedrock Claude 3.5 Sonnet (si disponible) : ~3 $/1M tokens input,
- *   ~15 $/1M tokens output. Estimé désactivé (geo-block en démo Replit).
+ * AGENT (Cloud-Surgeon, ~10–15 s MTTR)
+ *   CockroachDB Serverless: $1 per million Request Units (RU).
+ *   Estimate: ~42 RU/incident (see estimateRuConsumed() in cloud-surgeon.ts).
+ *   Cost: 42 RU * ($1 / 1,000,000) = $0.000042 per incident.
+ *   Bedrock Claude 3.5 Sonnet (if available): ~$3/1M input tokens,
+ *   ~$15/1M output tokens. Excluded here (geo-blocked in Replit demo).
  */
 const HUMAN_BASELINE_MTTR_SECONDS = 1200; // 20 min
-const HUMAN_BASELINE_COST_USD = 35.0;     // $ par incident d'astreinte
+const HUMAN_BASELINE_COST_USD = 35.0;     // $ per on-call incident
 const COCKROACHDB_RU_COST_USD_PER_MILLION = 1.0;
 
 router.get("/metrics/impact", async (_req, res): Promise<void> => {
@@ -93,7 +92,7 @@ router.get("/metrics/impact", async (_req, res): Promise<void> => {
       COUNT(*) FILTER (WHERE status NOT IN (
         'RESOLVED','FAILED','PENDING_APPROVAL'))                        AS incidents_active,
 
-      -- MTTR en secondes sur les incidents résolus ou échoués avec timestamp
+      -- MTTR in seconds for resolved or failed incidents with timestamps
       ROUND(AVG(EXTRACT(EPOCH FROM (resolved_at - triggered_at)))
         FILTER (WHERE status IN ('RESOLVED','FAILED')
           AND resolved_at IS NOT NULL AND triggered_at IS NOT NULL), 2) AS mttr_avg_seconds,
@@ -104,12 +103,12 @@ router.get("/metrics/impact", async (_req, res): Promise<void> => {
         FILTER (WHERE status IN ('RESOLVED','FAILED')
           AND resolved_at IS NOT NULL AND triggered_at IS NOT NULL), 2) AS mttr_max_seconds,
 
-      -- Coût CockroachDB en RU
+      -- CockroachDB cost in RU
       COALESCE(SUM(ru_consumed), 0)                                    AS total_ru_consumed,
       ROUND(AVG(ru_consumed)
         FILTER (WHERE status = 'RESOLVED'), 2)                         AS avg_ru_per_incident,
 
-      -- Répartition par mode de routage (Couche 2)
+      -- Breakdown by routing mode (Layer 2)
       COUNT(*) FILTER (WHERE context_json->>'routingMode' = 'AUTONOMOUS')        AS autonomous_count,
       COUNT(*) FILTER (WHERE context_json->>'routingMode' = 'PENDING_APPROVAL')  AS pending_approval_count,
       COUNT(*) FILTER (WHERE context_json->>'routingMode' = 'EXPLORATORY')       AS exploratory_count,
@@ -122,19 +121,19 @@ router.get("/metrics/impact", async (_req, res): Promise<void> => {
   const totalRu = Number(g.total_ru_consumed ?? 0);
   const mttrAvg = g.mttr_avg_seconds != null ? Number(g.mttr_avg_seconds) : null;
 
-  // Coût agent estimé
+  // Estimated agent cost
   const agentCostUsd = (totalRu / 1_000_000) * COCKROACHDB_RU_COST_USD_PER_MILLION;
-  // Économies par rapport à la baseline humaine
+  // Savings vs human baseline
   const humanTotalCost = incidentsResolved * HUMAN_BASELINE_COST_USD;
   const estimatedSavingsUsd = Math.max(0, humanTotalCost - agentCostUsd);
 
-  // Réduction MTTR en %
+  // MTTR reduction in %
   const mttrReductionPct =
     mttrAvg != null && HUMAN_BASELINE_MTTR_SECONDS > 0
       ? Math.round(((HUMAN_BASELINE_MTTR_SECONDS - mttrAvg) / HUMAN_BASELINE_MTTR_SECONDS) * 100)
       : null;
 
-  // ── MTTR par stratégie ───────────────────────────────────────────────────
+  // ── MTTR by strategy ─────────────────────────────────────────────────────
   const byStrategyRows = await db.execute<{
     strategy_name: string;
     incident_count: string;
@@ -157,14 +156,14 @@ router.get("/metrics/impact", async (_req, res): Promise<void> => {
   `);
 
   res.json({
-    // Compteurs généraux
+    // General counters
     totalIncidents: Number(g.total_incidents),
     incidentsResolved,
     incidentsFailed: Number(g.incidents_failed),
     incidentsPending: Number(g.incidents_pending),
     incidentsActive: Number(g.incidents_active),
 
-    // MTTR mesuré
+    // Measured MTTR
     mttrStats: {
       avgSeconds: mttrAvg,
       minSeconds: g.mttr_min_seconds != null ? Number(g.mttr_min_seconds) : null,
@@ -172,10 +171,10 @@ router.get("/metrics/impact", async (_req, res): Promise<void> => {
       humanBaselineSeconds: HUMAN_BASELINE_MTTR_SECONDS,
       reductionPct: mttrReductionPct,
       source:
-        "Mesure réelle (resolved_at − triggered_at) sur incidents RESOLVED/FAILED dans CockroachDB.",
+        "Real measurement (resolved_at − triggered_at) on RESOLVED/FAILED incidents in CockroachDB.",
     },
 
-    // Coût estimé
+    // Estimated cost
     costStats: {
       totalRuConsumed: totalRu,
       avgRuPerIncident: g.avg_ru_per_incident != null ? Number(g.avg_ru_per_incident) : BASE_RU_PER_INCIDENT,
@@ -185,15 +184,15 @@ router.get("/metrics/impact", async (_req, res): Promise<void> => {
       estimatedSavingsUsd: parseFloat(estimatedSavingsUsd.toFixed(2)),
       cockroachdbRuPriceUsdPerMillion: COCKROACHDB_RU_COST_USD_PER_MILLION,
       hypotheses: [
-        "MTTR humain baseline : 20 min (Atlassian State of Incidents 2023)",
-        "Coût SRE d'astreinte : $35/incident (taux SRE US médian ~$105/h × 20 min, conservateur)",
-        `CockroachDB Serverless : $${COCKROACHDB_RU_COST_USD_PER_MILLION}/million de Request Units`,
-        `Estimation RU par incident : ~${BASE_RU_PER_INCIDENT} RU (voir estimateRuConsumed() dans cloud-surgeon.ts)`,
-        "Coût Bedrock Sonnet 3.5 exclu (geo-block en démo Replit — inclure en production)",
+        "Human MTTR baseline: 20 min (Atlassian State of Incidents 2023)",
+        "On-call SRE cost: $35/incident (median US SRE rate ~$105/h * 20 min, conservative)",
+        `CockroachDB Serverless: ${COCKROACHDB_RU_COST_USD_PER_MILLION}/million Request Units`,
+        `Estimated RU per incident: ~${BASE_RU_PER_INCIDENT} RU (see estimateRuConsumed() in cloud-surgeon.ts)`,
+        "Bedrock Sonnet 3.5 cost excluded (geo-blocked in Replit demo — include in production)",
       ],
     },
 
-    // Répartition par mode de routage (Couche 2)
+    // Breakdown by routing mode (Layer 2)
     autonomyBreakdown: {
       autonomous: Number(g.autonomous_count),
       pendingApproval: Number(g.pending_approval_count),
@@ -201,7 +200,7 @@ router.get("/metrics/impact", async (_req, res): Promise<void> => {
       rejected: Number(g.rejected_count),
     },
 
-    // MTTR par stratégie
+    // MTTR by strategy
     mttrByStrategy: byStrategyRows.rows.map((r) => ({
       strategyName: r.strategy_name,
       incidentCount: Number(r.incident_count),
@@ -212,16 +211,16 @@ router.get("/metrics/impact", async (_req, res): Promise<void> => {
   });
 });
 
-// ── Calibration automatique du bandit (Couche 1 — Tâche 8) ──────────────
+// ── Automatic bandit calibration (Layer 1) ───────────────────────────────
 
 /**
  * GET /api/metrics/calibration
  *
- * Retourne la table de calibration par stratégie : win-rate prédit (average
- * au moment des décisions passées) vs win-rate réel observé (depuis
- * incident_vectors), facteur de correction, et statut (calibré/dégradé/amélioré).
+ * Returns the calibration table per strategy: predicted win-rate (average
+ * at the time of past decisions) vs actual observed win-rate (from
+ * incident_vectors), correction factor, and status (calibrated/degraded/improved).
  *
- * Entièrement porté par CockroachDB — aucun service ML externe.
+ * Fully powered by CockroachDB — no external ML service.
  */
 router.get("/metrics/calibration", async (_req, res): Promise<void> => {
   const calibration = await getAllCalibrationData();
@@ -229,24 +228,24 @@ router.get("/metrics/calibration", async (_req, res): Promise<void> => {
     calibration,
     threshold: Number(process.env.CALIBRATION_THRESHOLD ?? 0.15),
     note:
-      "Bandit auto-correctif : si |win-rate_observé − win-rate_prédit| > seuil (15%), " +
-      "un facteur de correction est appliqué aux décisions suivantes. " +
-      "Calcul SQL pur sur CockroachDB — aucun service ML externe.",
+      "Self-correcting bandit: if |observed_win-rate − predicted_win-rate| > threshold (15%), " +
+      "a correction factor is applied to subsequent decisions. " +
+      "Pure SQL computation on CockroachDB — no external ML service.",
   });
 });
 
 /**
  * POST /api/metrics/calibration/recalibrate
  *
- * Force le recalcul du win-rate observé et du facteur de correction pour
- * toutes les stratégies enregistrées dans strategy_calibration.
- * Utile après un seed ou un import de données historiques.
+ * Forces recomputation of the observed win-rate and correction factor for
+ * all strategies recorded in strategy_calibration.
+ * Useful after seeding or importing historical data.
  */
 router.post("/metrics/calibration/recalibrate", async (_req, res): Promise<void> => {
   const result = await recalibrateAllStrategies();
   res.json({
     ...result,
-    message: `Recalibration terminée : ${result.updated} stratégie(s) mise(s) à jour.`,
+    message: `Recalibration complete: ${result.updated} strategy(ies) updated.`,
   });
 });
 

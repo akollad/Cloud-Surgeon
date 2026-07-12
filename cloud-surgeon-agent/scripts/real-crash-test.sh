@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# Test de résilience à un VRAI crash de process (SIGKILL), pas un early
-# return simulé dans le même appel HTTP.
+# Resilience test against a REAL process crash (SIGKILL), not an early
+# return simulated within the same HTTP call.
 #
-# Étapes :
-#   1. Active CLOUD_SURGEON_CRASH_TEST_DELAY_MS (pause entre les tours de
-#      l'agent, après écriture en base) et redémarre le serveur API.
-#   2. Envoie un déclenchement d'incident en tâche de fond.
-#   3. Attend que le tour 0 soit écrit en base, puis SIGKILL le process
-#      Node du serveur API en pleine exécution — un vrai crash, pas un
-#      arrêt propre.
-#   4. Vérifie que le process est bien mort (aucune réponse HTTP).
-#   5. Redémarre le serveur (comme le ferait un orchestrateur Lambda/ECS
-#      après un crash) et renvoie la même requête de déclenchement.
-#   6. Vérifie que l'incident reprend exactement au tour suivant (pas de
-#      duplication du tour 0) et se termine RESOLVED.
+# Steps:
+#   1. Enables CLOUD_SURGEON_CRASH_TEST_DELAY_MS (pause between agent turns
+#      after writing to the DB) and restarts the API server.
+#   2. Sends an incident trigger in the background.
+#   3. Waits for turn 0 to be written to the DB, then SIGKILLs the
+#      Node process of the API server mid-execution — a real crash, not a
+#      clean shutdown.
+#   4. Verifies that the process is dead (no HTTP response).
+#   5. Restarts the server (as a Lambda/ECS orchestrator would after a crash)
+#      and re-sends the same trigger request.
+#   6. Verifies that the incident resumes at the next turn (no duplication
+#      of turn 0) and finishes RESOLVED.
 #
 # Usage: ./real-crash-test.sh <API_BASE_URL> <API_KEY>
 set -euo pipefail
@@ -22,9 +22,9 @@ API_BASE_URL="${1:-http://localhost:80/api}"
 API_KEY="${2:?Usage: real-crash-test.sh <API_BASE_URL> <API_KEY>}"
 ALERT_TEXT="Real crash test $(date +%s)"
 
-echo "== [1/6] Alerte de test: $ALERT_TEXT"
+echo "== [1/6] Test alert: $ALERT_TEXT"
 
-echo "== [2/6] Déclenchement de l'incident en tâche de fond..."
+echo "== [2/6] Triggering incident in the background..."
 curl -s -X POST "$API_BASE_URL/incidents/trigger" \
   -H "x-api-key: $API_KEY" -H 'Content-Type: application/json' \
   -d "{\"alertText\":\"$ALERT_TEXT\",\"simulateCrash\":false}" > /tmp/crash-test-response.json &
@@ -32,35 +32,35 @@ CURL_PID=$!
 
 sleep 1.5
 
-echo "== [3/6] Recherche du process serveur API et SIGKILL réel..."
+echo "== [3/6] Finding API server process and sending real SIGKILL..."
 NODE_PID=$(pgrep -f "dist/index.mjs" | head -n1 || true)
 if [ -z "$NODE_PID" ]; then
-  echo "ERREUR: process dist/index.mjs introuvable" >&2
+  echo "ERROR: dist/index.mjs process not found" >&2
   exit 1
 fi
 kill -9 "$NODE_PID"
-echo "   Process $NODE_PID tué avec SIGKILL."
+echo "   Process $NODE_PID killed with SIGKILL."
 
 wait "$CURL_PID" 2>/dev/null || true
 
-echo "== [4/6] Vérification que le serveur ne répond plus..."
+echo "== [4/6] Verifying that the server is no longer responding..."
 if curl -s -o /dev/null -w "%{http_code}" --max-time 2 "$API_BASE_URL/healthz" 2>/dev/null | grep -q "200"; then
-  echo "ERREUR: le serveur répond encore après SIGKILL" >&2
+  echo "ERROR: server still responding after SIGKILL" >&2
   exit 1
 fi
-echo "   Confirmé: serveur bien mort."
+echo "   Confirmed: server is dead."
 
-echo "== [5/6] Redémarrage requis maintenant."
-echo "   Ce script ne peut pas redémarrer le workflow Replit lui-même"
-echo "   (c'est un contrôle plateforme, pas une commande shell). Redémarre"
-echo "   'artifacts/api-server: API Server' maintenant, puis appuie sur Entrée."
+echo "== [5/6] Restart required now."
+echo "   This script cannot restart the Replit workflow itself"
+echo "   (it is a platform control, not a shell command). Restart"
+echo "   'artifacts/api-server: API Server' now, then press Enter."
 read -r _
 
-echo "== [6/6] Renvoi de la même alerte pour vérifier la reprise..."
+echo "== [6/6] Re-sending the same alert to verify resumption..."
 RESUME=$(curl -s -X POST "$API_BASE_URL/incidents/trigger" \
   -H "x-api-key: $API_KEY" -H 'Content-Type: application/json' \
   -d "{\"alertText\":\"$ALERT_TEXT\",\"simulateCrash\":false}")
 echo "$RESUME"
 
-echo "$RESUME" | grep -q '"status":"RESOLVED"' && echo "OK: incident résolu après reprise post-crash réel." \
-  || { echo "ERREUR: incident non résolu après reprise" >&2; exit 1; }
+echo "$RESUME" | grep -q '"status":"RESOLVED"' && echo "OK: incident resolved after real post-crash resumption." \
+  || { echo "ERROR: incident not resolved after resumption" >&2; exit 1; }

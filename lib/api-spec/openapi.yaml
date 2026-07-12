@@ -139,7 +139,7 @@ components:
           type: integer
         agent:
           type: string
-          description: Nom de l'agent ayant exécuté ce tour (diagnostician/remediator/auditor)
+          description: Name of the agent that executed this turn (diagnostician/remediator/auditor)
         thought:
           type: string
         thoughtSource:
@@ -160,29 +160,29 @@ components:
           type: string
         strategyName:
           type: string
-          description: Stratégie de réparation détectée/choisie pour cet incident
-        # Couche 2 — décision de routage
+          description: Repair strategy detected/chosen for this incident
+        # Layer 2 — routing decision
         routingMode:
           type: string
           enum: [AUTONOMOUS, PENDING_APPROVAL, EXPLORATORY, REJECTED]
-          description: Mode de routage décidé par la Couche 2 (mémoire → confiance → action)
+          description: Routing mode decided by Layer 2 (memory -> confidence -> action)
         routingDecisionComputed:
           type: boolean
         ragScore:
           type: number
           nullable: true
-          description: Distance cosinus RAG (0 = identique, 1 = opposé)
+          description: RAG cosine distance (0 = identical, 1 = opposite)
         ragStrategyHint:
           type: string
           nullable: true
-          description: Stratégie de l'incident le plus similaire dans la mémoire vectorielle
+          description: Strategy from the most similar incident in the vector memory
         winRate:
           type: number
           nullable: true
-          description: Taux de succès historique de la stratégie (0–1)
+          description: Historical success rate for the strategy (0-1)
         winRateSampleSize:
           type: integer
-          description: Nombre de samples ayant servi au calcul du win-rate
+          description: Number of samples used to compute the win-rate
         turns:
           type: array
           items:
@@ -219,11 +219,11 @@ components:
         claimedByAgent:
           type: string
           nullable: true
-          description: Agent ayant réclamé cet incident via transaction sérialisable
+          description: Agent that claimed this incident via serializable transaction
         causedByIncidentId:
           type: string
           nullable: true
-          description: Incident parent dans la chaîne causale (CTE récursive)
+          description: Parent incident in the causal chain (recursive CTE)
         updatedAt:
           type: string
           format: date-time

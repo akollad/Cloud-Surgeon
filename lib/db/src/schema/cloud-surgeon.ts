@@ -33,9 +33,9 @@ const vector1024 = customType<{ data: number[]; driverData: string }>({
   },
 });
 
-// Cœur de la résilience : une ligne par incident unique (déduplication par
-// alertFingerprint). contextJson contient l'historique complet des tours de
-// l'agent afin qu'il puisse reprendre exactement où il s'est arrêté.
+// Core of resilience: one row per unique incident (deduplicated by
+// alertFingerprint). contextJson holds the full agent turn history so it
+// can resume exactly where it left off.
 export const incidentStateTable = pgTable("incident_state", {
   incidentId: uuid("incident_id").primaryKey().defaultRandom(),
   alertFingerprint: varchar("alert_fingerprint", { length: 255 })
@@ -44,23 +44,23 @@ export const incidentStateTable = pgTable("incident_state", {
   status: varchar("status", { length: 50 }).notNull().default("TRIGGERED"),
   currentStep: varchar("current_step", { length: 100 }),
   contextJson: jsonb("context_json").notNull().default({}),
-  // Coordination multi-agents : quel agent (diagnostician/remediator/auditor)
-  // détient actuellement le droit d'écrire sur cet incident. Réclamé et
-  // libéré via une transaction CockroachDB (voir claimIncidentForAgent).
+  // Multi-agent coordination: which agent (diagnostician/remediator/auditor)
+  // currently holds the write lock on this incident. Claimed and released
+  // via a CockroachDB transaction (see claimIncidentForAgent).
   claimedByAgent: varchar("claimed_by_agent", { length: 50 }),
-  // Chaînage causal : cet incident a-t-il été déclenché en réaction à un
-  // autre incident déjà résolu ? Auto-référence traversable par une CTE
-  // récursive (WITH RECURSIVE) pour reconstruire une chaîne causale.
+  // Causal chaining: was this incident triggered as a side effect of another
+  // already-resolved incident? Self-reference traversable by a recursive CTE
+  // (WITH RECURSIVE) to reconstruct a causal chain.
   causedByIncidentId: uuid("caused_by_incident_id"),
-  // MTTR et coût par incident (Tâche 5)
-  // triggeredAt : timestamp d'arrivée de l'alerte (immutable après INSERT)
+  // MTTR and cost per incident
+  // triggeredAt: alert arrival timestamp (immutable after INSERT)
   triggeredAt: timestamp("triggered_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
-  // resolvedAt : mis à jour quand le statut passe à RESOLVED ou FAILED
+  // resolvedAt: updated when status transitions to RESOLVED or FAILED
   resolvedAt: timestamp("resolved_at", { withTimezone: true }),
-  // ruConsumed : estimation des CockroachDB Request Units consommées par
-  // cet incident (lecture + écriture + vecteur ANN + transactions sérialisables)
+  // ruConsumed: estimated CockroachDB Request Units consumed by this incident
+  // (reads + writes + ANN vector search + serializable transactions)
   ruConsumed: integer("ru_consumed").notNull().default(0),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()
@@ -74,12 +74,11 @@ export const insertIncidentStateSchema = createInsertSchema(
 export type InsertIncidentState = z.infer<typeof insertIncidentStateSchema>;
 export type IncidentState = typeof incidentStateTable.$inferSelect;
 
-// Base de connaissance RAG : messages d'erreur déjà résolus, vectorisés
-// (dimension 1024, comme Amazon Titan Text Embeddings V2). Chaque ligne
-// porte aussi le nom de la stratégie de résolution employée et si elle a
-// réussi, pour calculer un taux de succès par stratégie via une simple
-// agrégation SQL (un bandit contextuel appuyé sur CockroachDB, pas un
-// service ML externe).
+// RAG knowledge base: resolved error messages, vectorized at 1024 dimensions
+// (matching Amazon Titan Text Embeddings V2). Each row also carries the
+// resolution strategy used and whether it succeeded, enabling per-strategy
+// success-rate computation via a simple SQL aggregation (a contextual bandit
+// backed by CockroachDB, no external ML service).
 export const incidentVectorsTable = pgTable("incident_vectors", {
   vectorId: uuid("vector_id").primaryKey().defaultRandom(),
   incidentId: uuid("incident_id").references(
@@ -91,14 +90,14 @@ export const incidentVectorsTable = pgTable("incident_vectors", {
     .notNull()
     .default("default_repair"),
   outcomeSuccess: boolean("outcome_success").notNull().default(true),
-  // Tâche 9 — feedback humain :
-  // "outcome" = signal automatique (résolution/échec de l'incident)
-  // "human"   = signal issu d'une décision humaine (rejet ou correction)
+  // Human feedback signal source:
+  // "outcome" = automatic signal (incident resolution/failure)
+  // "human"   = signal from a human decision (rejection or correction)
   signalSource: varchar("signal_source", { length: 10 })
     .notNull()
     .default("outcome"),
-  // Pondération du signal : 1.0 pour les outcomes automatiques,
-  // 0.5 pour les signaux humains (moins de certitude qu'un vrai résultat).
+  // Signal weight: 1.0 for automatic outcomes,
+  // 0.5 for human signals (less certainty than a real outcome).
   weight: doublePrecision("weight").notNull().default(1.0),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
@@ -107,12 +106,11 @@ export const incidentVectorsTable = pgTable("incident_vectors", {
 
 export type IncidentVector = typeof incidentVectorsTable.$inferSelect;
 
-// Traçabilité des passations entre agents spécialisés (Diagnostician,
-// Remediator, Auditor) : chaque réclamation/libération d'un incident est
-// journalisée, avec le mode de décision retenu par le Remediator
-// (autonomous / needs_approval / cautious) selon le score de similarité
-// RAG. C'est la preuve que la mémoire vectorielle influence une vraie
-// décision, pas seulement un affichage.
+// Traceability of handoffs between specialized agents (Diagnostician,
+// Remediator, Auditor): each claim/release of an incident is logged,
+// along with the decision mode chosen by the Remediator
+// (autonomous / needs_approval / cautious) based on the RAG similarity score.
+// This proves that the vector memory influences a real decision, not just a display.
 export const agentHandoffsTable = pgTable("agent_handoffs", {
   handoffId: uuid("handoff_id").primaryKey().defaultRandom(),
   incidentId: uuid("incident_id")
@@ -128,7 +126,7 @@ export const agentHandoffsTable = pgTable("agent_handoffs", {
 
 export type AgentHandoff = typeof agentHandoffsTable.$inferSelect;
 
-// Journal chronologique immuable de chaque action tentée par l'agent.
+// Immutable chronological journal of every action attempted by the agent.
 export const executionLogsTable = pgTable("execution_logs", {
   logId: uuid("log_id").primaryKey().defaultRandom(),
   incidentId: uuid("incident_id")
@@ -144,39 +142,39 @@ export const executionLogsTable = pgTable("execution_logs", {
 export type ExecutionLog = typeof executionLogsTable.$inferSelect;
 
 /**
- * Calibration automatique des stratégies (Couche 1 — bandit auto-correctif)
+ * Automatic strategy calibration (Layer 1 — self-correcting bandit)
  *
- * Une ligne par stratégie. Enregistre :
- *  - avgPredictedWinRate : moyenne glissante des win-rates prédits au moment
- *    de chaque décision de routage (ce qu'on croyait qu'allait se passer)
- *  - observedWinRate : win-rate réel calculé depuis incident_vectors
- *    (ce qui s'est réellement passé, mis à jour après chaque incident résolu)
- *  - correctionFactor : facteur multiplicatif appliqué au win-rate brut dans
- *    les décisions futures. 1.0 = neutre ; < 1 = dégradé ; > 1 = promu.
- *    Activé quand |observed − predicted| > 15%.
+ * One row per strategy. Records:
+ *  - avgPredictedWinRate: rolling average of win-rates predicted at the time of
+ *    each routing decision (what we believed would happen)
+ *  - observedWinRate: actual win-rate computed from incident_vectors
+ *    (what actually happened, updated after each resolved incident)
+ *  - correctionFactor: multiplicative factor applied to the raw win-rate in
+ *    future decisions. 1.0 = neutral; < 1 = demoted; > 1 = promoted.
+ *    Activated when |observed - predicted| > 15%.
  *
- * Entièrement porté par CockroachDB — aucun service ML externe.
+ * Entirely backed by CockroachDB — no external ML service.
  */
 export const strategyCalibrationTable = pgTable("strategy_calibration", {
   strategyName: varchar("strategy_name", { length: 100 }).primaryKey(),
-  /** Moyenne glissante pondérée du win-rate prédit à chaque décision. */
+  /** Weighted rolling average of the win-rate predicted at each decision. */
   avgPredictedWinRate: doublePrecision("avg_predicted_win_rate").notNull().default(0.5),
-  /** Win-rate réel observé (recalculé depuis incident_vectors). NULL si aucune donnée. */
+  /** Actual observed win-rate (recomputed from incident_vectors). NULL if no data yet. */
   observedWinRate: doublePrecision("observed_win_rate"),
   /**
-   * Facteur de correction appliqué au win-rate brut lors des décisions suivantes.
-   * = observed / predicted si |écart| > seuil (15%), sinon 1.0.
-   * Borné à [0.1 ; 1.5].
+   * Correction factor applied to the raw win-rate in subsequent decisions.
+   * = observed / predicted if |gap| > threshold (15%), otherwise 1.0.
+   * Clamped to [0.1; 1.5].
    */
   correctionFactor: doublePrecision("correction_factor").notNull().default(1.0),
-  /** Nombre de décisions enregistrées pour cette stratégie. */
+  /** Number of decisions recorded for this strategy. */
   predictionCount: integer("prediction_count").notNull().default(0),
   /**
-   * Nombre cumulé de signaux humains reçus pour cette stratégie
-   * (rejets + corrections). Chaque signal humain pèse 0.5 dans le win-rate
-   * au lieu de 1.0 pour un outcome automatique — la mémoire reste prudente
-   * sur les jugements humains qui peuvent refléter des préférences, pas
-   * seulement la performance technique de la stratégie.
+   * Cumulative count of human signals received for this strategy
+   * (rejections + corrections). Each human signal counts as 0.5 in the win-rate
+   * instead of 1.0 for an automatic outcome — the memory stays cautious about
+   * human judgments that may reflect preferences, not just the technical
+   * performance of the strategy.
    */
   humanSignalCount: integer("human_signal_count").notNull().default(0),
   lastRecalculatedAt: timestamp("last_recalculated_at", { withTimezone: true })

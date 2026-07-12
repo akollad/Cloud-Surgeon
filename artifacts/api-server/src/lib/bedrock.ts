@@ -5,22 +5,21 @@ import {
 import { logger } from "./logger";
 
 // ----------------------------------------------------------------------------
-// Vrai appel à Amazon Bedrock (Claude 3.5 Haiku) pour générer le
-// raisonnement ("thought") de chaque tour de l'agent, à la place du texte
-// français figé. Le choix de l'outil et son exécution restent déterministes
-// (voir cloud-surgeon.ts) — seule la partie "réflexion" est déléguée à un
-// vrai LLM, ce qui est déjà suffisant pour prouver l'appel Bedrock réel sans
-// rendre la démo imprévisible ou dangereuse.
+// Real Amazon Bedrock call (Claude Haiku 4.5) to generate the "thought"
+// reasoning for each agent turn, replacing static hardcoded text. Tool
+// choice and execution remain deterministic (see cloud-surgeon.ts) — only
+// the "reflection" part is delegated to a real LLM, which is sufficient to
+// prove a real Bedrock call without making the demo unpredictable or unsafe.
 //
-// Si AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY ne sont pas configurées, ou si
-// l'appel échoue (ex: accès au modèle non activé dans la console Bedrock),
-// on renvoie `null` et l'appelant retombe sur le texte simulé — de façon
-// transparente, jamais silencieuse (voir le champ `thoughtSource`).
+// If AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY are not configured, or if the
+// call fails (e.g. model access not enabled in the Bedrock console), we
+// return `null` and the caller falls back to simulated text — transparently,
+// never silently (see the `thoughtSource` field).
 // ----------------------------------------------------------------------------
 
-// Claude 3.5 Haiku a été retiré du service ; Claude Haiku 4.5 n'est
-// disponible qu'en "inference profile" (pas d'invocation on-demand directe
-// par modelId brut), donc on utilise l'ID de profil global.
+// Claude 3.5 Haiku was retired; Claude Haiku 4.5 is only available as an
+// "inference profile" (no direct on-demand invocation via raw modelId),
+// so we use the global profile ID.
 const MODEL_ID = "global.anthropic.claude-haiku-4-5-20251001-v1:0";
 
 let client: BedrockRuntimeClient | null = null;
@@ -47,10 +46,10 @@ export async function invokeBedrockThought(
 
   const prompt =
     turnIndex === 0
-      ? `Tu es un agent DevOps autonome. Une alerte d'infrastructure vient d'arriver : "${alertText}". ` +
-        `En une phrase en français, explique ton raisonnement pour décider de vérifier l'état du cluster avant toute action corrective.`
-      : `Tu es un agent DevOps autonome. Après diagnostic (résultat: ${JSON.stringify(priorToolOutput)}), ` +
-        `en une phrase en français, explique ton raisonnement pour décider de déclencher une action de réparation.`;
+      ? `You are an autonomous DevOps agent. An infrastructure alert just arrived: "${alertText}". ` +
+        `In one sentence, explain your reasoning for deciding to check cluster state before any corrective action.`
+      : `You are an autonomous DevOps agent. After diagnostic (result: ${JSON.stringify(priorToolOutput)}), ` +
+        `in one sentence, explain your reasoning for deciding to trigger a repair action.`;
 
   try {
     const command = new InvokeModelCommand({

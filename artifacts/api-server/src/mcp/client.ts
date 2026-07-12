@@ -5,24 +5,23 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { logger } from "../lib/logger";
 
 // ----------------------------------------------------------------------------
-// Client MCP : lance le serveur d'outils (mcp/server.ts, compilé en
-// dist/mcp-server.mjs) comme sous-processus et lui parle en JSON-RPC sur
-// stdio, exactement comme le ferait un client Claude Desktop ou une Lambda
-// utilisant Bedrock AgentCore. L'agent (cloud-surgeon.ts) n'appelle plus
-// jamais une fonction TypeScript locale directement : il passe par ce
-// protocole standard, ce qui permettrait de brancher le même serveur MCP à
-// n'importe quel autre client compatible sans rien changer côté outils.
+// MCP Client: launches the tools server (mcp/server.ts, compiled to
+// dist/mcp/server.mjs) as a subprocess and communicates with it via JSON-RPC
+// over stdio, exactly as a Claude Desktop client or a Lambda using Bedrock
+// AgentCore would. The agent (cloud-surgeon.ts) never calls a local TypeScript
+// function directly: it goes through this standard protocol, which means the
+// same MCP server could be plugged into any compatible client with no changes
+// on the tools side.
 // ----------------------------------------------------------------------------
 
 let clientPromise: Promise<Client> | null = null;
 
 function resolveServerEntry(): string {
-  // Ce fichier est bundlé DANS dist/index.mjs par esbuild (il n'existe pas
-  // en tant que module séparé à l'exécution), donc `import.meta.url` ici
-  // pointe vers dist/index.mjs, pas vers un dist/mcp/client.mjs qui
-  // n'existe pas. Le serveur MCP, lui, est un entry point esbuild à part
-  // qui préserve l'arborescence src/ -> il finit toujours à côté, en
-  // dist/mcp/server.mjs.
+  // This file is bundled INSIDE dist/index.mjs by esbuild (it does not exist
+  // as a separate module at runtime), so `import.meta.url` here points to
+  // dist/index.mjs, not to a dist/mcp/client.mjs that doesn't exist.
+  // The MCP server is a separate esbuild entry point that preserves the
+  // src/ tree → it always ends up at dist/mcp/server.mjs.
   const distDir = path.dirname(fileURLToPath(import.meta.url));
   return path.resolve(distDir, "mcp", "server.mjs");
 }

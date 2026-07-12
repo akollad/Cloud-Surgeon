@@ -1,15 +1,14 @@
 /**
- * Seed de la mémoire vectorielle
+ * Vector memory seed
  *
- * Insère des incidents synthétiques (un par scénario connu) dans
- * `incident_vectors` pour que le RAG de la Couche 1 ait une base de
- * connaissance dès le premier démarrage. Sans ce seed, tous les nouveaux
- * incidents sont routés en mode EXPLORATORY jusqu'à ce qu'un premier
- * incident réel soit résolu et indexé.
+ * Inserts synthetic incidents (one per known scenario) into
+ * `incident_vectors` so that the Layer 1 RAG has a knowledge base
+ * from the very first startup. Without this seed, all new incidents are
+ * routed in EXPLORATORY mode until a first real incident is resolved and indexed.
  *
- * Chaque entrée seed a `outcome_success = true` et reflète la stratégie
- * nominale pour ce type d'incident. Les entrées seed n'ont pas d'incident_id
- * source (elles ne proviennent pas d'un incident concret résolu).
+ * Each seed entry has `outcome_success = true` and reflects the nominal
+ * strategy for that incident type. Seed entries have no source incident_id
+ * (they do not originate from a concrete resolved incident).
  */
 
 import { sql } from "drizzle-orm";
@@ -55,19 +54,19 @@ const SEED_INCIDENTS: Array<{ text: string; strategy: string }> = [
   },
 ];
 
-/** Marqueur process-level : évite de re-vérifier la DB à chaque démarrage. */
+/** Process-level flag: avoids re-checking the DB on every startup. */
 let seeded = false;
 
 /**
- * Vérifie si la mémoire vectorielle contient déjà des entrées seed (identifiées
- * par strategy_name != 'default_repair' et incident_id IS NULL), et si non,
- * insère les incidents synthétiques via SQL direct.
- * Appeler au démarrage du serveur — idempotent.
+ * Checks whether the vector memory already contains seed entries (identified
+ * by strategy_name != 'default_repair' and incident_id IS NULL), and if not,
+ * inserts synthetic incidents via direct SQL.
+ * Call at server startup — idempotent.
  */
 export async function seedVectorMemory(): Promise<{ seeded: boolean; count: number }> {
   if (seeded) return { seeded: false, count: 0 };
 
-  // Compter les entrées seed non-default (= vraies entrées de seed S2)
+  // Count non-default seed entries (= real seed entries)
   const countResult = await db.execute<{ n: string }>(sql`
     SELECT COUNT(*) AS n
     FROM incident_vectors
@@ -81,8 +80,8 @@ export async function seedVectorMemory(): Promise<{ seeded: boolean; count: numb
     return { seeded: false, count: existingSeeds };
   }
 
-  // Insérer via SQL direct pour éviter tout problème avec les types Drizzle
-  // sur les colonnes nullable UUID (incident_id).
+  // Insert via direct SQL to avoid any issues with Drizzle types
+  // on nullable UUID columns (incident_id).
   for (const s of SEED_INCIDENTS) {
     const embedding = await generateEmbedding(s.text);
     const embeddingLiteral = `[${embedding.join(",")}]`;

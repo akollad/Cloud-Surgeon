@@ -1,17 +1,17 @@
 /**
  * Webhook CloudWatch/SNS → Cloud-Surgeon
  *
- * Point d'entrée réel pour les alertes AWS CloudWatch acheminées via SNS.
- * Accepte deux formats :
- *   1. Le corps brut d'un message SNS HTTP (champ `Message` contenant le JSON
- *      de l'alarme CloudWatch sérialisé en string).
- *   2. Le JSON d'une alarme CloudWatch directement (format API Gateway proxy).
+ * Real entry point for AWS CloudWatch alerts routed via SNS.
+ * Accepts two formats:
+ *   1. The raw body of an SNS HTTP message (field `Message` containing the
+ *      CloudWatch alarm JSON serialized as a string).
+ *   2. CloudWatch alarm JSON directly (API Gateway proxy format).
  *
- * Extrait `AlarmName` + `NewStateReason` pour construire l'alertText, puis
- * crée ou reprend un incident via le même chemin que /incidents/trigger —
- * preuve que l'intégration dans un vrai pipeline d'ops n'est pas fictive.
+ * Extracts `AlarmName` + `NewStateReason` to build the alertText, then
+ * creates or resumes an incident via the same path as /incidents/trigger —
+ * proof that integration into a real ops pipeline is not fictional.
  *
- * Exemple de corps SNS :
+ * Example SNS body:
  * {
  *   "Type": "Notification",
  *   "TopicArn": "arn:aws:sns:us-east-1:...",
@@ -27,9 +27,9 @@ import { db, executionLogsTable } from "@workspace/db";
 
 const router: IRouter = Router();
 
-// ── Schémas de validation ─────────────────────────────────────────────────
+// ── Validation schemas ────────────────────────────────────────────────────
 
-// Corps d'une alarme CloudWatch (format direct ou désérialisé depuis SNS)
+// Body of a CloudWatch alarm (direct format or deserialized from SNS)
 const CloudWatchAlarmBody = z.object({
   AlarmName: z.string().min(1),
   NewStateValue: z.string().optional(),
@@ -39,7 +39,7 @@ const CloudWatchAlarmBody = z.object({
   Region: z.string().optional(),
 });
 
-// Corps d'une notification SNS (Message = JSON stringifié de l'alarme)
+// Body of an SNS notification (Message = JSON-stringified alarm)
 const SnsNotificationBody = z.object({
   Type: z.literal("Notification"),
   Message: z.string(),
@@ -47,7 +47,7 @@ const SnsNotificationBody = z.object({
   Subject: z.string().optional(),
 });
 
-// Confirmation d'abonnement SNS — à valider manuellement en production
+// SNS subscription confirmation — must be validated manually in production
 const SnsSubscriptionConfirmation = z.object({
   Type: z.literal("SubscriptionConfirmation"),
   SubscribeURL: z.string(),
@@ -60,7 +60,7 @@ const SnsSubscriptionConfirmation = z.object({
 router.post("/webhook/cloudwatch", async (req, res): Promise<void> => {
   const body = req.body as Record<string, unknown>;
 
-  // Confirmation d'abonnement SNS (premier appel lors de la configuration)
+  // SNS subscription confirmation (first call during setup)
   const subConfirm = SnsSubscriptionConfirmation.safeParse(body);
   if (subConfirm.success) {
     req.log.info(
@@ -74,10 +74,10 @@ router.post("/webhook/cloudwatch", async (req, res): Promise<void> => {
     return;
   }
 
-  // Extraire le corps de l'alarme CloudWatch
+  // Extract the CloudWatch alarm body
   let alarmBody: z.infer<typeof CloudWatchAlarmBody> | null = null;
 
-  // Cas 1 : notification SNS encapsulant l'alarme dans `Message` (string JSON)
+  // Case 1: SNS notification wrapping the alarm in `Message` (JSON string)
   const snsNotif = SnsNotificationBody.safeParse(body);
   if (snsNotif.success) {
     try {
@@ -85,11 +85,11 @@ router.post("/webhook/cloudwatch", async (req, res): Promise<void> => {
       const alarm = CloudWatchAlarmBody.safeParse(parsed);
       if (alarm.success) alarmBody = alarm.data;
     } catch {
-      // Message non-JSON → traité comme corps direct
+      // Non-JSON message → treated as direct body
     }
   }
 
-  // Cas 2 : corps CloudWatch direct (API Gateway proxy ou test manuel)
+  // Case 2: direct CloudWatch body (API Gateway proxy or manual test)
   if (!alarmBody) {
     const direct = CloudWatchAlarmBody.safeParse(body);
     if (direct.success) alarmBody = direct.data;
@@ -98,13 +98,13 @@ router.post("/webhook/cloudwatch", async (req, res): Promise<void> => {
   if (!alarmBody) {
     res.status(400).json({
       error:
-        "Corps invalide : attendu un message SNS (champ Type=Notification + Message) " +
-        "ou un corps d'alarme CloudWatch direct (champ AlarmName requis).",
+        "Invalid body: expected an SNS message (Type=Notification + Message fields) " +
+        "or a direct CloudWatch alarm body (AlarmName field required).",
     });
     return;
   }
 
-  // Construire l'alertText à partir des champs CloudWatch
+  // Build alertText from CloudWatch fields
   const rawAlertText = [
     `CloudWatch ALARM: ${alarmBody.AlarmName}`,
     alarmBody.NewStateValue ? `State: ${alarmBody.NewStateValue}` : null,
@@ -114,9 +114,9 @@ router.post("/webhook/cloudwatch", async (req, res): Promise<void> => {
     .filter(Boolean)
     .join(" | ");
 
-  // ── Défense contre l'injection de prompt ─────────────────────────────
-  // Les champs SNS/CloudWatch peuvent être contrôlés par un attaquant ayant
-  // accès au compte AWS ou interceptant la notification SNS en transit.
+  // ── Prompt injection defense ─────────────────────────────────────────
+  // SNS/CloudWatch fields can be controlled by an attacker with
+  // AWS account access or intercepting the SNS notification in transit.
   const validation = validateAlertText(rawAlertText);
   if (!validation.ok) {
     req.log.warn({ reason: validation.error }, "Prompt injection guard: webhook hard-rejected");
@@ -157,8 +157,8 @@ router.post("/webhook/cloudwatch", async (req, res): Promise<void> => {
     }
   }
 
-  // Exécution asynchrone : on répond 202 immédiatement et laisse l'agent
-  // travailler en background — cohérent avec le modèle Lambda (async invoke).
+  // Async execution: respond 202 immediately and let the agent
+  // work in the background — consistent with the Lambda async invoke model.
   res.status(202).json({
     incidentId: incident.incidentId,
     alertFingerprint: incident.alertFingerprint,
@@ -168,7 +168,7 @@ router.post("/webhook/cloudwatch", async (req, res): Promise<void> => {
       : "Incident received, agent loop started asynchronously.",
   });
 
-  // Lancement asynchrone post-réponse (fire-and-forget, comme SNS → Lambda)
+  // Async fire-and-forget post-response (like SNS → Lambda)
   if (!alreadyTerminal) {
     runAgentLoop(incident, alertText, false).catch((err: unknown) => {
       req.log.error({ err, incidentId: incident.incidentId }, "Async agent loop failed");

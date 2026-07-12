@@ -16,11 +16,11 @@ import { generateEmbedding } from "./embeddings";
 import { type ChaosConfig, ChaosPartitionError, injectChaos, sleep as chaosSleep } from "./chaos";
 
 // ============================================================================
-// Cloud-Surgeon — Architecture à 3 couches
+// Cloud-Surgeon — 3-Layer Architecture
 //
-// Couche 1 : Mémoire causale et évaluée (RAG vectoriel + win-rate par stratégie)
-// Couche 2 : La mémoire décide (routage AUTONOMOUS / PENDING_APPROVAL / EXPLORATORY)
-// Couche 3 : Coordination multi-agents via transactions sérialisables CockroachDB
+// Layer 1: Causal and evaluated memory (vector RAG + SQL win-rate per strategy)
+// Layer 2: Memory decides (AUTONOMOUS / PENDING_APPROVAL / EXPLORATORY routing)
+// Layer 3: Multi-agent coordination via CockroachDB serializable transactions
 // ============================================================================
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -41,30 +41,30 @@ interface AgentTurn {
 export interface IncidentContext {
   alertText?: string;
   strategyName?: string;
-  // Couche 2 : décision de routage et données ayant conduit à la décision
+  // Layer 2: routing decision and data that led to the decision
   routingMode?: RoutingMode;
   routingDecisionComputed?: boolean;
-  ragScore?: number | null;         // distance cosinus (0 = identique, 1 = opposé)
-  ragStrategyHint?: string | null;  // stratégie de l'incident le plus similaire
-  winRate?: number | null;          // win-rate brut historique de la stratégie
-  winRateSampleSize?: number;       // nombre de samples ayant servi au calcul
-  // Couche 1 — calibration automatique (Tâche 8)
-  correctionFactor?: number | null; // facteur de correction de la stratégie (1.0 = neutre)
-  effectiveWinRate?: number | null; // winRate × correctionFactor (utilisé pour le routage)
+  ragScore?: number | null;         // cosine distance (0 = identical, 1 = opposite)
+  ragStrategyHint?: string | null;  // strategy of the most similar historical incident
+  winRate?: number | null;          // raw historical win-rate for the strategy
+  winRateSampleSize?: number;       // number of samples used in the calculation
+  // Layer 1 — automatic calibration
+  correctionFactor?: number | null; // strategy correction factor (1.0 = neutral)
+  effectiveWinRate?: number | null; // winRate * correctionFactor (used for routing)
   turns?: AgentTurn[];
   finalResponse?: string | null;
   crashed?: boolean;
   [key: string]: unknown;
 }
 
-// ── Couche 1 : utilitaires de mémoire ────────────────────────────────────
+// ── Layer 1: memory utilities ─────────────────────────────────────────────
 
 export function fingerprint(alertText: string): string {
   return createHash("sha256").update(alertText.trim()).digest("hex");
 }
 
 
-/** Détecte la stratégie à appliquer à partir du texte d'alerte. */
+/** Detects the strategy to apply from the alert text. */
 export function detectStrategy(alertText: string): string {
   const t = alertText.toLowerCase();
   if (t.includes("jvm") || t.includes("heap") || t.includes("oom")) return "jvm_heap_restart";
@@ -80,7 +80,7 @@ export function detectStrategy(alertText: string): string {
   return "default_repair";
 }
 
-/** Extrait un nom de service lisible depuis le texte d'alerte. */
+/** Extracts a readable service name from the alert text. */
 export function detectServiceName(alertText: string): string {
   const m = alertText.match(/'([^']+)'/);
   if (m) return m[1];
@@ -93,15 +93,15 @@ export function detectServiceName(alertText: string): string {
 }
 
 /**
- * Taux de succès historique d'une stratégie — le bandit contextuel porté par
- * CockroachDB. Aucun service ML externe : une agrégation SQL suffit.
+ * Historical success rate for a strategy — the contextual bandit powered by
+ * CockroachDB. No external ML service: a SQL aggregation is sufficient.
  *
- * Depuis la Tâche 9, la formule est pondérée : chaque signal contribue selon
- * son poids (weight=1.0 pour les outcomes automatiques, weight=0.5 pour les
- * signaux humains). Cela évite que quelques rejets humains rapides ne
- * renversent un historique de centaines d'incidents résolus.
+ * The formula is weighted: each signal contributes according to its weight
+ * (weight=1.0 for automatic outcomes, weight=0.5 for human signals).
+ * This prevents a few quick human rejections from overturning a history
+ * of hundreds of resolved incidents.
  *
- *   win_rate = SUM(weight × outcome_success) / SUM(weight)
+ *   win_rate = SUM(weight * outcome_success) / SUM(weight)
  */
 export async function getStrategyWinRate(
   strategyName: string,
@@ -115,11 +115,11 @@ export async function getStrategyWinRate(
     WHERE strategy_name = ${strategyName}
   `);
   const row = rows.rows[0];
-  if (!row || row.total === "0") return { winRate: 0.5, count: 0 }; // prior neutre si inconnu
+  if (!row || row.total === "0") return { winRate: 0.5, count: 0 }; // neutral prior when unknown
   return { winRate: Number(row.win_rate), count: Number(row.total) };
 }
 
-/** Win-rate de toutes les stratégies connues — exposé via /api/metrics/win-rates. */
+/** Win-rate for all known strategies — exposed via /api/metrics/win-rates. */
 export async function getAllStrategyWinRates(): Promise<
   Array<{ strategyName: string; winRate: number; successCount: number; totalCount: number }>
 > {
@@ -195,25 +195,25 @@ async function indexResolvedIncident(
   await recalibrateStrategy(strategyName);
 }
 
-// ── Couche 1 : calibration automatique du bandit ──────────────────────────
+// ── Layer 1: automatic bandit calibration ────────────────────────────────
 
 /**
- * Seuil de déviation (valeur absolue) entre win-rate prédit et win-rate
- * observé au-delà duquel le facteur de correction est activé.
- * Configurable via CALIBRATION_THRESHOLD env var (défaut : 0.15 = 15 %).
+ * Deviation threshold (absolute value) between predicted and observed win-rate
+ * above which the correction factor is activated.
+ * Configurable via CALIBRATION_THRESHOLD env var (default: 0.15 = 15%).
  */
 const CALIBRATION_THRESHOLD = Number(process.env.CALIBRATION_THRESHOLD ?? 0.15);
 
 /**
- * Enregistre le win-rate prédit au moment d'une décision de routage.
+ * Records the predicted win-rate at the time of a routing decision.
  *
- * Maintient une moyenne glissante pondérée par le nombre de décisions
- * (`prediction_count`) de façon à ce que les décisions récentes ne biaisent
- * pas excessivement l'historique. Utilise un UPSERT CockroachDB :
+ * Maintains a weighted rolling average by the number of decisions
+ * (`prediction_count`) so that recent decisions do not excessively bias
+ * the history. Uses a CockroachDB UPSERT:
  *
- *   new_avg = (old_avg × old_count + new_prediction) / (old_count + 1)
+ *   new_avg = (old_avg * old_count + new_prediction) / (old_count + 1)
  *
- * Appelé une fois par incident, juste avant la décision de routage.
+ * Called once per incident, just before the routing decision.
  */
 async function recordRoutingPrediction(
   strategyName: string,
@@ -234,22 +234,22 @@ async function recordRoutingPrediction(
 }
 
 /**
- * Recalcule le win-rate réel (observé) depuis `incident_vectors` pour une
- * stratégie et met à jour le facteur de correction dans `strategy_calibration`.
+ * Recomputes the real (observed) win-rate from `incident_vectors` for a
+ * strategy and updates the correction factor in `strategy_calibration`.
  *
- * Formule du facteur de correction :
- *   - Si |observed − predicted| ≤ CALIBRATION_THRESHOLD → correction_factor = 1.0 (neutre)
- *   - Sinon → correction_factor = clamp(observed / predicted, 0.1, 1.5)
+ * Correction factor formula:
+ *   - If |observed − predicted| ≤ CALIBRATION_THRESHOLD → correction_factor = 1.0 (neutral)
+ *   - Otherwise → correction_factor = clamp(observed / predicted, 0.1, 1.5)
  *
- * Un facteur < 1 dégrade les décisions futures (trop d'échecs imprévus).
- * Un facteur > 1 améliore les décisions futures (meilleure performance que prévu).
+ * A factor < 1 downgrades future decisions (too many unexpected failures).
+ * A factor > 1 upgrades future decisions (better performance than expected).
  *
- * Entièrement porté par CockroachDB — aucun service ML externe.
+ * Fully powered by CockroachDB — no external ML service.
  */
 export async function recalibrateStrategy(strategyName: string): Promise<void> {
   // Observed win-rate = SQL aggregate from incident_vectors (all time)
   const observed = await getStrategyWinRate(strategyName);
-  if (observed.count === 0) return; // aucune donnée — on ne modifie pas le facteur
+  if (observed.count === 0) return; // no data — do not modify the factor
 
   const observedWinRate = observed.winRate;
 
@@ -279,8 +279,8 @@ export async function recalibrateStrategy(strategyName: string): Promise<void> {
 }
 
 /**
- * Récupère le facteur de correction actuel d'une stratégie.
- * Retourne 1.0 si aucune donnée de calibration n'est encore disponible.
+ * Retrieves the current correction factor for a strategy.
+ * Returns 1.0 if no calibration data is available yet.
  */
 async function getCorrectionFactor(strategyName: string): Promise<number> {
   const rows = await db.execute<{ correction_factor: string }>(sql`
@@ -290,29 +290,29 @@ async function getCorrectionFactor(strategyName: string): Promise<number> {
   return Number(rows.rows[0].correction_factor);
 }
 
-// ── Couche 2 : boucle de feedback humain ──────────────────────────────────
+// ── Layer 2: human feedback loop ──────────────────────────────────────────
 
 export type HumanFeedback = "rejected" | "corrected" | "approved";
 
 /**
- * Enregistre un signal humain dans la mémoire vectorielle et met à jour la
- * calibration de la stratégie concernée.
+ * Records a human signal in the vector memory and updates the
+ * calibration for the concerned strategy.
  *
- * ### Principe de pondération
- * Les signaux humains utilisent `weight = 0.5` (contre 1.0 pour les outcomes
- * automatiques). Cela rend la mémoire prudente : un seul rejet rapide ne peut
- * pas effacer un historique de dizaines de succès, mais plusieurs signaux
- * humains cohérents font basculer le routage.
+ * ### Weighting principle
+ * Human signals use `weight = 0.5` (vs 1.0 for automatic outcomes).
+ * This makes memory cautious: a single quick rejection cannot erase a
+ * history of dozens of successes, but several consistent human signals
+ * will flip routing.
  *
- * ### Signaux produits
- * - **rejected** : 1 signal négatif (w=0.5) sur la stratégie rejetée
- * - **corrected** : 1 signal négatif (w=0.5) sur la stratégie rejetée
- *                 + 1 signal positif (w=0.5) sur la stratégie suggérée
- * - **approved**  : aucun signal (l'outcome de résolution le couvrira)
+ * ### Signals produced
+ * - **rejected**  : 1 negative signal (w=0.5) on the rejected strategy
+ * - **corrected** : 1 negative signal (w=0.5) on the rejected strategy
+ *                 + 1 positive signal (w=0.5) on the suggested strategy
+ * - **approved**  : no signal (the resolution outcome will cover it)
  *
- * ### Traçabilité
- * La colonne `signal_source = "human"` permet au dashboard et au jury de
- * distinguer les signaux humains des outcomes automatiques.
+ * ### Traceability
+ * The `signal_source = "human"` column lets the dashboard and judges
+ * distinguish human signals from automatic outcomes.
  */
 export async function recordHumanFeedback(
   incidentId: string,
@@ -325,7 +325,7 @@ export async function recordHumanFeedback(
   const HUMAN_WEIGHT = 0.5;
 
   if (feedback === "rejected" || feedback === "corrected") {
-    // Signal négatif pondéré pour la stratégie rejetée
+    // Weighted negative signal for the rejected strategy
     await db.insert(incidentVectorsTable).values({
       incidentId,
       errorMessageText: alertText,
@@ -336,11 +336,11 @@ export async function recordHumanFeedback(
       weight: HUMAN_WEIGHT,
     });
 
-    // Recalibration immédiate : le facteur de correction doit refléter
-    // l'avis de l'humain avant la prochaine décision de routage.
+    // Immediate recalibration: the correction factor must reflect
+    // the human's judgment before the next routing decision.
     await recalibrateStrategy(strategyName);
 
-    // Incrémenter le compteur de signaux humains dans strategy_calibration
+    // Increment human signal counter in strategy_calibration
     await db.execute(sql`
       INSERT INTO strategy_calibration (strategy_name, human_signal_count, last_recalculated_at)
       VALUES (${strategyName}, 1, now())
@@ -351,7 +351,7 @@ export async function recordHumanFeedback(
   }
 
   if (feedback === "corrected" && suggestedStrategy) {
-    // Signal positif pondéré pour la stratégie suggérée par l'humain
+    // Weighted positive signal for the strategy suggested by the human
     await db.insert(incidentVectorsTable).values({
       incidentId,
       errorMessageText: alertText,
@@ -373,7 +373,7 @@ export async function recordHumanFeedback(
     `);
   }
 
-  // Journal d'exécution — traçabilité pour le dashboard et le jury
+  // Execution log — traceability for the dashboard and judges
   await db.insert(executionLogsTable).values({
     incidentId,
     actionTaken: `HUMAN_FEEDBACK_${feedback.toUpperCase()}`,
@@ -382,7 +382,7 @@ export async function recordHumanFeedback(
       feedback,
       suggestedStrategy: suggestedStrategy ?? null,
       signalWeight: HUMAN_WEIGHT,
-      note: "Couche 2 → Couche 1 : le jugement humain réalimente directement le win-rate SQL.",
+      note: "Layer 2 → Layer 1: human judgment feeds directly into the SQL win-rate.",
     }),
   });
 }
@@ -402,7 +402,7 @@ export interface CalibrationRow {
 }
 
 /**
- * Retourne la table complète de calibration pour le dashboard et l'endpoint API.
+ * Returns the full calibration table for the dashboard and API endpoint.
  */
 export async function getAllCalibrationData(): Promise<CalibrationRow[]> {
   const rows = await db.execute<{
@@ -470,43 +470,42 @@ export async function recalibrateAllStrategies(): Promise<{ updated: number }> {
   return { updated };
 }
 
-// ── Couche 2 : décision de routage ────────────────────────────────────────
+// ── Layer 2: routing decision ──────────────────────────────────────────────
 
 /**
- * Décide du mode de routage à partir du win-rate historique de la stratégie
- * détectée (Couche 2). La distance RAG est conservée dans le contexte pour
- * affichage dans le dashboard mais n'influence plus le seuil de décision :
- * les pseudo-embeddings déterministes (SHA-256 + LCG) ont une distance
- * cosinus ~0.93 même entre textes identiques en raison du stockage float32
- * de CockroachDB VECTOR — les seuils de proximité d'embedding classiques
- * (< 0.1) ne s'appliquent pas à ce cas. En production, des embeddings Titan
- * Text V2 (float32 natifs) rendraient la distance significative.
+ * Decides the routing mode from the historical win-rate of the detected
+ * strategy (Layer 2). RAG distance is kept in context for dashboard display
+ * but no longer influences the decision threshold: deterministic pseudo-embeddings
+ * (SHA-256 + LCG) have cosine distance ~0.93 even between identical texts due
+ * to CockroachDB VECTOR float32 storage — classical embedding proximity thresholds
+ * (< 0.1) do not apply here. In production, native Titan Text V2 (float32)
+ * embeddings would make the distance meaningful.
  *
- *  AUTONOMOUS     : stratégie connue (> 0 samples) ET win-rate > 80%
- *                   → l'agent agit seul, la mémoire confirme la fiabilité
- *  PENDING_APPROVAL: stratégie connue mais win-rate ≤ 80%
- *                   → l'agent propose et attend la validation humaine
- *  EXPLORATORY    : aucun sample connu pour cette stratégie
- *                   → territoire inexploré, mode apprentissage documenté
+ *  AUTONOMOUS      : known strategy (> 0 samples) AND win-rate > 80%
+ *                    → agent acts alone, memory confirms reliability
+ *  PENDING_APPROVAL: known strategy but win-rate ≤ 80%
+ *                    → agent proposes and waits for human validation
+ *  EXPLORATORY     : no known samples for this strategy
+ *                    → uncharted territory, documented learning mode
  */
 export function computeRoutingMode(
   strategyName: string,
-  _distance: number | undefined, // conservé pour la Couche 3 (logging/affichage)
+  _distance: number | undefined, // kept for Layer 3 (logging/display)
   winRate: number | undefined,
   sampleCount: number,
 ): RoutingMode {
-  // Stratégie de repli générique → toujours exploratoire (rien à apprendre)
+  // Generic fallback strategy → always exploratory (nothing to learn from)
   if (sampleCount === 0 || strategyName === "default_repair") return "EXPLORATORY";
   if ((winRate ?? 0) > 0.8) return "AUTONOMOUS";
   return "PENDING_APPROVAL";
 }
 
-// ── Couche 3 : coordination multi-agents via transactions ─────────────────
+// ── Layer 3: multi-agent coordination via transactions ────────────────────
 
 /**
- * Réclame un incident pour un agent donné via une transaction sérialisable
- * CockroachDB. Retry automatique sur erreur de sérialisation (code 40001)
- * — c'est CockroachDB qui est l'arbitre, pas le code.
+ * Claims an incident for a given agent via a CockroachDB serializable
+ * transaction. Automatic retry on serialization error (code 40001)
+ * — CockroachDB is the arbiter, not the code.
  */
 export async function claimIncidentForAgent(
   incidentId: string,
@@ -525,13 +524,13 @@ export async function claimIncidentForAgent(
         [agentName, incidentId],
       );
       await client.query("COMMIT");
-      if (result.rows.length === 0) return null; // déjà réclamé par un autre
+      if (result.rows.length === 0) return null; // already claimed by another agent
       return mapRowToIncidentState(result.rows[0]);
     } catch (err: unknown) {
       await client.query("ROLLBACK").catch(() => {});
       const pgErr = err as { code?: string };
       if (pgErr.code === "40001" && attempt < MAX_RETRIES - 1) {
-        // Conflit de sérialisation CockroachDB — backoff exponentiel
+        // CockroachDB serialization conflict — exponential backoff
         await sleep(50 * Math.pow(2, attempt));
         continue;
       }
@@ -543,7 +542,7 @@ export async function claimIncidentForAgent(
   return null;
 }
 
-/** Libère la réclamation d'un incident (fin de phase d'un agent). */
+/** Releases the claim on an incident (end of an agent phase). */
 export async function releaseIncidentClaim(incidentId: string): Promise<void> {
   await db
     .update(incidentStateTable)
@@ -551,7 +550,7 @@ export async function releaseIncidentClaim(incidentId: string): Promise<void> {
     .where(eq(incidentStateTable.incidentId, incidentId));
 }
 
-/** Journalise une passation entre agents dans agent_handoffs. */
+/** Logs an agent handoff in agent_handoffs. */
 async function logAgentHandoff(
   incidentId: string,
   agentName: AgentName,
@@ -566,34 +565,34 @@ async function logAgentHandoff(
   });
 }
 
-// ── Couche 5 : estimation des coûts ──────────────────────────────────────
+// ── Layer 5: cost estimation ──────────────────────────────────────────────
 
 /**
- * Estimation des CockroachDB Request Units consommées par un incident complet.
+ * Estimates CockroachDB Request Units consumed by a complete incident.
  *
- * Modèle documenté (données de facturation CockroachDB Serverless 2025) :
- *   - Recherche ANN vectorielle (VECTOR, 1024 dims, opérateur <=>)    : ~5 RU
- *   - Transactions sérialisables (BEGIN SERIALIZABLE + UPDATE … RETURNING) : ~3 RU × nbAgents
- *   - Écritures simples (INSERT/UPDATE sur incident_state, logs, handoffs)  : ~2 RU × nbEcritures
- *   - Lectures simples (SELECT)                                             : ~1 RU × nbLectures
- *   - Écriture vectorielle finale (INSERT dans incident_vectors)            : ~5 RU
- *   - Overhead (connexions, metadata, auto-commit DDL)                      : ~3 RU
+ * Documented model (CockroachDB Serverless 2025 billing data):
+ *   - ANN vector search (VECTOR, 1024 dims, <=> operator)               : ~5 RU
+ *   - Serializable transactions (BEGIN SERIALIZABLE + UPDATE … RETURNING): ~3 RU * numAgents
+ *   - Simple writes (INSERT/UPDATE on incident_state, logs, handoffs)    : ~2 RU * numWrites
+ *   - Simple reads (SELECT)                                              : ~1 RU * numReads
+ *   - Final vector write (INSERT into incident_vectors)                  : ~5 RU
+ *   - Overhead (connections, metadata, auto-commit DDL)                  : ~3 RU
  *
- * Pour un incident avec 3 agents et 3 tours : 5 + (3×3) + (6×2) + 5×1 + 5 + 3 = 36 RU.
- * On arrondit à 42 RU pour intégrer la variabilité réseau et les réessais
- * transactionnels (code CockroachDB 40001).
+ * For an incident with 3 agents and 3 turns: 5 + (3*3) + (6*2) + 5*1 + 5 + 3 = 36 RU.
+ * Rounded to 42 RU to account for network variability and transactional
+ * retries (CockroachDB code 40001).
  */
 export const BASE_RU_PER_INCIDENT = 42;
 
 /**
- * Affine l'estimation en fonction du nombre de tours réels (chaque tour
- * supplémentaire génère 1 write (execution_log) + 1 read (persist) = ~3 RU).
+ * Refines the estimate based on the actual number of turns (each additional
+ * turn generates 1 write (execution_log) + 1 read (persist) = ~3 RU).
  */
 export function estimateRuConsumed(turns: number): number {
   return BASE_RU_PER_INCIDENT + Math.max(0, turns - 3) * 3;
 }
 
-// ── Utilitaires internes ──────────────────────────────────────────────────
+// ── Internal utilities ────────────────────────────────────────────────────
 
 function mapRowToIncidentState(row: Record<string, unknown>): IncidentState {
   return {
@@ -623,7 +622,7 @@ async function callTool(
     return callMcpTool(toolName, toolInput);
   }
   if (toolName === "verify_resolution") {
-    // Outil interne de l'Auditor — évaluation locale, pas via MCP
+    // Internal Auditor tool — local evaluation, not via MCP
     const repairVerified = Boolean(toolInput.repairVerified);
     return {
       verified: repairVerified,
@@ -635,20 +634,20 @@ async function callTool(
         : "Repair output indicates failure. Escalation recommended.",
     };
   }
-  return { success: false, error: `Outil inconnu: ${toolName}` };
+  return { success: false, error: `Unknown tool: ${toolName}` };
 }
 
 /**
- * Enveloppe `persistIncidentState` avec une logique de retry pour les modes chaos.
+ * Wraps `persistIncidentState` with retry logic for chaos modes.
  *
- * - LATENCY  : attend `chaos.latencyMs` ms avant d'écrire (réseau lent simulé).
- * - PARTITION: `injectChaos` lève `ChaosPartitionError` → l'écriture DB est
- *              annulée sur la 1re tentative (vrai échec de write, pas juste un
- *              délai). On logue l'événement, on attend 500 ms (recovery réseau),
- *              puis on réessaie sans chaos. Le contexte persisté lors de la
- *              PHASE PRÉCÉDENTE est intact en base — c'est exactement ce que
- *              démontre la résilience de CockroachDB face à une partition.
- * - NONE/null: délégation directe à `persistIncidentState`.
+ * - LATENCY  : waits `chaos.latencyMs` ms before writing (simulated slow network).
+ * - PARTITION: `injectChaos` throws `ChaosPartitionError` → the DB write is
+ *              aborted on the 1st attempt (true write failure, not just a delay).
+ *              We log the event, wait 500 ms (network recovery), then retry
+ *              without chaos. The context persisted in the PREVIOUS PHASE is
+ *              intact in the DB — this is exactly what CockroachDB resilience
+ *              against a partition demonstrates.
+ * - NONE/null: delegates directly to `persistIncidentState`.
  */
 async function persistWithChaosRetry(
   incidentId: string,
@@ -675,7 +674,7 @@ async function persistWithChaosRetry(
             phase: phaseName,
             delayMs: event.delayMs,
             wasPartition: false,
-            message: `Latence réseau simulée : ${event.delayMs} ms ajoutés avant écriture DB (${phaseName})`,
+            message: `Simulated network latency: ${event.delayMs} ms added before DB write (${phaseName})`,
           }),
         );
       }
@@ -691,11 +690,11 @@ async function persistWithChaosRetry(
             phase: phaseName,
             wasPartition: true,
             error: (err as Error).message,
-            recovery: "auto-retry after 500ms — état de la phase précédente intact en base",
+            recovery: "auto-retry after 500ms — previous phase state intact in DB",
             message:
-              `Partition simulée (${phaseName}) : écriture DB avortée. ` +
-              `L'état persisté lors de la phase précédente est intègre en CockroachDB. ` +
-              `Reprise automatique dans 500 ms.`,
+              `Simulated partition (${phaseName}): DB write aborted. ` +
+              `The state persisted in the previous phase is intact in CockroachDB. ` +
+              `Automatic recovery in 500 ms.`,
           }),
         );
         // Simulate network recovery window, then retry WITHOUT chaos.
@@ -715,9 +714,9 @@ async function persistIncidentState(
   currentStep: string,
   context: IncidentContext,
   opts?: {
-    /** Timestamp de résolution — à passer pour les statuts terminaux (RESOLVED / FAILED). */
+    /** Resolution timestamp — pass for terminal statuses (RESOLVED / FAILED). */
     resolvedAt?: Date;
-    /** Estimation des Request Units CockroachDB consommées par cet incident. */
+    /** Estimated CockroachDB Request Units consumed by this incident. */
     ruConsumed?: number;
   },
 ): Promise<IncidentState> {
@@ -745,7 +744,7 @@ async function logExecution(
 
 const sleep = chaosSleep;
 
-// ── CRUD basique ──────────────────────────────────────────────────────────
+// ── Basic CRUD ────────────────────────────────────────────────────────────
 
 export async function getOrCreateIncident(alertText: string): Promise<IncidentState> {
   const fp = fingerprint(alertText);
@@ -789,14 +788,14 @@ export async function getIncidentHandoffs(
     .orderBy(asc(agentHandoffsTable.createdAt));
 }
 
-// ── Boucle d'agent principale ─────────────────────────────────────────────
+// ── Main agent loop ───────────────────────────────────────────────────────
 
 /**
- * Exécute ou reprend la boucle d'agent en 3 phases (Diagnostician → Remediator
- * → Auditor). Chaque phase réclame l'incident via une transaction sérialisable
- * CockroachDB, écrit son tour en base, puis libère la réclamation — la boucle
- * peut être interrompue à tout moment et reprend exactement là où elle s'est
- * arrêtée au prochain appel.
+ * Executes or resumes the agent loop in 3 phases (Diagnostician → Remediator
+ * → Auditor). Each phase claims the incident via a CockroachDB serializable
+ * transaction, writes its turn to the DB, then releases the claim — the loop
+ * can be interrupted at any time and resumes exactly where it left off on
+ * the next call.
  */
 export async function runAgentLoop(
   incident: IncidentState,
@@ -804,9 +803,9 @@ export async function runAgentLoop(
   simulateCrash: boolean,
   chaos?: ChaosConfig,
 ): Promise<IncidentState> {
-  // Statuts terminaux : ne pas retraiter
+  // Terminal statuses: do not reprocess
   if (incident.status === "RESOLVED" || incident.status === "FAILED") return incident;
-  // PENDING_APPROVAL : l'humain doit approuver/rejeter avant de continuer
+  // PENDING_APPROVAL: human must approve/reject before continuing
   if (incident.status === "PENDING_APPROVAL") return incident;
 
   const context: IncidentContext = (incident.contextJson as IncidentContext) ?? {
@@ -828,7 +827,7 @@ export async function runAgentLoop(
   // ════════════════════════════════════════════════════════════
   if (startTurn === 0) {
     const claimed = await claimIncidentForAgent(incident.incidentId, "diagnostician");
-    if (!claimed) return current; // rare : déjà réclamé
+    if (!claimed) return current; // rare: already claimed
 
     await logAgentHandoff(
       incident.incidentId,
@@ -872,25 +871,25 @@ export async function runAgentLoop(
   }
 
   // ════════════════════════════════════════════════════════════
-  // COUCHE 2 — Décision de routage (entre Diagnostician et Remediator)
+  // LAYER 2 — Routing decision (between Diagnostician and Remediator)
   // ════════════════════════════════════════════════════════════
   if (context.turns.length === 1 && !context.routingDecisionComputed) {
     const embedding = await generateEmbedding(alertText);
     const ragHit = await findSimilarIncident(embedding);
-    // Le win-rate est calculé sur la stratégie DÉTECTÉE (pas sur celle du
-    // RAG hit) : la stratégie détectée est la décision de l'agent, le RAG
-    // hit est utilisé comme signal de similarité historique pour l'affichage.
+    // Win-rate is computed on the DETECTED strategy (not the RAG hit strategy):
+    // the detected strategy is the agent's decision; the RAG hit is used as a
+    // historical similarity signal for display purposes.
     const winRateResult = await getStrategyWinRate(strategyName);
 
-    // ── Calibration automatique (Couche 1 — Tâche 8) ────────────────────
-    // 1. Enregistre la prédiction courante avant d'appliquer la correction
+    // ── Automatic calibration (Layer 1) ─────────────────────────────────
+    // 1. Record the current prediction before applying the correction
     await recordRoutingPrediction(strategyName, winRateResult.winRate);
-    // 2. Récupère le facteur de correction (1.0 si pas encore de calibration)
+    // 2. Retrieve the correction factor (1.0 if no calibration data yet)
     const correctionFactor = await getCorrectionFactor(strategyName);
-    // 3. win-rate effectif = win-rate brut × facteur de correction
-    //    Si la stratégie a été surdimensionnée (beaucoup d'échecs récents),
-    //    le facteur < 1 et le routage bascule vers PENDING_APPROVAL même si
-    //    le win-rate brut historique reste élevé — la mémoire se corrige.
+    // 3. effective win-rate = raw win-rate * correction factor
+    //    If the strategy was over-estimated (many recent failures),
+    //    factor < 1 and routing flips to PENDING_APPROVAL even if the raw
+    //    historical win-rate remains high — memory self-corrects.
     const effectiveWinRate = winRateResult.winRate * correctionFactor;
     // ────────────────────────────────────────────────────────────────────
 
@@ -907,13 +906,13 @@ export async function runAgentLoop(
 
     if (routingMode === "PENDING_APPROVAL") {
       const ragInfo = ragHit
-        ? `RAG distance: ${ragHit.distance.toFixed(3)}, effective win-rate: ${(effectiveWinRate * 100).toFixed(0)}% (raw: ${(winRateResult.winRate * 100).toFixed(0)}%, correction: ×${correctionFactor.toFixed(2)}, ${winRateResult.count} samples)`
+        ? `RAG distance: ${ragHit.distance.toFixed(3)}, effective win-rate: ${(effectiveWinRate * 100).toFixed(0)}% (raw: ${(winRateResult.winRate * 100).toFixed(0)}%, correction: *${correctionFactor.toFixed(2)}, ${winRateResult.count} samples)`
         : "no RAG match";
       await logAgentHandoff(
         incident.incidentId,
         "remediator",
         "PENDING_APPROVAL",
-        `Confiance insuffisante pour agir en autonomie — ${ragInfo}. En attente d'approbation humaine.`,
+        `Insufficient confidence to act autonomously — ${ragInfo}. Awaiting human approval.`,
       );
       return await persistIncidentState(
         incident.incidentId,
@@ -923,7 +922,7 @@ export async function runAgentLoop(
       );
     }
 
-    // Mise à jour du contexte avec la décision (sans changer le statut)
+    // Update context with the decision (without changing status)
     current = await persistIncidentState(incident.incidentId, "DIAGNOSING", "ROUTING_DECIDED", context);
   }
 
@@ -1015,8 +1014,8 @@ export async function runAgentLoop(
     const finalStatus = repairSuccess ? "RESOLVED" : "FAILED";
     const routingLabel = context.routingMode ?? "AUTONOMOUS";
     context.finalResponse = repairSuccess
-      ? `RESOLVED [${strategyName}] [${routingLabel}]: Diagnostic confirmé par Diagnostician, réparation appliquée par Remediator, clôture validée par Auditor.`
-      : `FAILED [${strategyName}]: La réparation a échoué — escalade vers l'équipe d'astreinte recommandée par l'Auditor.`;
+      ? `RESOLVED [${strategyName}] [${routingLabel}]: Diagnostic confirmed by Diagnostician, repair applied by Remediator, closure validated by Auditor.`
+      : `FAILED [${strategyName}]: Repair failed — escalation to on-call team recommended by Auditor.`;
 
     current = await persistWithChaosRetry(
       incident.incidentId,
@@ -1029,7 +1028,7 @@ export async function runAgentLoop(
     );
     await releaseIncidentClaim(incident.incidentId);
 
-    // Alimente la Couche 1 avec le résultat réel de cet incident
+    // Feed Layer 1 with the actual result of this incident
     await indexResolvedIncident(
       incident.incidentId,
       alertText,

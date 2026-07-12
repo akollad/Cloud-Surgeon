@@ -7,7 +7,7 @@
  */
 
 /**
- * Mode de routage décidé par la Couche 2 (mémoire → confiance → action)
+ * Routing mode decided by Layer 2 (memory -> confidence -> action)
  */
 export type IncidentContextRoutingMode = typeof IncidentContextRoutingMode[keyof typeof IncidentContextRoutingMode];
 
