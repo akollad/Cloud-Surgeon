@@ -756,7 +756,8 @@ def _incidents_tab_content() -> None:
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 
-tab_live, tab_decision, tab_incidents, tab_memory, tab_calibration, tab_impact, tab_logs = st.tabs([
+tab_guide, tab_live, tab_decision, tab_incidents, tab_memory, tab_calibration, tab_impact, tab_logs = st.tabs([
+    "🧪 Judge Guide",
     "🔴 Live Diagnostic",
     "🧠 Why this decision?",
     "📋 Incidents",
@@ -787,6 +788,193 @@ def render_incident_turns(incident: dict) -> None:
             st.write(f"**Tool call:** `{turn['toolName']}({turn['toolInput']})`")
             st.write(f"**Result:** `{turn['toolOutput']}`")
 
+
+with tab_guide:
+    st.header("🧪 Judge Guide — How to Test Cloud-Surgeon")
+    st.caption(
+        "Follow the scenarios below in order for a complete end-to-end walkthrough. "
+        "Each one demonstrates a distinct architectural layer."
+    )
+
+    # ── Quick start ───────────────────────────────────────────────────────────
+    with st.container(border=True):
+        st.subheader("⚡ Quick Start (2 minutes)")
+        st.markdown("""
+1. **Check the green banner at the top** — confirms the API server is live and CockroachDB is connected.
+2. **In the sidebar**, pick any preset scenario (e.g. *"Payment service 5xx spike (ECS)"*) and click **⚡ Trigger Agent**.
+3. **Watch this tab row** — switch to **🔴 Live Diagnostic** to see the agent work in real time.
+
+That's it. Everything else below goes deeper into each architectural layer.
+""")
+
+    st.divider()
+
+    # ── Scenario A ────────────────────────────────────────────────────────────
+    st.subheader("🅐 Standard incident — 3-phase agent loop")
+    with st.expander("Show steps", expanded=True):
+        st.markdown("""
+**What it proves:** Diagnostician → Remediator → Auditor pipeline, RAG vector search, contextual bandit routing, CockroachDB durable state.
+
+**Steps:**
+1. Sidebar → *"DB connection pool exhausted (Postgres RDS)"* → **⚡ Trigger Agent**
+2. Tab **🔴 Live Diagnostic** → watch status bar: `DIAGNOSING → REPAIRING → RESOLVED`
+3. Each turn shows: agent badge (🔍 / 🔧 / ✅), tool called, tool output, thought source
+4. Tab **🧠 Why this decision?** → see the RAG score, win-rate, and routing mode that drove the choice
+5. Tab **📋 Incidents** → full incident row with fingerprint, strategy, timestamps
+
+**Routing modes you may see:**
+
+| Badge | Meaning |
+|---|---|
+| 🟢 AUTONOMOUS | Win-rate ≥ 80 % — agent acts alone, no human needed |
+| 🟡 APPROVAL REQUIRED | Win-rate < 80 % — see Scenario D |
+| 🔵 EXPLORATORY | No RAG match — agent documents and learns for next time |
+
+**Try several presets back-to-back** to watch the win-rate chart in **📊 Memory & Win-rates** evolve.
+""")
+
+    # ── Scenario B ────────────────────────────────────────────────────────────
+    st.subheader("🅑 Predictive detection — incident before the alarm fires")
+    with st.expander("Show steps"):
+        st.markdown("""
+**What it proves:** Layer 0 anomaly detection — Cloud-Surgeon opens a `PREDICTIVE` incident from raw metric datapoints *before* CloudWatch crosses its threshold.
+
+**Steps:**
+1. Sidebar → **🔮 Proactive Anomaly Detection** section
+2. Pick *"🔮 ECS CPU spike (checkout service — pre-alarm)"* → **📡 Ingest metric (trigger predictive)**
+3. A green banner confirms: *"Predictive incident opened before any alarm!"* with similarity score and detection method
+4. Switch to tab **📋 Incidents** → the incident status is `PREDICTIVE` (not `TRIGGERED`)
+
+**Why it matters:** Traditional monitoring reacts. Cloud-Surgeon acts before the on-call engineer gets paged.
+
+**Try all 5 predictive scenarios** to see different metric types (CPU, connections, throttles, latency, disk).
+""")
+
+    # ── Scenario C ────────────────────────────────────────────────────────────
+    st.subheader("🅒 Chaos resilience — crash-and-resume")
+    with st.expander("Show steps"):
+        st.markdown("""
+**What it proves:** Every agent turn is committed to CockroachDB before the next one starts. A crash at any point leaves a resumable checkpoint — zero context loss.
+
+**Steps:**
+1. Sidebar → *"JVM memory leak (recommendation service)"* → Chaos mode: **💀 SIGKILL crash after diagnostic** → **⚡ Trigger Agent**
+2. The agent runs Turn 0 (Diagnostician), then the process is killed mid-repair
+3. Sidebar → same scenario again → **⚡ Trigger Agent**
+4. The agent resumes from Turn 1 (Remediator) — it does **not** re-run the diagnostic
+
+**Alternatively — real OS-level crash:**
+1. Run any incident normally first
+2. Sidebar → **☠️ Real Process Crash** → **💀 SIGKILL the API server**
+3. Wait ~3 seconds for the process manager to restart it
+4. Re-trigger the same scenario → observe recovery from CockroachDB
+
+**What to look for in 📜 Execution Log:** the same `incidentId` appears across both runs — proof that state was restored, not restarted.
+""")
+
+    # ── Scenario D ────────────────────────────────────────────────────────────
+    st.subheader("🅓 Human-in-the-loop — approve or reject a repair")
+    with st.expander("Show steps"):
+        st.markdown("""
+**What it proves:** Low-confidence repairs pause for human validation. Human corrections are written back into vector memory (weighted ×0.5) and shift future routing.
+
+**How to trigger PENDING_APPROVAL:**
+The agent enters approval mode when the RAG score **or** win-rate is below 80 %. This happens naturally after the first few incidents when memory is sparse, or with *"Unknown incident (exploratory scenario)"*.
+
+**Steps:**
+1. Sidebar → *"Unknown incident (exploratory scenario)"* → **⚡ Trigger Agent**
+2. Tab **📋 Incidents** → yellow banner *"N incident(s) awaiting human approval"*
+3. In the pending card: read the proposed strategy, RAG score, win-rate
+4. Click **✅ Approve** → agent continues to Remediator phase
+   — **or** — Click **❌ Reject** → incident closes, rejection logged as negative signal
+5. After approving or rejecting, tab **🎯 Calibration** → see the human signal appear in the correction factor
+
+**Human correction (optional):**
+In the pending card, open the *"🔧 Correct strategy"* expander, pick a better strategy, click **✅ Apply correction** → that signal is inserted into vector memory at ×0.5 weight and will influence future routing for similar alerts.
+""")
+
+    # ── Scenario E ────────────────────────────────────────────────────────────
+    st.subheader("🅔 CloudWatch webhook — real AWS alerting pipeline")
+    with st.expander("Show steps"):
+        st.markdown("""
+**What it proves:** The same endpoint that the dashboard's "Simulate" button calls is production-ready — configure an AWS SNS topic to POST to it and real CloudWatch alarms flow automatically.
+
+---
+
+**Option 1 — Simulate from the dashboard (no AWS required):**
+1. Sidebar → **🌐 CloudWatch Webhook** section
+2. Fill in *AlarmName* and *NewStateReason* (or keep defaults)
+3. Click **📡 Simulate CloudWatch webhook**
+4. A `202 Accepted` banner confirms the incident was created → visible in **📋 Incidents**
+
+---
+
+**Option 2 — Connect real AWS CloudWatch:**
+
+```
+CloudWatch Alarm  →  SNS Topic  →  POST https://<your-domain>/api/webhook/cloudwatch
+```
+
+**AWS setup (one-time):**
+1. Create an SNS Topic (type: Standard)
+2. Add an HTTPS subscription pointing to `https://<your-domain>/api/webhook/cloudwatch`
+3. The endpoint automatically responds to the `SubscriptionConfirmation` request → subscription activates
+4. Point any CloudWatch Alarm's *"In alarm"* action to that SNS Topic
+5. Fire or simulate the alarm in CloudWatch → it arrives here and triggers the full agent loop
+
+**Payload format accepted:**
+```json
+{
+  "Type": "Notification",
+  "Message": "{\\"AlarmName\\":\\"checkout-5xx-spike\\",\\"NewStateValue\\":\\"ALARM\\",\\"NewStateReason\\":\\"Threshold Crossed: 3 out of 3 datapoints > 10.\\"}"
+}
+```
+Or send the CloudWatch JSON directly (without the SNS envelope) — both are handled.
+""")
+
+    st.divider()
+
+    # ── Tab guide ─────────────────────────────────────────────────────────────
+    st.subheader("📑 What each tab shows")
+    st.markdown("""
+| Tab | What to look at |
+|---|---|
+| **🔴 Live Diagnostic** | Real-time agent progress + CDC live event stream from CockroachDB changefeed |
+| **🧠 Why this decision?** | RAG score, win-rate, routing mode, causal chain (recursive CTE), agent handoffs |
+| **📋 Incidents** | All incidents with status, strategy, fingerprint — approve/reject pending ones here |
+| **📊 Memory & Win-rates** | Per-strategy win-rate bar chart (contextual bandit), ccloud cluster status, live cluster health |
+| **🎯 Calibration** | Predicted vs actual win-rate, correction factors, human signal history |
+| **💰 MTTR & Cost Impact** | Mean time to resolve vs on-call engineer, cost per incident, routing breakdown |
+| **📜 Execution Log** | Immutable journal of every tool call, input, output — full auditability |
+""")
+
+    # ── Architecture summary ──────────────────────────────────────────────────
+    st.divider()
+    st.subheader("🏗️ 3-Layer CockroachDB Architecture — at a glance")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        with st.container(border=True):
+            st.markdown("**Layer 0 — Durable State**")
+            st.caption(
+                "`incident_state` table — full JSONB context, per-turn history, "
+                "serializable write lock (`claimed_by_agent`). "
+                "Crash-resume works because every turn is committed before the next starts."
+            )
+    with col2:
+        with st.container(border=True):
+            st.markdown("**Layer 1 — RAG Vector Memory**")
+            st.caption(
+                "`incident_vectors` table — VECTOR(1024) embeddings, C-SPANN cosine ANN index. "
+                "Finds the most similar past incident and its winning strategy. "
+                "Win-rate is pure SQL `COUNT(*) FILTER (WHERE outcome_success)`."
+            )
+    with col3:
+        with st.container(border=True):
+            st.markdown("**Layer 2 — Calibration & CDC**")
+            st.caption(
+                "`strategy_calibration` — self-corrects when predicted ≠ actual win-rate (×0.5 factor). "
+                "CockroachDB changefeed pushes every DB change to the SSE stream — "
+                "the live audit feed updates without polling."
+            )
 
 with tab_live:
     # Live status: auto-refreshes every 3 s to track in-progress agents.
