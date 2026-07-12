@@ -1,39 +1,22 @@
 ---
-name: Bedrock geo-block and CockroachDB Cloud API permission gotchas
-description: Two environment/config blockers hit wiring real AWS Bedrock and CockroachDB Cloud API calls from this Replit container; not fixable by changing app code.
+name: Bedrock geo-block & CockroachDB Cloud API perms
+description: Anthropic-on-Bedrock geo-restricted from Replit container; Bearer token does NOT bypass it. CockroachDB Cloud API key needs role assigned per-cluster.
 ---
 
-**Bedrock (Anthropic models) geo-block:** invoking any Anthropic model on
-Bedrock from this Replit container returns `Access to Anthropic models is
-not allowed from unsupported countries, regions, or territories` even with
-valid AWS credentials and `AWS_REGION` set to a supported region. This is
-Anthropic-side geographic filtering based on the calling infrastructure's
-apparent location, not an AWS credentials/permissions problem — no
-AWS_REGION change or model-ID change fixes it. Non-Anthropic Bedrock models
-(Titan, etc.) may still work; only Anthropic models are geo-restricted this
-way.
+## Bedrock geo-block
 
-**How to apply:** if a task needs a real Bedrock call to an Anthropic model,
-verify early (single smoke-test invocation) before building the rest of the
-feature around it — this is a hard external blocker discovered only at
-invocation time, not something `ListFoundationModels`/`ListInferenceProfiles`
-reveals in advance.
+Anthropic models via Amazon Bedrock return HTTP 400 "Access to Anthropic models is not allowed from unsupported countries/regions" when called from Replit's container infrastructure.
 
-**Bedrock Claude 3.5 Haiku is EOL as of ~mid-2026:**
-`anthropic.claude-3-5-haiku-20241022-v1:0` returns "this model version has
-reached end of life." Newer Anthropic models on Bedrock (Claude Haiku 4.5,
-Sonnet 4.x, Opus 4.x) are `INFERENCE_PROFILE`-only — they cannot be invoked
-by raw modelId; use an inference profile ID instead, e.g.
-`global.anthropic.claude-haiku-4-5-20251001-v1:0` (discover via
-`ListInferenceProfilesCommand` from `@aws-sdk/client-bedrock`, not
-`client-bedrock-runtime`).
+- Applies to **us-east-1** AND **eu-west-1**.
+- Applies to both **SigV4** (AWS SDK) and **Bearer token** (new Bedrock API key feature). Neither auth path bypasses the geo-restriction.
+- `BEDROCK_API_KEY` is set and valid, but calls still fail.
 
-**CockroachDB Cloud API `403 unauthorized`:** a valid-looking
-`COCKROACH_CLOUD_API_KEY` + `COCKROACH_CLOUD_CLUSTER_ID` can still get
-`{"code":7,"message":"unauthorized"}` from `GET /api/v1/clusters/{id}`. The
-service account behind the key needs an explicit role (Cluster Admin /
-Cluster Read) assigned to that specific cluster in the CockroachDB Cloud
-console — creating the API key alone is not sufficient. Confirmed fix:
-assigning the role in the console resolved it immediately, no code/endpoint
-change needed (base path is `https://cockroachlabs.cloud/api/v1`, not
-`/api/v2`).
+**Workaround**: Use `AI_PROVIDER=anthropic` which routes through the Replit AI Integrations proxy (`AI_INTEGRATIONS_ANTHROPIC_API_KEY` / `AI_INTEGRATIONS_ANTHROPIC_BASE_URL`). This works from the container and gives real Claude responses.
+
+**Why:** Anthropic's content delivery policy restricts model access by the requester's IP geography, not by the auth method. Replit's container IPs are in a geo-blocked region from Anthropic's perspective.
+
+**How to apply:** Always set `AI_PROVIDER=anthropic` in the shared env vars for this project. Keep the Bedrock code in place (`bedrock.ts`) as a future-proof path for deployment environments where the geo-block doesn't apply.
+
+## CockroachDB Cloud API key permissions
+
+The Cloud API key must have a role explicitly assigned to each cluster in the CockroachDB Cloud console. A key with no cluster-level role returns 403 on cluster-scoped endpoints even if the key itself is valid.
