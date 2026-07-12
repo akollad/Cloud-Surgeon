@@ -45,7 +45,7 @@ export const TriggerIncidentResponse = zod.object({
 })).optional(),
   "finalResponse": zod.string().nullish(),
   "crashed": zod.boolean().optional()
-}),
+}).passthrough(),
   "claimedByAgent": zod.string().nullish().describe('Agent that claimed this incident via serializable transaction'),
   "causedByIncidentId": zod.string().nullish().describe('Parent incident in the causal chain (recursive CTE)'),
   "updatedAt": zod.coerce.date()
@@ -80,7 +80,7 @@ export const ListIncidentsResponseItem = zod.object({
 })).optional(),
   "finalResponse": zod.string().nullish(),
   "crashed": zod.boolean().optional()
-}),
+}).passthrough(),
   "claimedByAgent": zod.string().nullish().describe('Agent that claimed this incident via serializable transaction'),
   "causedByIncidentId": zod.string().nullish().describe('Parent incident in the causal chain (recursive CTE)'),
   "updatedAt": zod.coerce.date()
@@ -120,7 +120,7 @@ export const GetIncidentResponse = zod.object({
 })).optional(),
   "finalResponse": zod.string().nullish(),
   "crashed": zod.boolean().optional()
-}),
+}).passthrough(),
   "claimedByAgent": zod.string().nullish().describe('Agent that claimed this incident via serializable transaction'),
   "causedByIncidentId": zod.string().nullish().describe('Parent incident in the causal chain (recursive CTE)'),
   "updatedAt": zod.coerce.date()

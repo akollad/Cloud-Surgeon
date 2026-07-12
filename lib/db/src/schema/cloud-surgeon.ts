@@ -183,3 +183,33 @@ export const strategyCalibrationTable = pgTable("strategy_calibration", {
 });
 
 export type StrategyCalibration = typeof strategyCalibrationTable.$inferSelect;
+
+/**
+ * Metric snapshots for proactive anomaly detection.
+ *
+ * Each row is one CloudWatch metric datapoint that was ingested via
+ * POST /api/metrics/ingest. The embedding is used for vector similarity
+ * against `incident_vectors` to find pre-alarm failure patterns.
+ * When a match exceeds the similarity threshold a PREDICTIVE incident is
+ * opened and linked via `predictive_incident_id`.
+ */
+export const metricSnapshotsTable = pgTable("metric_snapshots", {
+  snapshotId: uuid("snapshot_id").primaryKey().defaultRandom(),
+  metricName: varchar("metric_name", { length: 255 }).notNull(),
+  serviceName: varchar("service_name", { length: 255 }).notNull(),
+  metricValue: doublePrecision("metric_value").notNull(),
+  metricText: text("metric_text").notNull(),
+  embedding: vector1024("embedding").notNull(),
+  matchedIncidentId: uuid("matched_incident_id").references(
+    () => incidentStateTable.incidentId,
+  ),
+  similarityScore: doublePrecision("similarity_score"),
+  predictiveIncidentId: uuid("predictive_incident_id").references(
+    () => incidentStateTable.incidentId,
+  ),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type MetricSnapshot = typeof metricSnapshotsTable.$inferSelect;

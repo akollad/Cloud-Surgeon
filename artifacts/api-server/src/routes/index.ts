@@ -4,6 +4,7 @@ import chaosRouter from "./chaos";
 import incidentsRouter from "./incidents";
 import metricsRouter from "./metrics";
 import webhookRouter from "./webhook";
+import streamRouter from "./stream";
 
 const router: IRouter = Router();
 
@@ -14,6 +15,10 @@ router.use(healthRouter);
 // webhook would be blocked if mounted after. The webhook is secured by
 // SNS format validation; API key auth is not compatible with SNS HTTP subscriptions.
 router.use(webhookRouter);
+
+// streamRouter before incidentsRouter: SSE connections and CDC webhook receiver
+// need their own auth logic (SSE: X-API-Key header; CDC: no auth from CRDB).
+router.use(streamRouter);
 
 // metricsRouter and chaosRouter before incidentsRouter for the same reason
 // (apiKeyAuth is global in incidentsRouter; others apply their own).

@@ -3,6 +3,8 @@ import { logger } from "./lib/logger";
 import { seedVectorMemory } from "./lib/seed";
 import { pool } from "@workspace/db";
 import { bedrockIsConfigured, bedrockAuthMethod } from "./lib/bedrock";
+import { createMetricSnapshotsTable } from "./lib/anomaly";
+import { initChangefeed } from "./lib/cdc";
 
 const rawPort = process.env["PORT"];
 
@@ -85,5 +87,19 @@ app.listen(port, async (err) => {
     // Non-fatal: seed can fail if the DB is temporarily unavailable at startup
     // without preventing the service from starting.
     logger.warn({ err: seedErr }, "Vector memory seed failed (non-fatal)");
+  }
+
+  // Create metric_snapshots table for proactive anomaly detection (idempotent)
+  try {
+    await createMetricSnapshotsTable();
+  } catch (err) {
+    logger.warn({ err }, "[ANOMALY] metric_snapshots table creation failed (non-fatal)");
+  }
+
+  // Start CockroachDB CDC changefeed (or polling fallback) for live audit stream
+  try {
+    await initChangefeed();
+  } catch (err) {
+    logger.warn({ err }, "[CDC] initChangefeed failed (non-fatal)");
   }
 });

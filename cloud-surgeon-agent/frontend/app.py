@@ -80,6 +80,40 @@ def fetch_cluster_health() -> dict | None:
     return api_get("/metrics/cluster")
 
 
+def ingest_metrics(datapoints: list[dict]) -> dict | None:
+    return api_post("/metrics/ingest", datapoints)
+
+
+def fetch_audit_stream_status() -> dict | None:
+    """
+    Connects to the SSE audit stream, reads only the first 'connected' event
+    to discover whether the CockroachDB CDC changefeed is active or whether
+    the server has fallen back to polling. Returns immediately after the
+    first event (or on timeout).
+    """
+    try:
+        resp = requests.get(
+            f"{API_BASE_URL}/stream/audit",
+            headers={**_AUTH_HEADERS, "Accept": "text/event-stream"},
+            stream=True,
+            timeout=3,
+        )
+        resp.raise_for_status()
+        for line in resp.iter_lines(chunk_size=None):
+            if not line:
+                continue
+            text = line.decode("utf-8") if isinstance(line, bytes) else line
+            if text.startswith("data: "):
+                import json as _json
+                try:
+                    return _json.loads(text[6:])
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return None
+
+
 def recalibrate_all() -> dict | None:
     return api_post("/metrics/calibration/recalibrate", {})
 
@@ -135,6 +169,37 @@ def _check_password() -> bool:
 
 
 # ── Preset scenarios ──────────────────────────────────────────────────────────
+
+# Preset metric datapoints for the proactive anomaly detection demo.
+# These are sent to POST /api/metrics/ingest to trigger PREDICTIVE incidents
+# BEFORE CloudWatch fires an alarm.
+PREDICTIVE_SCENARIOS = {
+    "🔮 ECS CPU spike (checkout service — pre-alarm)": [
+        {"metricName": "CPUUtilization", "value": 84,
+         "dimensions": {"ServiceName": "checkout-ecs", "ClusterName": "prod"},
+         "serviceHint": "checkout-ecs"},
+    ],
+    "🔮 RDS connection pool approaching limit": [
+        {"metricName": "DatabaseConnections", "value": 430,
+         "dimensions": {"DBInstanceIdentifier": "catalog-db"},
+         "serviceHint": "catalog-db"},
+    ],
+    "🔮 Lambda throttling pre-alarm": [
+        {"metricName": "Throttles", "value": 12,
+         "dimensions": {"FunctionName": "order-processor"},
+         "serviceHint": "order-processor"},
+    ],
+    "🔮 High target response time (ALB)": [
+        {"metricName": "TargetResponseTime", "value": 2.8,
+         "dimensions": {"LoadBalancer": "app/checkout-alb"},
+         "serviceHint": "checkout-alb"},
+    ],
+    "🔮 Disk usage critical (EC2 worker)": [
+        {"metricName": "FreeableStorage", "value": 500_000_000,  # 500 MB free
+         "dimensions": {"InstanceId": "i-0abc123", "ServiceName": "worker-03"},
+         "serviceHint": "worker-03"},
+    ],
+}
 
 PRESET_SCENARIOS = {
     "Payment service 5xx spike (ECS)": (
@@ -311,6 +376,37 @@ with st.sidebar:
             st.error(f"Error: {st.session_state.get('_api_error')}")
 
     st.divider()
+    st.subheader("🔮 Proactive Anomaly Detection")
+    st.caption(
+        "Send metric datapoints **before** CloudWatch fires an alarm. "
+        "Cloud-Surgeon uses CockroachDB vector similarity to recognise the pattern "
+        "and opens a **PREDICTIVE** incident proactively."
+    )
+    predictive_scenario_label = st.selectbox(
+        "Metric scenario",
+        list(PREDICTIVE_SCENARIOS.keys()),
+        key="predictive_scenario",
+    )
+    predictive_datapoints = PREDICTIVE_SCENARIOS[predictive_scenario_label]
+    if st.button("📡 Ingest metric (trigger predictive)", use_container_width=True, type="primary"):
+        result = ingest_metrics(predictive_datapoints)
+        if result:
+            n = len(result.get("predictiveIncidents", []))
+            if n > 0:
+                pred = result["predictiveIncidents"][0]
+                st.success(
+                    f"🔮 **Predictive incident opened** before any alarm!\n\n"
+                    f"Strategy: `{pred['strategy']}` · "
+                    f"Similarity: `{pred['similarityScore']:.3f}` · "
+                    f"Method: `{pred['detectionMethod']}`\n\n"
+                    f"Incident `{pred['incidentId'][:8]}` is now visible in the 📋 Incidents tab."
+                )
+            else:
+                st.info(f"Ingested — no anomaly threshold crossed. (result: {result.get('message','')})")
+        else:
+            st.error(st.session_state.get("_api_error"))
+
+    st.divider()
     st.subheader("🌱 Vector Memory")
     if st.button("Reset seed", use_container_width=True, help="Inserts the 9 synthetic incidents if absent."):
         seed_result = api_post("/metrics/seed", {})
@@ -443,10 +539,39 @@ def _incidents_tab_content() -> None:
                         else:
                             st.error(st.session_state.get("_api_error"))
 
+    # ── Predictive incidents highlight ────────────────────────────────────
+    predictive = [
+        i for i in others
+        if (i.get("contextJson") or {}).get("source") == "predictive"
+    ]
+    if predictive:
+        st.info(
+            f"🔮 **{len(predictive)} PREDICTIVE incident(s)** — opened by vector similarity "
+            "BEFORE CloudWatch fired an alarm. CockroachDB memory recognised the failure pattern proactively."
+        )
+        for inc in predictive[:3]:
+            ctx = inc.get("contextJson", {})
+            score = ctx.get("similarityScore")
+            method = ctx.get("detectionMethod", "keyword")
+            metric = ctx.get("predictiveMetric", "unknown")
+            strategy = ctx.get("predictiveStrategy", ctx.get("strategyName", "?"))
+            with st.container(border=True):
+                st.markdown(
+                    f"**🔮 Predictive** `{inc['incidentId'][:8]}` · metric: `{metric}` · "
+                    f"strategy: `{strategy}` · "
+                    f"similarity: `{score:.3f}`" if score else
+                    f"**🔮 Predictive** `{inc['incidentId'][:8]}` · metric: `{metric}` · strategy: `{strategy}`"
+                )
+                st.caption(
+                    f"Detection method: `{method}` · status: `{inc['status']}` · "
+                    "Alarm had NOT fired when this incident was opened."
+                )
+
     st.dataframe(
         [
             {
                 "Incident": i["incidentId"][:8],
+                "🔮": "PREDICTIVE" if (i.get("contextJson") or {}).get("source") == "predictive" else "",
                 "Status": i["status"],
                 "Strategy": (i.get("contextJson") or {}).get("strategyName", "—"),
                 "Mode": (i.get("contextJson") or {}).get("routingMode", "—"),
@@ -559,6 +684,68 @@ with tab_live:
                     )
     else:
         st.caption("Choose a scenario in the sidebar and click « ⚡ Trigger Agent ».")
+
+    # ── CDC Audit Stream (real-time) ───────────────────────────────────────
+    st.divider()
+    st.subheader("📡 Live Audit Stream — CockroachDB CDC")
+
+    # Check stream status (one quick SSE connection to read the 'connected' event).
+    stream_status = fetch_audit_stream_status()
+    if stream_status and stream_status.get("type") in ("connected", "heartbeat"):
+        cdc_active = stream_status.get("cdcActive", False)
+        stream_mode = stream_status.get("streamMode", "unknown")
+        if cdc_active:
+            st.success(
+                "🟢 **CockroachDB Changefeed ACTIVE** — every `execution_logs` and `agent_handoffs` "
+                "row is pushed to this dashboard in real time via CockroachDB's `webhook-https://` sink. "
+                "No polling. CockroachDB is the event bus."
+            )
+        else:
+            st.info(
+                "🔵 **Polling fallback** (2-second interval) — CockroachDB changefeed not available "
+                f"in this cluster tier. Stream mode: `{stream_mode}`"
+            )
+        st.caption(f"Stream endpoint: `GET /api/stream/audit` · mode: `{stream_mode}`")
+    else:
+        st.warning("⚠️ SSE audit stream unreachable — API server may be starting up.")
+
+    # Show recent audit events (last 10 execution log entries).
+    # In CDC mode these are pushed by CockroachDB; here we display them from the REST API
+    # since Streamlit fragments cannot maintain a persistent SSE connection across reruns.
+    st.caption(
+        "Showing latest audit log entries. In the production setup, these events are streamed "
+        "directly from CockroachDB changefeeds via SSE — no client-side polling required."
+    )
+
+    @st.fragment(run_every=2)
+    def _audit_stream_widget() -> None:
+        """Shows the last 8 execution log entries, refreshed every 2 s."""
+        logs = api_get("/logs") or []
+        if not logs:
+            st.caption("No audit events yet.")
+            return
+        recent = logs[:8]
+        for log in recent:
+            inc_short = (log.get("incidentId") or "")[:8]
+            action = log.get("actionTaken", "—")
+            created = (log.get("createdAt") or "")[:19]
+            # Colour-code by action type
+            if "INJECTION" in action:
+                icon = "🛡️"
+            elif "CHAOS" in action:
+                icon = "💀"
+            elif "HUMAN_FEEDBACK" in action:
+                icon = "👤"
+            elif any(x in action for x in ["crdb_", "aws_", "execute_"]):
+                icon = "🔧"
+            else:
+                icon = "📝"
+            st.markdown(
+                f"{icon} `{created}` · `{inc_short}` · **{action[:80]}**",
+                help=log.get("result", "")[:400] if log.get("result") else None,
+            )
+
+    _audit_stream_widget()
 
 
 with tab_decision:

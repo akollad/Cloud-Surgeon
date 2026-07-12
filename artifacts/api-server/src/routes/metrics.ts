@@ -27,6 +27,7 @@ import {
 } from "../lib/cloud-surgeon";
 import { seedVectorMemory } from "../lib/seed";
 import { crdbMcp } from "../lib/crdbMcp";
+import { ingestMetrics, type MetricDatapoint } from "../lib/anomaly";
 
 const router: IRouter = Router();
 
@@ -283,6 +284,72 @@ router.get("/metrics/cluster", async (_req, res): Promise<void> => {
     res.status(502).json({
       error: err instanceof Error ? err.message : String(err),
       source: "cockroachdb-cloud-mcp",
+    });
+  }
+});
+
+// ── Proactive metric ingest (anomaly detection) ───────────────────────────
+//
+// POST /api/metrics/ingest
+//
+// Accepts a JSON array of CloudWatch metric datapoints. For each datapoint:
+//   1. Generates an embedding for a natural-language metric description.
+//   2. Runs a vector similarity search against `incident_vectors`.
+//   3. Falls back to keyword pattern matching (reliable with pseudo-embeddings).
+//   4. Stores the snapshot in `metric_snapshots`.
+//   5. When a known failure pattern is detected BEFORE an alarm fires,
+//      opens a PREDICTIVE incident tagged with source: "predictive".
+//
+// This is the core proactive anomaly detection feature: CockroachDB's
+// distributed vector index is used not just to answer queries but to
+// *watch* the environment in real time.
+//
+// Example payload:
+//   [{ "metricName": "CPUUtilization", "value": 84,
+//      "dimensions": { "ServiceName": "checkout-ecs" } }]
+
+router.post("/metrics/ingest", async (req, res): Promise<void> => {
+  const raw = req.body;
+  const datapoints: MetricDatapoint[] = Array.isArray(raw)
+    ? raw
+    : raw?.datapoints && Array.isArray(raw.datapoints)
+      ? raw.datapoints
+      : null;
+
+  if (!datapoints) {
+    res.status(400).json({
+      error:
+        "Body must be a JSON array of metric datapoints, or an object with a 'datapoints' array. " +
+        "Each item: { metricName: string, value: number, dimensions?: Record<string,string>, serviceHint?: string }",
+    });
+    return;
+  }
+
+  if (datapoints.length === 0) {
+    res.json({ ingested: 0, predictiveIncidents: [], message: "No datapoints provided." });
+    return;
+  }
+
+  if (datapoints.length > 50) {
+    res.status(400).json({ error: "Maximum 50 datapoints per request." });
+    return;
+  }
+
+  try {
+    const result = await ingestMetrics(datapoints);
+    res.json({
+      ...result,
+      message:
+        result.predictiveIncidents.length > 0
+          ? `🔮 ${result.predictiveIncidents.length} predictive incident(s) opened — agent acting before CloudWatch alarms fire.`
+          : `${result.ingested} metric(s) ingested. No anomaly threshold crossed.`,
+      note:
+        "Proactive anomaly detection: CockroachDB vector similarity detects failure patterns " +
+        "before CloudWatch fires an alarm. Predictive incidents are tagged with source='predictive'.",
+    });
+  } catch (err) {
+    res.status(500).json({
+      error: err instanceof Error ? err.message : String(err),
     });
   }
 });
