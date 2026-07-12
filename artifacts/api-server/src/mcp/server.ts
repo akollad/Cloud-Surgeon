@@ -12,7 +12,7 @@ import { z } from "zod";
 // production, plutôt que des fonctions TypeScript appelées en dur.
 // ----------------------------------------------------------------------------
 
-const COCKROACH_API_BASE = "https://cockroachlabs.cloud/api/v2";
+const COCKROACH_API_BASE = "https://cockroachlabs.cloud/api/v1";
 
 async function callCockroachCloudApi(action: string): Promise<Record<string, unknown>> {
   const apiKey = process.env.COCKROACH_CLOUD_API_KEY;

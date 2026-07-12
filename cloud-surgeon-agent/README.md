@@ -162,6 +162,40 @@ tableaux en interrogeant à nouveau le backend.
     n'est pas garantie compatible avec le dialecte CockroachDB (le SQL du
     fichier `schema.sql`, lui, est écrit et testé pour CockroachDB).
 
+### Authentification, outils MCP, Bedrock réel
+
+- **Authentification** : toutes les routes `/api/incidents/*` et `/api/logs`
+  exigent un header `x-api-key` (secret partagé `CLOUD_SURGEON_API_KEY`,
+  déjà envoyé automatiquement par le dashboard Streamlit). `/api/healthz`
+  reste public. Voir `artifacts/api-server/src/middleware/apiKeyAuth.ts`.
+- **Serveur MCP réel** : les outils `execute_ccloud_command` et
+  `aws_repair_service` ne sont plus des fonctions appelées en dur — ils
+  sont exposés par un vrai serveur MCP (`src/mcp/server.ts`, protocole
+  standard Anthropic) lancé en sous-processus stdio, et appelés par
+  l'agent via un client MCP (`src/mcp/client.ts`). N'importe quel autre
+  client MCP (Claude Desktop, etc.) pourrait se connecter à ce même serveur.
+- **Appel Bedrock réel** : le raisonnement ("thought") de chaque tour est
+  généré par un vrai appel à Amazon Bedrock (Claude Haiku 4.5, via
+  `src/lib/bedrock.ts`) quand `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`
+  sont configurées. **Dans cet environnement Replit, l'appel échoue
+  actuellement avec une erreur géographique renvoyée par Anthropic**
+  ("Access to Anthropic models is not allowed from unsupported countries,
+  regions, or territories") — limitation de la région du datacenter, pas un
+  bug côté agent. Chaque tour indique honnêtement sa source
+  (`thoughtSource: "bedrock" | "simulated"`) : aucune simulation n'est
+  jamais présentée comme un vrai appel réussi.
+- **Appel CockroachDB Cloud API réel** : `execute_ccloud_command` interroge
+  `GET /api/v1/clusters/{id}` avec `COCKROACH_CLOUD_API_KEY` /
+  `COCKROACH_CLOUD_CLUSTER_ID` quand ils sont configurés. Actuellement bloqué
+  par un `403 unauthorized` — la clé de service account doit avoir un rôle
+  (Cluster Admin / Cluster Read) explicitement assigné sur ce cluster dans
+  la console CockroachDB Cloud, en plus d'exister.
+- **Action AWS reste volontairement simulée** : `aws_repair_service` n'exécute
+  jamais de vraie action corrective (restart, scaling...) — un LLM qui
+  déclenche automatiquement des actions destructives sur une vraie
+  infrastructure sans garde-fou d'approbation humaine est un risque
+  délibérément écarté de cette démo.
+
 Pour lancer le dashboard seul en local :
 
 ```bash

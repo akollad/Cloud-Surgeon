@@ -18,7 +18,10 @@ import { logger } from "./logger";
 // transparente, jamais silencieuse (voir le champ `thoughtSource`).
 // ----------------------------------------------------------------------------
 
-const MODEL_ID = "anthropic.claude-3-5-haiku-20241022-v1:0";
+// Claude 3.5 Haiku a été retiré du service ; Claude Haiku 4.5 n'est
+// disponible qu'en "inference profile" (pas d'invocation on-demand directe
+// par modelId brut), donc on utilise l'ID de profil global.
+const MODEL_ID = "global.anthropic.claude-haiku-4-5-20251001-v1:0";
 
 let client: BedrockRuntimeClient | null = null;
 
