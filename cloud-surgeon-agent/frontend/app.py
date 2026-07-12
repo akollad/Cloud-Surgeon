@@ -323,8 +323,13 @@ def _home_summary_widget() -> None:
         _status = fetch_audit_stream_status()
         st.session_state["_cdc_status"] = _status
         st.session_state["_cdc_status_ts"] = _now
+        # Keep the last *successful* result so we can show it while reconnecting.
+        if _status is not None:
+            st.session_state["_cdc_last_known"] = _status
     else:
         _status = st.session_state["_cdc_status"]
+
+    _cdc_last_known = st.session_state.get("_cdc_last_known")
 
     # ── Audit event counter (since session start) ────────────────────────────
     # Uses /logs/count so the total is accurate even when /logs is paginated.
@@ -354,9 +359,19 @@ def _home_summary_widget() -> None:
         elif _status and _status.get("type") in ("connected", "heartbeat"):
             st.info("🔵 Polling fallback")
             st.caption("2-second polling (no changefeed tier)")
+        elif _cdc_last_known:
+            # API was slow / timed out but we have a prior reading — show it
+            # with a subtle "reconnecting" note rather than a warning.
+            if _cdc_last_known.get("cdcActive"):
+                st.success("🟢 CDC LIVE")
+                st.caption("Reconnecting… (last known: changefeed active)")
+            else:
+                st.info("🔵 Polling fallback")
+                st.caption("Reconnecting… (last known: polling mode)")
         else:
-            st.warning("⚠️ Stream unknown")
-            st.caption("SSE endpoint unreachable")
+            # No successful reading yet — server may still be booting.
+            st.info("⏳ Connecting…")
+            st.caption("Waiting for API server to start")
 
     with col_events:
         st.metric(
