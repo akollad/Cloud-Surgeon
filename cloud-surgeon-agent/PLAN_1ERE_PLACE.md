@@ -1,5 +1,5 @@
 # Plan sur 1 mois — viser la 1ère place (CockroachDB x AWS 2026)
-*(v2 — révisé : originalité approfondie, couverture explicite des 5 critères, Bedrock retiré du chemin critique car pris en charge par l'équipe)*
+*(v3 — révisé : originalité approfondie, couverture explicite des 5 critères, Bedrock retiré du chemin critique, + 7 renforts ciblés sur les points faibles : impact chiffré, coût réel, sécurité anti-injection, chaos engineering élargi, calibration de la confiance, boucle humain→mémoire, vision multi-cloud/multi-tenant)*
 
 ## Pourquoi cette révision
 La v1 avait une seule originalité (mémoire "active") suffisamment développée ;
@@ -40,6 +40,13 @@ Poussé à fond :
   ce que ni un simple vector store ni une base non-relationnelle ne peuvent
   faire aussi naturellement — c'est un usage typiquement CockroachDB/SQL
   qu'aucun concurrent avec Pinecone/Chroma ne pourra revendiquer.
+- **Renfort — calibration de la confiance** : le win-rate n'est pas utilisé
+  one-shot. Une tâche périodique compare, pour chaque stratégie, le win-rate
+  *prédit au moment de la décision* et le win-rate *réel observé depuis* ; si
+  l'écart dépasse un seuil, la stratégie est automatiquement rétrogradée
+  (moins de poids dans la couche 2) même si son win-rate historique brut
+  reste élevé. Ça prouve que la mémoire s'auto-corrige, pas seulement
+  qu'elle accumule.
 
 ### Couche 2 — La mémoire décide, elle n'affiche pas
 Le score de similarité + le taux de succès de la couche 1 pilotent un vrai
