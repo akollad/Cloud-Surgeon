@@ -91,6 +91,15 @@ export const incidentVectorsTable = pgTable("incident_vectors", {
     .notNull()
     .default("default_repair"),
   outcomeSuccess: boolean("outcome_success").notNull().default(true),
+  // Tâche 9 — feedback humain :
+  // "outcome" = signal automatique (résolution/échec de l'incident)
+  // "human"   = signal issu d'une décision humaine (rejet ou correction)
+  signalSource: varchar("signal_source", { length: 10 })
+    .notNull()
+    .default("outcome"),
+  // Pondération du signal : 1.0 pour les outcomes automatiques,
+  // 0.5 pour les signaux humains (moins de certitude qu'un vrai résultat).
+  weight: doublePrecision("weight").notNull().default(1.0),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -162,6 +171,14 @@ export const strategyCalibrationTable = pgTable("strategy_calibration", {
   correctionFactor: doublePrecision("correction_factor").notNull().default(1.0),
   /** Nombre de décisions enregistrées pour cette stratégie. */
   predictionCount: integer("prediction_count").notNull().default(0),
+  /**
+   * Nombre cumulé de signaux humains reçus pour cette stratégie
+   * (rejets + corrections). Chaque signal humain pèse 0.5 dans le win-rate
+   * au lieu de 1.0 pour un outcome automatique — la mémoire reste prudente
+   * sur les jugements humains qui peuvent refléter des préférences, pas
+   * seulement la performance technique de la stratégie.
+   */
+  humanSignalCount: integer("human_signal_count").notNull().default(0),
   lastRecalculatedAt: timestamp("last_recalculated_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

@@ -16,6 +16,7 @@ import {
   getIncidentHandoffs,
   getOrCreateIncident,
   pseudoEmbedding,
+  recordHumanFeedback,
   runAgentLoop,
   type IncidentContext,
 } from "../lib/cloud-surgeon";
@@ -206,17 +207,100 @@ router.post("/incidents/:incidentId/reject", async (req, res): Promise<void> => 
 
   req.log.info({ incidentId: incident.incidentId }, "Incident rejected by human");
 
-  // Indexer le résultat négatif pour ajuster le win-rate (Couche 1)
-  const { db: dbModule, incidentVectorsTable } = await import("@workspace/db");
+  // Enregistrer le signal humain (Couche 2 → Couche 1) :
+  // Le rejet pèse 0.5 au lieu de 1.0 — la mémoire reste prudente sur
+  // les jugements humains par rapport à un vrai échec d'incident.
   const alertText = (context.alertText as string | undefined) ?? "";
   if (alertText && context.strategyName) {
-    await dbModule.insert(incidentVectorsTable).values({
-      incidentId: incident.incidentId,
-      errorMessageText: alertText,
-      embedding: pseudoEmbedding(alertText),
-      strategyName: context.strategyName,
-      outcomeSuccess: false, // rejet = signal négatif pour cette stratégie
+    await recordHumanFeedback(
+      incident.incidentId,
+      alertText,
+      context.strategyName,
+      "rejected",
+    );
+  }
+
+  res.json(GetIncidentResponse.parse(updated));
+});
+
+/**
+ * Corrige un incident en attente (PENDING_APPROVAL) en suggérant une
+ * stratégie alternative.
+ *
+ * La Couche 2 ferme ici sa boucle d'apprentissage :
+ *  - Signal négatif (w=0.5) pour la stratégie originale → son win-rate baisse
+ *  - Signal positif (w=0.5) pour la stratégie suggérée → son win-rate monte
+ * Les deux signaux sont marqués `signal_source = "human"` dans
+ * `incident_vectors` pour distinguer le feedback humain des outcomes
+ * automatiques.
+ */
+router.post("/incidents/:incidentId/correct", async (req, res): Promise<void> => {
+  const params = GetIncidentParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+
+  const suggestedStrategy =
+    typeof req.body?.suggestedStrategy === "string"
+      ? req.body.suggestedStrategy.trim()
+      : null;
+
+  if (!suggestedStrategy) {
+    res.status(400).json({ error: "Missing required field: suggestedStrategy" });
+    return;
+  }
+
+  const incident = await getIncidentById(params.data.incidentId);
+  if (!incident) {
+    res.status(404).json({ error: "Incident not found" });
+    return;
+  }
+
+  if (incident.status !== "PENDING_APPROVAL") {
+    res.status(409).json({
+      error: `Incident is in status '${incident.status}', expected 'PENDING_APPROVAL'`,
     });
+    return;
+  }
+
+  const context = incident.contextJson as IncidentContext;
+  const originalStrategy = context.strategyName ?? "unknown";
+
+  context.routingMode = "REJECTED";
+  context.finalResponse =
+    `HUMAN_CORRECTED: L'opérateur a rejeté la stratégie '${originalStrategy}' ` +
+    `et suggéré '${suggestedStrategy}'. ` +
+    `Les deux signaux ont été intégrés dans la mémoire vectorielle (signal humain, poids 0.5). ` +
+    `Le win-rate de '${originalStrategy}' a baissé ; celui de '${suggestedStrategy}' a monté.`;
+
+  const [updated] = await db
+    .update(incidentStateTable)
+    .set({
+      status: "FAILED",
+      currentStep: "HUMAN_CORRECTED",
+      claimedByAgent: null,
+      contextJson: context,
+      resolvedAt: new Date(),
+      ruConsumed: 25,
+    })
+    .where(eq(incidentStateTable.incidentId, incident.incidentId))
+    .returning();
+
+  req.log.info(
+    { incidentId: incident.incidentId, originalStrategy, suggestedStrategy },
+    "Incident corrected by human — updating win-rates for both strategies",
+  );
+
+  const alertText = (context.alertText as string | undefined) ?? "";
+  if (alertText) {
+    await recordHumanFeedback(
+      incident.incidentId,
+      alertText,
+      originalStrategy,
+      "corrected",
+      suggestedStrategy,
+    );
   }
 
   res.json(GetIncidentResponse.parse(updated));

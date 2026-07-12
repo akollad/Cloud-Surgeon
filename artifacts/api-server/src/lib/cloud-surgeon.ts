@@ -108,13 +108,21 @@ export function detectServiceName(alertText: string): string {
 /**
  * Taux de succès historique d'une stratégie — le bandit contextuel porté par
  * CockroachDB. Aucun service ML externe : une agrégation SQL suffit.
+ *
+ * Depuis la Tâche 9, la formule est pondérée : chaque signal contribue selon
+ * son poids (weight=1.0 pour les outcomes automatiques, weight=0.5 pour les
+ * signaux humains). Cela évite que quelques rejets humains rapides ne
+ * renversent un historique de centaines d'incidents résolus.
+ *
+ *   win_rate = SUM(weight × outcome_success) / SUM(weight)
  */
 export async function getStrategyWinRate(
   strategyName: string,
 ): Promise<{ winRate: number; count: number }> {
   const rows = await db.execute<{ win_rate: string; total: string }>(sql`
     SELECT
-      COUNT(*) FILTER (WHERE outcome_success) * 1.0 / NULLIF(COUNT(*), 0) AS win_rate,
+      SUM(CASE WHEN outcome_success THEN weight ELSE 0.0 END)
+        / NULLIF(SUM(weight), 0.0) AS win_rate,
       COUNT(*) AS total
     FROM incident_vectors
     WHERE strategy_name = ${strategyName}
@@ -295,6 +303,103 @@ async function getCorrectionFactor(strategyName: string): Promise<number> {
   return Number(rows.rows[0].correction_factor);
 }
 
+// ── Couche 2 : boucle de feedback humain ──────────────────────────────────
+
+export type HumanFeedback = "rejected" | "corrected" | "approved";
+
+/**
+ * Enregistre un signal humain dans la mémoire vectorielle et met à jour la
+ * calibration de la stratégie concernée.
+ *
+ * ### Principe de pondération
+ * Les signaux humains utilisent `weight = 0.5` (contre 1.0 pour les outcomes
+ * automatiques). Cela rend la mémoire prudente : un seul rejet rapide ne peut
+ * pas effacer un historique de dizaines de succès, mais plusieurs signaux
+ * humains cohérents font basculer le routage.
+ *
+ * ### Signaux produits
+ * - **rejected** : 1 signal négatif (w=0.5) sur la stratégie rejetée
+ * - **corrected** : 1 signal négatif (w=0.5) sur la stratégie rejetée
+ *                 + 1 signal positif (w=0.5) sur la stratégie suggérée
+ * - **approved**  : aucun signal (l'outcome de résolution le couvrira)
+ *
+ * ### Traçabilité
+ * La colonne `signal_source = "human"` permet au dashboard et au jury de
+ * distinguer les signaux humains des outcomes automatiques.
+ */
+export async function recordHumanFeedback(
+  incidentId: string,
+  alertText: string,
+  strategyName: string,
+  feedback: HumanFeedback,
+  suggestedStrategy?: string,
+): Promise<void> {
+  const embedding = pseudoEmbedding(alertText);
+  const HUMAN_WEIGHT = 0.5;
+
+  if (feedback === "rejected" || feedback === "corrected") {
+    // Signal négatif pondéré pour la stratégie rejetée
+    await db.insert(incidentVectorsTable).values({
+      incidentId,
+      errorMessageText: alertText,
+      embedding,
+      strategyName,
+      outcomeSuccess: false,
+      signalSource: "human",
+      weight: HUMAN_WEIGHT,
+    });
+
+    // Recalibration immédiate : le facteur de correction doit refléter
+    // l'avis de l'humain avant la prochaine décision de routage.
+    await recalibrateStrategy(strategyName);
+
+    // Incrémenter le compteur de signaux humains dans strategy_calibration
+    await db.execute(sql`
+      INSERT INTO strategy_calibration (strategy_name, human_signal_count, last_recalculated_at)
+      VALUES (${strategyName}, 1, now())
+      ON CONFLICT (strategy_name) DO UPDATE
+      SET human_signal_count   = strategy_calibration.human_signal_count + 1,
+          last_recalculated_at = now()
+    `);
+  }
+
+  if (feedback === "corrected" && suggestedStrategy) {
+    // Signal positif pondéré pour la stratégie suggérée par l'humain
+    await db.insert(incidentVectorsTable).values({
+      incidentId,
+      errorMessageText: alertText,
+      embedding,
+      strategyName: suggestedStrategy,
+      outcomeSuccess: true,
+      signalSource: "human",
+      weight: HUMAN_WEIGHT,
+    });
+
+    await recalibrateStrategy(suggestedStrategy);
+
+    await db.execute(sql`
+      INSERT INTO strategy_calibration (strategy_name, human_signal_count, last_recalculated_at)
+      VALUES (${suggestedStrategy}, 1, now())
+      ON CONFLICT (strategy_name) DO UPDATE
+      SET human_signal_count   = strategy_calibration.human_signal_count + 1,
+          last_recalculated_at = now()
+    `);
+  }
+
+  // Journal d'exécution — traçabilité pour le dashboard et le jury
+  await db.insert(executionLogsTable).values({
+    incidentId,
+    actionTaken: `HUMAN_FEEDBACK_${feedback.toUpperCase()}`,
+    result: JSON.stringify({
+      strategyName,
+      feedback,
+      suggestedStrategy: suggestedStrategy ?? null,
+      signalWeight: HUMAN_WEIGHT,
+      note: "Couche 2 → Couche 1 : le jugement humain réalimente directement le win-rate SQL.",
+    }),
+  });
+}
+
 export type CalibrationStatus = "calibrated" | "downgraded" | "upgraded" | "no_data";
 
 export interface CalibrationRow {
@@ -303,6 +408,7 @@ export interface CalibrationRow {
   observedWinRate: number | null;
   correctionFactor: number;
   predictionCount: number;
+  humanSignalCount: number;
   deviation: number | null;
   status: CalibrationStatus;
   lastRecalculatedAt: Date;
@@ -318,10 +424,12 @@ export async function getAllCalibrationData(): Promise<CalibrationRow[]> {
     observed_win_rate: string | null;
     correction_factor: string;
     prediction_count: string;
+    human_signal_count: string;
     last_recalculated_at: string;
   }>(sql`
     SELECT strategy_name, avg_predicted_win_rate, observed_win_rate,
-           correction_factor, prediction_count, last_recalculated_at
+           correction_factor, prediction_count, human_signal_count,
+           last_recalculated_at
     FROM strategy_calibration
     ORDER BY prediction_count DESC, strategy_name
   `);
@@ -331,6 +439,7 @@ export async function getAllCalibrationData(): Promise<CalibrationRow[]> {
     const observed = r.observed_win_rate != null ? Number(r.observed_win_rate) : null;
     const factor = Number(r.correction_factor);
     const count = Number(r.prediction_count);
+    const humanSignalCount = Number(r.human_signal_count ?? 0);
     const deviation = observed != null ? observed - predicted : null;
 
     let status: CalibrationStatus;
@@ -350,6 +459,7 @@ export async function getAllCalibrationData(): Promise<CalibrationRow[]> {
       observedWinRate: observed,
       correctionFactor: factor,
       predictionCount: count,
+      humanSignalCount,
       deviation,
       status,
       lastRecalculatedAt: new Date(r.last_recalculated_at),

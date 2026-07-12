@@ -97,6 +97,10 @@ def reject_incident(incident_id: str) -> dict | None:
     return api_post(f"/incidents/{incident_id}/reject", {})
 
 
+def correct_incident(incident_id: str, suggested_strategy: str) -> dict | None:
+    return api_post(f"/incidents/{incident_id}/correct", {"suggestedStrategy": suggested_strategy})
+
+
 # ── Scénarios prédéfinis ─────────────────────────────────────────────────────
 
 PRESET_SCENARIOS = {
@@ -485,6 +489,9 @@ with tab_incidents:
         pending = [i for i in incidents if i["status"] == "PENDING_APPROVAL"]
         others = [i for i in incidents if i["status"] != "PENDING_APPROVAL"]
 
+        # Liste des stratégies disponibles pour la correction humaine
+        _all_strategies = sorted({v[1] for v in PRESET_SCENARIOS.values()})
+
         if pending:
             st.warning(f"🟡 {len(pending)} incident(s) en attente d'approbation humaine")
             for inc in pending:
@@ -494,21 +501,24 @@ with tab_incidents:
                 wr = ctx.get("winRate")
                 rag_str = f"{rag:.3f}" if rag is not None else "—"
                 wr_str = f"{wr * 100:.0f}%" if wr is not None else "—"
+                inc_key = inc["incidentId"]
 
                 with st.container(border=True):
                     st.markdown(
-                        f"**`{inc['incidentId'][:8]}`** · stratégie `{strategy}` · "
+                        f"**`{inc_key[:8]}`** · stratégie proposée : `{strategy}` · "
                         f"RAG: `{rag_str}` · win-rate: `{wr_str}`"
                     )
                     st.caption(f"Alerte : {ctx.get('alertText', '')[:120]}")
+
+                    # ── Ligne 1 : Approuver / Rejeter ───────────────────
                     col_ap, col_rj, _ = st.columns([1, 1, 3])
                     with col_ap:
                         if st.button(
                             "✅ Approuver",
-                            key=f"approve_{inc['incidentId']}",
+                            key=f"approve_{inc_key}",
                             type="primary",
                         ):
-                            result = approve_incident(inc["incidentId"])
+                            result = approve_incident(inc_key)
                             if result:
                                 st.success("Approuvé — l'agent reprend en mode AUTONOMOUS")
                                 time.sleep(1)
@@ -518,12 +528,46 @@ with tab_incidents:
                     with col_rj:
                         if st.button(
                             "❌ Rejeter",
-                            key=f"reject_{inc['incidentId']}",
+                            key=f"reject_{inc_key}",
                         ):
-                            result = reject_incident(inc["incidentId"])
+                            result = reject_incident(inc_key)
                             if result:
-                                st.warning("Rejeté — incident clôturé sans action corrective")
+                                st.warning(
+                                    "Rejeté — signal négatif (×0.5) enregistré dans la mémoire. "
+                                    "Le win-rate de `" + strategy + "` a baissé."
+                                )
                                 time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error(st.session_state.get("_api_error"))
+
+                    # ── Ligne 2 : Corriger (stratégie alternative) ──────
+                    with st.expander("✏️ Suggérer une stratégie alternative…", expanded=False):
+                        st.caption(
+                            "La mémoire recevra un signal négatif (×0.5) pour `" + strategy + "` "
+                            "et un signal positif (×0.5) pour la stratégie choisie — "
+                            "sans attendre la fin d'un incident."
+                        )
+                        alt_strategies = [s for s in _all_strategies if s != strategy]
+                        suggested = st.selectbox(
+                            "Stratégie alternative",
+                            alt_strategies,
+                            key=f"suggest_{inc_key}",
+                        )
+                        if st.button(
+                            f"✅ Confirmer : utiliser `{suggested}`",
+                            key=f"correct_{inc_key}",
+                            type="secondary",
+                        ):
+                            result = correct_incident(inc_key, suggested)
+                            if result:
+                                st.success(
+                                    f"Correction enregistrée — "
+                                    f"signal −0.5 pour `{strategy}`, "
+                                    f"signal +0.5 pour `{suggested}`. "
+                                    "La calibration a été mise à jour."
+                                )
+                                time.sleep(1.5)
                                 st.rerun()
                             else:
                                 st.error(st.session_state.get("_api_error"))
@@ -601,12 +645,12 @@ with tab_memory:
 
 
 with tab_calibration:
-    st.header("🎯 Calibration automatique du bandit contextuel")
+    st.header("🎯 Calibration automatique & feedback humain")
     st.caption(
-        "La Couche 1 enregistre le win-rate **prédit** au moment de chaque décision de routage et le compare "
-        "au win-rate **réellement observé** (issu de `incident_vectors`). Si l'écart dépasse 15%, un "
-        "facteur de correction multiplicatif est appliqué aux décisions suivantes — la mémoire s'auto-corrige. "
-        "Entièrement porté par **CockroachDB** — aucun service ML externe."
+        "La **Couche 1** enregistre le win-rate prédit vs observé et auto-corrige les décisions futures. "
+        "La **Couche 2** ferme ici sa boucle d'apprentissage : chaque rejet ou correction humaine "
+        "injecte un signal pondéré (×0.5) directement dans `incident_vectors` — sans attendre la fin d'un incident. "
+        "Entièrement porté par **CockroachDB**, aucun service ML externe."
     )
 
     col_r_cal, col_recal, _ = st.columns([1, 2, 4])
@@ -654,12 +698,22 @@ with tab_calibration:
                 "no_data":    "⚪ Sans données",
             }
 
+            total_human_signals = sum(r.get("humanSignalCount", 0) for r in rows)
+            if total_human_signals > 0:
+                st.info(
+                    f"🧑‍💻 **{total_human_signals} signal(s) humain(s) intégré(s)** dans la mémoire vectorielle "
+                    f"(rejets + corrections, poids ×0.5 chacun). "
+                    "Les stratégies rejetées ont vu leur win-rate baisser ; "
+                    "les stratégies suggérées ont vu leur win-rate monter."
+                )
+
             table_rows = []
             for r in rows:
                 predicted = r["avgPredictedWinRate"]
                 observed  = r["observedWinRate"]
                 factor    = r["correctionFactor"]
                 deviation = r["deviation"]
+                human_n   = r.get("humanSignalCount", 0)
                 table_rows.append({
                     "Stratégie":              r["strategyName"],
                     "Prédit (avg)":           f"{predicted * 100:.1f}%",
@@ -669,6 +723,7 @@ with tab_calibration:
                         if deviation is not None else "—"
                     ),
                     "Facteur correction":     f"×{factor:.3f}" if factor != 1.0 else "×1.000 (neutre)",
+                    "Signaux humains":        human_n if human_n > 0 else "—",
                     "Décisions enregistrées": r["predictionCount"],
                     "Statut":                 STATUS_LABELS.get(r["status"], r["status"]),
                 })

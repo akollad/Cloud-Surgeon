@@ -174,10 +174,20 @@ ALTER TABLE incident_state
 -- aucun service ML externe requis.
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS strategy_calibration (
-    strategy_name         VARCHAR(100) PRIMARY KEY,
+    strategy_name          VARCHAR(100) PRIMARY KEY,
     avg_predicted_win_rate FLOAT NOT NULL DEFAULT 0.5,
-    observed_win_rate     FLOAT,
-    correction_factor     FLOAT NOT NULL DEFAULT 1.0,
-    prediction_count      INT NOT NULL DEFAULT 0,
-    last_recalculated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    observed_win_rate      FLOAT,
+    correction_factor      FLOAT NOT NULL DEFAULT 1.0,
+    prediction_count       INT NOT NULL DEFAULT 0,
+    -- Tâche 9 : nombre cumulé de signaux humains (rejets + corrections)
+    human_signal_count     INT NOT NULL DEFAULT 0,
+    last_recalculated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Migration Tâche 9 : signal source et pondération des signaux humains
+ALTER TABLE incident_vectors
+    ADD COLUMN IF NOT EXISTS signal_source VARCHAR(10) NOT NULL DEFAULT 'outcome',
+    ADD COLUMN IF NOT EXISTS weight        FLOAT       NOT NULL DEFAULT 1.0;
+
+ALTER TABLE strategy_calibration
+    ADD COLUMN IF NOT EXISTS human_signal_count INT NOT NULL DEFAULT 0;
