@@ -33,6 +33,7 @@ by raw modelId; use an inference profile ID instead, e.g.
 `{"code":7,"message":"unauthorized"}` from `GET /api/v1/clusters/{id}`. The
 service account behind the key needs an explicit role (Cluster Admin /
 Cluster Read) assigned to that specific cluster in the CockroachDB Cloud
-console — creating the API key alone is not sufficient. This must be fixed
-by the user in the console; it is not a code or endpoint-path bug (the base
-path is `https://cockroachlabs.cloud/api/v1`, not `/api/v2`).
+console — creating the API key alone is not sufficient. Confirmed fix:
+assigning the role in the console resolved it immediately, no code/endpoint
+change needed (base path is `https://cockroachlabs.cloud/api/v1`, not
+`/api/v2`).

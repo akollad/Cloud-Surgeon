@@ -186,10 +186,10 @@ tableaux en interrogeant à nouveau le backend.
   jamais présentée comme un vrai appel réussi.
 - **Appel CockroachDB Cloud API réel** : `execute_ccloud_command` interroge
   `GET /api/v1/clusters/{id}` avec `COCKROACH_CLOUD_API_KEY` /
-  `COCKROACH_CLOUD_CLUSTER_ID` quand ils sont configurés. Actuellement bloqué
-  par un `403 unauthorized` — la clé de service account doit avoir un rôle
-  (Cluster Admin / Cluster Read) explicitement assigné sur ce cluster dans
-  la console CockroachDB Cloud, en plus d'exister.
+  `COCKROACH_CLOUD_CLUSTER_ID`. Fonctionne en production — la clé de service
+  account a un rôle (Cluster Admin/Read) assigné sur ce cluster dans la
+  console CockroachDB Cloud. Chaque tour de diagnostic renvoie désormais le
+  vrai état du cluster (`simulated: false`).
 - **Action AWS reste volontairement simulée** : `aws_repair_service` n'exécute
   jamais de vraie action corrective (restart, scaling...) — un LLM qui
   déclenche automatiquement des actions destructives sur une vraie
