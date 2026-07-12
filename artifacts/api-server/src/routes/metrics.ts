@@ -419,8 +419,9 @@ router.post("/metrics/ingest", async (req, res): Promise<void> => {
 
 // ── Seed ──────────────────────────────────────────────────────────────────
 
-router.post("/metrics/seed", async (_req, res): Promise<void> => {
-  const result = await seedVectorMemory();
+router.post("/metrics/seed", async (req, res): Promise<void> => {
+  const force = req.query.force === "true" || req.body?.force === true;
+  const result = await seedVectorMemory(force);
   res.json(result);
 });
 

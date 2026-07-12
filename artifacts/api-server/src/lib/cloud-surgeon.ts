@@ -321,7 +321,7 @@ export async function recordHumanFeedback(
   feedback: HumanFeedback,
   suggestedStrategy?: string,
 ): Promise<void> {
-  const embedding = await generateEmbedding(alertText);
+  const { embedding } = await generateEmbedding(alertText);
   const HUMAN_WEIGHT = 0.5;
 
   if (feedback === "rejected" || feedback === "corrected") {
@@ -911,7 +911,7 @@ export async function runAgentLoop(
   // LAYER 2 — Routing decision (between Diagnostician and Remediator)
   // ════════════════════════════════════════════════════════════
   if (context.turns.length === 1 && !context.routingDecisionComputed) {
-    const embedding = await generateEmbedding(alertText);
+    const { embedding } = await generateEmbedding(alertText);
     const ragHit = await findSimilarIncident(embedding);
     // Win-rate is computed on the DETECTED strategy (not the RAG hit strategy):
     // the detected strategy is the agent's decision; the RAG hit is used as a
@@ -1069,7 +1069,7 @@ export async function runAgentLoop(
     await indexResolvedIncident(
       incident.incidentId,
       alertText,
-      await generateEmbedding(alertText),
+      (await generateEmbedding(alertText)).embedding,
       strategyName,
       repairSuccess,
     );

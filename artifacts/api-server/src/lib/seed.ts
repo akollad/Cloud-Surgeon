@@ -58,33 +58,43 @@ const SEED_INCIDENTS: Array<{ text: string; strategy: string }> = [
 let seeded = false;
 
 /**
- * Checks whether the vector memory already contains seed entries (identified
- * by strategy_name != 'default_repair' and incident_id IS NULL), and if not,
- * inserts synthetic incidents via direct SQL.
- * Call at server startup — idempotent.
+ * Seeds the vector memory with synthetic incidents.
+ *
+ * @param force - When true, deletes all existing seed entries (incident_id IS NULL)
+ *   and re-inserts them. Use after changing the embedding provider so that stored
+ *   vectors and query vectors live in the same embedding space.
+ *   When false (default), skips if seeds already exist (idempotent).
  */
-export async function seedVectorMemory(): Promise<{ seeded: boolean; count: number }> {
-  if (seeded) return { seeded: false, count: 0 };
+export async function seedVectorMemory(
+  force = false,
+): Promise<{ seeded: boolean; count: number; provider?: string }> {
+  if (!force && seeded) return { seeded: false, count: 0 };
 
-  // Count non-default seed entries (= real seed entries)
-  const countResult = await db.execute<{ n: string }>(sql`
-    SELECT COUNT(*) AS n
-    FROM incident_vectors
-    WHERE incident_id IS NULL
-      AND strategy_name != 'default_repair'
-  `);
-  const existingSeeds = Number(countResult.rows[0]?.n ?? 0);
-
-  if (existingSeeds >= SEED_INCIDENTS.length) {
-    seeded = true;
-    return { seeded: false, count: existingSeeds };
+  if (force) {
+    // Purge stale seeds so they are recreated in the current embedding space
+    await db.execute(sql`DELETE FROM incident_vectors WHERE incident_id IS NULL`);
+    seeded = false;
+  } else {
+    // Count non-default seed entries (= real seed entries)
+    const countResult = await db.execute<{ n: string }>(sql`
+      SELECT COUNT(*) AS n
+      FROM incident_vectors
+      WHERE incident_id IS NULL
+        AND strategy_name != 'default_repair'
+    `);
+    const existingSeeds = Number(countResult.rows[0]?.n ?? 0);
+    if (existingSeeds >= SEED_INCIDENTS.length) {
+      seeded = true;
+      return { seeded: false, count: existingSeeds };
+    }
   }
 
-  // Insert via direct SQL to avoid any issues with Drizzle types
-  // on nullable UUID columns (incident_id).
+  // Insert via direct SQL to avoid Drizzle issues with nullable UUID columns.
+  let provider = "unknown";
   for (const s of SEED_INCIDENTS) {
-    const embedding = await generateEmbedding(s.text);
-    const embeddingLiteral = `[${embedding.join(",")}]`;
+    const result = await generateEmbedding(s.text);
+    provider = result.provider;
+    const embeddingLiteral = `[${result.embedding.join(",")}]`;
     await db.execute(sql`
       INSERT INTO incident_vectors
         (error_message_text, embedding, strategy_name, outcome_success)
@@ -95,5 +105,5 @@ export async function seedVectorMemory(): Promise<{ seeded: boolean; count: numb
   }
 
   seeded = true;
-  return { seeded: true, count: SEED_INCIDENTS.length };
+  return { seeded: true, count: SEED_INCIDENTS.length, provider };
 }

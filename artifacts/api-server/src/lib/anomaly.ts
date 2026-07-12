@@ -238,7 +238,7 @@ export async function ingestMetrics(datapoints: MetricDatapoint[]): Promise<Inge
     let embedding: number[];
 
     try {
-      embedding = await generateEmbedding(metricText);
+      ({ embedding } = await generateEmbedding(metricText));
     } catch (err) {
       logger.warn({ err, metric: dp.metricName }, "[ANOMALY] Embedding failed — skipping datapoint");
       continue;

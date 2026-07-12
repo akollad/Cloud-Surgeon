@@ -85,7 +85,7 @@ router.post("/incidents/trigger", async (req, res): Promise<void> => {
   const alreadyTerminal = incident.status === "RESOLVED" || incident.status === "FAILED";
 
   if (!alreadyTerminal && incident.status !== "PENDING_APPROVAL") {
-    const embedding = await generateEmbedding(alertText);
+    const { embedding } = await generateEmbedding(alertText);
     const similar = await findSimilarIncident(embedding);
     if (similar) {
       req.log.info(

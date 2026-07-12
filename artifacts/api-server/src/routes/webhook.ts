@@ -150,7 +150,7 @@ router.post("/webhook/cloudwatch", async (req, res): Promise<void> => {
   const alreadyTerminal = incident.status === "RESOLVED" || incident.status === "FAILED";
 
   if (!alreadyTerminal) {
-    const embedding = await generateEmbedding(alertText);
+    const { embedding } = await generateEmbedding(alertText);
     const similar = await findSimilarIncident(embedding);
     if (similar) {
       req.log.info({ distance: similar.distance }, "Found similar historical incident via RAG");
