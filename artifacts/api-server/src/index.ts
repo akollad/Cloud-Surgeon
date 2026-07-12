@@ -32,14 +32,21 @@ app.listen(port, async (err) => {
   const provider = (process.env.AI_PROVIDER ?? "bedrock").toLowerCase();
   const bedrockAuth = bedrockAuthMethod();
   const bedrockStatus = bedrockIsConfigured()
-    ? `LIVE (${bedrockAuth}, region: ${process.env.BEDROCK_REGION ?? "eu-west-1"})`
-    : "SIMULATED (no credentials)";
+    ? `credentials set (${bedrockAuth}) — geo-blocked from container; use LIVE Anthropic fallback`
+    : "no credentials";
+  const anthropicLive = !!(
+    process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY ||
+    process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL
+  );
   const aiProviderLabel =
     provider === "anthropic"
-      ? `anthropic (Replit integration)`
+      ? `anthropic ${anthropicLive ? "🟢 LIVE (Replit integration)" : "⚠️ no API key"}`
       : `bedrock — ${bedrockStatus}`;
 
-  const awsStatus = process.env.AWS_ACCESS_KEY_ID ? "LIVE" : "SIMULATED (no AWS_ACCESS_KEY_ID)";
+  const awsRegion = process.env.AWS_REGION ?? "(not set)";
+  const awsStatus = process.env.AWS_ACCESS_KEY_ID
+    ? `🟢 LIVE (region: ${awsRegion})`
+    : "🔴 SIMULATED (no AWS_ACCESS_KEY_ID)";
 
   let dbStatus = "unknown";
   try {
@@ -60,8 +67,10 @@ app.listen(port, async (err) => {
   }
   if (!process.env.AWS_ACCESS_KEY_ID) {
     logger.info("[BOOT] AWS tools in SIMULATED mode — set AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY to enable live calls");
+  } else if (!["us-east-1","us-east-2","us-west-1","us-west-2","eu-west-1","eu-west-2","eu-west-3","eu-central-1","eu-north-1","ap-southeast-1","ap-southeast-2","ap-northeast-1","ca-central-1","sa-east-1"].includes(awsRegion)) {
+    logger.warn(`[BOOT] AWS_REGION="${awsRegion}" does not look like a valid AWS region — ECS/RDS/Lambda calls will fail`);
   }
-  if (!bedrockIsConfigured()) {
+  if (provider !== "anthropic" && !bedrockIsConfigured()) {
     logger.warn("[BOOT] Bedrock unconfigured — set BEDROCK_API_KEY or AWS credentials; thoughts will be simulated");
   }
   // ──────────────────────────────────────────────────────────────────────
