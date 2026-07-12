@@ -8,8 +8,8 @@ Two services must both be running:
 
 | Workflow | Command | Port |
 |---|---|---|
-| **Cloud-Surgeon Dashboard** | `streamlit run frontend/app.py --server.port 5000` | 5000 (Streamlit UI) |
-| **artifacts/api-server: API Server** | `pnpm --filter @workspace/api-server run dev` | 8080 → proxied to `/api` |
+| **Cloud-Surgeon Dashboard** | `cd cloud-surgeon-agent && /home/runner/workspace/.pythonlibs/bin/streamlit run frontend/app.py --server.port 5000 --server.address 0.0.0.0` | 5000 (Streamlit UI) |
+| **API Server** | `PORT=8080 pnpm --filter @workspace/api-server run dev` | 8080 → proxied à `/api` |
 
 - `pnpm install` — install Node dependencies (run from workspace root)
 - `pip install -r cloud-surgeon-agent/requirements.txt` — install Python/Streamlit dependencies
@@ -25,7 +25,8 @@ Two services must both be running:
 | `CLOUD_SURGEON_API_KEY` | Shared auth key between Streamlit dashboard and API server |
 | `COCKROACH_CLOUD_API_KEY` | (Optional) CockroachDB Cloud API key for real cluster status queries |
 | `COCKROACH_CLOUD_CLUSTER_ID` | (Optional) Cluster ID paired with the above |
-| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | (Optional) Enable real Bedrock calls — geo-blocked in Replit's datacenter, falls back to simulated reasoning |
+| `BEDROCK_API_KEY` | Bearer token pour AWS Bedrock (format `bdak-…`). Auth ok, quota journalier à surveiller |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | (Optional) Active les vraies réparations ECS/RDS/Lambda. Sans eux : mode SIMULATED |
 
 ## Stack
 
@@ -59,7 +60,7 @@ Two services must both be running:
 
 - **Use `psql` + `schema.sql` for DDL, not `drizzle-kit push`**: CockroachDB's dialect (especially `CREATE VECTOR INDEX`) is not guaranteed compatible with drizzle-kit introspection.
 - **psql connection string needs `&sslrootcert=system`**: append this to `COCKROACHDB_URL` when using psql directly.
-- **Bedrock is geo-blocked**: AWS/Anthropic blocks Bedrock calls from Replit's datacenter. The agent falls back to deterministic simulated reasoning automatically.
+- **Bedrock — Claude geo-bloqué, Nova Pro quota journalier**: Les modèles Claude sur Bedrock sont bloqués depuis le datacenter Replit. Amazon Nova Pro (`eu.amazon.nova-pro-v1:0`) répond correctement (auth ok via BEDROCK_API_KEY Bearer token) mais le quota journalier est épuisé sur le compte actuel. Attendre la remise à zéro (minuit UTC) puis basculer `bedrock.ts` sur la Converse API + Nova Pro. Fallback actuel : reasoning simulé (déterministe, toujours honnêtement labellé `thoughtSource: "simulated"`).
 - **API server proxied at `/api`**: the Streamlit dashboard calls `http://localhost:80/api` — the proxy routes this to the API server's port.
 
 ## Security
