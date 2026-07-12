@@ -317,19 +317,21 @@ def _home_summary_widget() -> None:
     import time as _time
 
     # ── CDC badge (refresh every 30 s — SSE connection is not free) ─────────
+    # Strategy: only overwrite the cached status when a real result comes back.
+    # If the SSE read times out or fails, keep the previous good value so the
+    # badge label never flickers to "Connecting…" mid-cycle.
     _now = _time.time()
     _cache_age = _now - st.session_state.get("_cdc_status_ts", 0)
     if _cache_age > 30 or "_cdc_status" not in st.session_state:
-        _status = fetch_audit_stream_status()
-        st.session_state["_cdc_status"] = _status
+        _fresh = fetch_audit_stream_status()
+        # Always advance the timestamp to avoid hammering the SSE endpoint.
         st.session_state["_cdc_status_ts"] = _now
-        # Keep the last *successful* result so we can show it while reconnecting.
-        if _status is not None:
-            st.session_state["_cdc_last_known"] = _status
-    else:
-        _status = st.session_state["_cdc_status"]
+        if _fresh is not None:
+            # Successful read — update the displayed status.
+            st.session_state["_cdc_status"] = _fresh
 
-    _cdc_last_known = st.session_state.get("_cdc_last_known")
+    # Use whatever the last successful read returned; None only on first boot.
+    _status = st.session_state.get("_cdc_status")
 
     # ── Audit event counter (since session start) ────────────────────────────
     # Uses /logs/count so the total is accurate even when /logs is paginated.
@@ -359,15 +361,6 @@ def _home_summary_widget() -> None:
         elif _status and _status.get("type") in ("connected", "heartbeat"):
             st.info("🔵 Polling fallback")
             st.caption("2-second polling (no changefeed tier)")
-        elif _cdc_last_known:
-            # API was slow / timed out but we have a prior reading — show it
-            # with a subtle "reconnecting" note rather than a warning.
-            if _cdc_last_known.get("cdcActive"):
-                st.success("🟢 CDC LIVE")
-                st.caption("Reconnecting… (last known: changefeed active)")
-            else:
-                st.info("🔵 Polling fallback")
-                st.caption("Reconnecting… (last known: polling mode)")
         else:
             # No successful reading yet — server may still be booting.
             st.info("⏳ Connecting…")
