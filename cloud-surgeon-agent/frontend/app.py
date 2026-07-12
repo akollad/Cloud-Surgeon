@@ -463,7 +463,7 @@ with st.sidebar:
     # ── Logo ──────────────────────────────────────────────────────────────
     _logo_path = os.path.join(os.path.dirname(__file__), "logo.png")
     if os.path.exists(_logo_path):
-        st.image(_logo_path, width='stretch')
+        st.image(_logo_path, use_container_width=True)
         st.divider()
 
     st.header("🚨 Trigger an Incident")
