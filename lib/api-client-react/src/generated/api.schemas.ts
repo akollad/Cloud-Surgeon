@@ -20,6 +20,7 @@ export type AgentTurnThoughtSource = typeof AgentTurnThoughtSource[keyof typeof 
 
 
 export const AgentTurnThoughtSource = {
+  anthropic: 'anthropic',
   bedrock: 'bedrock',
   simulated: 'simulated',
 } as const;

@@ -11,7 +11,8 @@ import {
   type IncidentState,
 } from "@workspace/db";
 import { callMcpTool } from "../mcp/client";
-import { invokeBedrockThought } from "./bedrock";
+import { invokeLLMThought } from "./llm";
+import { generateEmbedding } from "./embeddings";
 import { type ChaosConfig, ChaosPartitionError, injectChaos, sleep as chaosSleep } from "./chaos";
 
 // ============================================================================
@@ -31,7 +32,7 @@ interface AgentTurn {
   turn: number;
   agent: AgentName;
   thought: string;
-  thoughtSource: "bedrock" | "simulated";
+  thoughtSource: "anthropic" | "bedrock" | "simulated";
   toolName: string;
   toolInput: Record<string, unknown>;
   toolOutput: Record<string, unknown>;
@@ -62,20 +63,6 @@ export function fingerprint(alertText: string): string {
   return createHash("sha256").update(alertText.trim()).digest("hex");
 }
 
-/**
- * Vecteur pseudo-aléatoire déterministe (1024 dims) dérivé du texte.
- * Remplaçant d'Amazon Titan Text Embeddings V2 pour la démo.
- */
-export function pseudoEmbedding(text: string): number[] {
-  let x = BigInt("0x" + createHash("sha256").update(text.trim()).digest("hex"));
-  const mask = (1n << 31n) - 1n;
-  const vec: number[] = [];
-  for (let i = 0; i < 1024; i++) {
-    x = (1103515245n * x + 12345n) & mask;
-    vec.push((Number(x) / Number(mask)) * 2 - 1);
-  }
-  return vec;
-}
 
 /** Détecte la stratégie à appliquer à partir du texte d'alerte. */
 export function detectStrategy(alertText: string): string {
@@ -334,7 +321,7 @@ export async function recordHumanFeedback(
   feedback: HumanFeedback,
   suggestedStrategy?: string,
 ): Promise<void> {
-  const embedding = pseudoEmbedding(alertText);
+  const embedding = await generateEmbedding(alertText);
   const HUMAN_WEIGHT = 0.5;
 
   if (feedback === "rejected" || feedback === "corrected") {
@@ -758,34 +745,6 @@ async function logExecution(
 
 const sleep = chaosSleep;
 
-// ── Pensées par défaut (fallback si Bedrock non disponible) ────────────────
-
-const DIAGNOSTIC_THOUGHT =
-  "Je détecte une anomalie d'infrastructure. Avant toute action corrective, " +
-  "je vérifie l'état réel du composant concerné via l'API CockroachDB Cloud.";
-
-function REMEDIATION_THOUGHT(strategyName: string, routingMode: RoutingMode): string {
-  const modeNote =
-    routingMode === "EXPLORATORY"
-      ? " [MODE EXPLORATOIRE : stratégie inconnue, diagnostic étendu activé]"
-      : routingMode === "AUTONOMOUS"
-        ? " [MODE AUTONOME : mémoire vectorielle confirme la fiabilité de cette stratégie]"
-        : " [MODE APPROUVÉ : validation humaine reçue avant exécution]";
-  return (
-    `Le diagnostic confirme la dégradation. J'applique la stratégie '${strategyName}'${modeNote}. ` +
-    "Je déclenche une lecture d'état non destructive sur le service AWS concerné — " +
-    "toute action corrective requiert une approbation humaine explicite."
-  );
-}
-
-function AUDIT_THOUGHT(repairSuccess: boolean, strategyName: string): string {
-  return repairSuccess
-    ? `L'Auditor vérifie les sorties du Remediator : la réparation via '${strategyName}' a réussi. ` +
-        "Les métriques sont revenues à la normale. L'incident peut être clôturé."
-    : `L'Auditor vérifie les sorties du Remediator : la réparation via '${strategyName}' a échoué. ` +
-        "Escalade vers l'équipe d'astreinte recommandée.";
-}
-
 // ── CRUD basique ──────────────────────────────────────────────────────────
 
 export async function getOrCreateIncident(alertText: string): Promise<IncidentState> {
@@ -881,8 +840,7 @@ export async function runAgentLoop(
     const toolInput = {
       commandJson: JSON.stringify({ action: "cluster:status", target: alertText.slice(0, 40) }),
     };
-    const bedrockThought = await invokeBedrockThought(alertText, 0, null);
-    const thought = bedrockThought ?? DIAGNOSTIC_THOUGHT;
+    const { thought, source: thoughtSource } = await invokeLLMThought(alertText, 0, null);
     const toolOutput = await callTool("execute_ccloud_command", toolInput);
 
     await logExecution(
@@ -895,7 +853,7 @@ export async function runAgentLoop(
       turn: 0,
       agent: "diagnostician",
       thought,
-      thoughtSource: bedrockThought ? "bedrock" : "simulated",
+      thoughtSource,
       toolName: "execute_ccloud_command",
       toolInput,
       toolOutput,
@@ -917,7 +875,7 @@ export async function runAgentLoop(
   // COUCHE 2 — Décision de routage (entre Diagnostician et Remediator)
   // ════════════════════════════════════════════════════════════
   if (context.turns.length === 1 && !context.routingDecisionComputed) {
-    const embedding = pseudoEmbedding(alertText);
+    const embedding = await generateEmbedding(alertText);
     const ragHit = await findSimilarIncident(embedding);
     // Le win-rate est calculé sur la stratégie DÉTECTÉE (pas sur celle du
     // RAG hit) : la stratégie détectée est la décision de l'agent, le RAG
@@ -991,8 +949,7 @@ export async function runAgentLoop(
 
     const serviceName = detectServiceName(alertText);
     const toolInput = { serviceName, action: "describe_and_remediate" };
-    const bedrockThought = await invokeBedrockThought(alertText, 1, context.turns[0]?.toolOutput ?? null);
-    const thought = bedrockThought ?? REMEDIATION_THOUGHT(strategyName, routingMode);
+    const { thought, source: thoughtSource } = await invokeLLMThought(alertText, 1, context.turns[0]?.toolOutput ?? null);
     const toolOutput = await callTool("aws_repair_service", toolInput);
 
     await logExecution(
@@ -1005,7 +962,7 @@ export async function runAgentLoop(
       turn: 1,
       agent: "remediator",
       thought,
-      thoughtSource: bedrockThought ? "bedrock" : "simulated",
+      thoughtSource,
       toolName: "aws_repair_service",
       toolInput,
       toolOutput,
@@ -1036,8 +993,7 @@ export async function runAgentLoop(
       repairVerified: repairSuccess,
       strategyUsed: strategyName,
     };
-    const bedrockThought = await invokeBedrockThought(alertText, 2, repairOutput ?? null);
-    const thought = bedrockThought ?? AUDIT_THOUGHT(repairSuccess, strategyName);
+    const { thought, source: thoughtSource } = await invokeLLMThought(alertText, 2, repairOutput ?? null);
     const toolOutput = await callTool("verify_resolution", toolInput);
 
     await logExecution(
@@ -1050,7 +1006,7 @@ export async function runAgentLoop(
       turn: 2,
       agent: "auditor",
       thought,
-      thoughtSource: bedrockThought ? "bedrock" : "simulated",
+      thoughtSource,
       toolName: "verify_resolution",
       toolInput,
       toolOutput,
@@ -1077,7 +1033,7 @@ export async function runAgentLoop(
     await indexResolvedIncident(
       incident.incidentId,
       alertText,
-      pseudoEmbedding(alertText),
+      await generateEmbedding(alertText),
       strategyName,
       repairSuccess,
     );

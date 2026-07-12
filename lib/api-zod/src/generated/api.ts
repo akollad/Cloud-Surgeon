@@ -38,7 +38,7 @@ export const TriggerIncidentResponse = zod.object({
   "turn": zod.number(),
   "agent": zod.string().optional().describe('Nom de l\'agent ayant exécuté ce tour (diagnostician\/remediator\/auditor)'),
   "thought": zod.string(),
-  "thoughtSource": zod.enum(['bedrock', 'simulated']).optional(),
+  "thoughtSource": zod.enum(['anthropic', 'bedrock', 'simulated']).optional(),
   "toolName": zod.string(),
   "toolInput": zod.record(zod.string(), zod.unknown()),
   "toolOutput": zod.record(zod.string(), zod.unknown())
@@ -73,7 +73,7 @@ export const ListIncidentsResponseItem = zod.object({
   "turn": zod.number(),
   "agent": zod.string().optional().describe('Nom de l\'agent ayant exécuté ce tour (diagnostician\/remediator\/auditor)'),
   "thought": zod.string(),
-  "thoughtSource": zod.enum(['bedrock', 'simulated']).optional(),
+  "thoughtSource": zod.enum(['anthropic', 'bedrock', 'simulated']).optional(),
   "toolName": zod.string(),
   "toolInput": zod.record(zod.string(), zod.unknown()),
   "toolOutput": zod.record(zod.string(), zod.unknown())
@@ -113,7 +113,7 @@ export const GetIncidentResponse = zod.object({
   "turn": zod.number(),
   "agent": zod.string().optional().describe('Nom de l\'agent ayant exécuté ce tour (diagnostician\/remediator\/auditor)'),
   "thought": zod.string(),
-  "thoughtSource": zod.enum(['bedrock', 'simulated']).optional(),
+  "thoughtSource": zod.enum(['anthropic', 'bedrock', 'simulated']).optional(),
   "toolName": zod.string(),
   "toolInput": zod.record(zod.string(), zod.unknown()),
   "toolOutput": zod.record(zod.string(), zod.unknown())

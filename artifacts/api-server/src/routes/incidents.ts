@@ -15,11 +15,11 @@ import {
   getIncidentById,
   getIncidentHandoffs,
   getOrCreateIncident,
-  pseudoEmbedding,
   recordHumanFeedback,
   runAgentLoop,
   type IncidentContext,
 } from "../lib/cloud-surgeon";
+import { generateEmbedding } from "../lib/embeddings";
 import { sanitizeAlertText, validateAlertText } from "../lib/prompt-guard";
 import { createChaosConfig } from "../lib/chaos";
 import { apiKeyAuth } from "../middleware/apiKeyAuth";
@@ -85,7 +85,7 @@ router.post("/incidents/trigger", async (req, res): Promise<void> => {
   const alreadyTerminal = incident.status === "RESOLVED" || incident.status === "FAILED";
 
   if (!alreadyTerminal && incident.status !== "PENDING_APPROVAL") {
-    const embedding = pseudoEmbedding(alertText);
+    const embedding = await generateEmbedding(alertText);
     const similar = await findSimilarIncident(embedding);
     if (similar) {
       req.log.info(

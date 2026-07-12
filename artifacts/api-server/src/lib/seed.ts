@@ -14,7 +14,7 @@
 
 import { sql } from "drizzle-orm";
 import { db } from "@workspace/db";
-import { pseudoEmbedding } from "./cloud-surgeon";
+import { generateEmbedding } from "./embeddings";
 
 const SEED_INCIDENTS: Array<{ text: string; strategy: string }> = [
   {
@@ -84,7 +84,7 @@ export async function seedVectorMemory(): Promise<{ seeded: boolean; count: numb
   // Insérer via SQL direct pour éviter tout problème avec les types Drizzle
   // sur les colonnes nullable UUID (incident_id).
   for (const s of SEED_INCIDENTS) {
-    const embedding = pseudoEmbedding(s.text);
+    const embedding = await generateEmbedding(s.text);
     const embeddingLiteral = `[${embedding.join(",")}]`;
     await db.execute(sql`
       INSERT INTO incident_vectors

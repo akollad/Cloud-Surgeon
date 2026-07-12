@@ -144,7 +144,7 @@ components:
           type: string
         thoughtSource:
           type: string
-          enum: [bedrock, simulated]
+          enum: [anthropic, bedrock, simulated]
         toolName:
           type: string
         toolInput:

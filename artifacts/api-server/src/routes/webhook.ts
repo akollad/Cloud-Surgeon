@@ -20,7 +20,8 @@
  */
 import { Router, type IRouter } from "express";
 import { z } from "zod/v4";
-import { getOrCreateIncident, runAgentLoop, pseudoEmbedding, findSimilarIncident } from "../lib/cloud-surgeon";
+import { getOrCreateIncident, runAgentLoop, findSimilarIncident } from "../lib/cloud-surgeon";
+import { generateEmbedding } from "../lib/embeddings";
 import { sanitizeAlertText, validateAlertText } from "../lib/prompt-guard";
 import { db, executionLogsTable } from "@workspace/db";
 
@@ -149,7 +150,7 @@ router.post("/webhook/cloudwatch", async (req, res): Promise<void> => {
   const alreadyTerminal = incident.status === "RESOLVED" || incident.status === "FAILED";
 
   if (!alreadyTerminal) {
-    const embedding = pseudoEmbedding(alertText);
+    const embedding = await generateEmbedding(alertText);
     const similar = await findSimilarIncident(embedding);
     if (similar) {
       req.log.info({ distance: similar.distance }, "Found similar historical incident via RAG");
