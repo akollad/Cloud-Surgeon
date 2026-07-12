@@ -1,0 +1,136 @@
+## Inspiration
+
+On-call rotations are brutal. An alarm fires at 3 AM, a groggy engineer SSH-es into production, runs the same five diagnostic commands they've run a hundred times before, applies the same fix — and goes back to bed. Twenty minutes of human time, $200 of SRE cost, and the knowledge of what happened and how it was fixed lives nowhere except a Slack thread that will be forgotten by morning.
+
+We asked: what if the agent that runs those commands *remembered* every incident it had ever seen? Not in a vector store bolted on as an afterthought, but in a real distributed database that could simultaneously serve as a knowledge base, a confidence ledger, a coordination lock, and a real-time event bus — all with ACID guarantees?
+
+That's the question Cloud-Surgeon was built to answer. CockroachDB isn't just the storage layer here. It *is* the agent's memory architecture.
+
+---
+
+## What it does
+
+Cloud-Surgeon is an autonomous AI DevOps agent that detects, diagnoses, and repairs AWS infrastructure incidents — before the pager fires, and without waking a human.
+
+**Three-layer memory architecture, all backed by CockroachDB:**
+
+**Layer 1 — Causal Memory (Vector RAG)**  
+When an alert arrives, the agent queries `incident_vectors` using a native C-SPANN cosine ANN index on 1024-dimensional embeddings. It finds the most similar historical incident and its winning repair strategy. A `strategy_calibration` table tracks win-rates per strategy, so the routing decision improves with every resolved incident.
+
+**Layer 2 — Confidence-Based Routing**  
+A SQL aggregation computes a correction factor from recent prediction errors. Based on accumulated win-rate, the agent routes each incident to one of three modes:
+- `AUTONOMOUS` — agent acts immediately, no human required  
+- `PENDING_APPROVAL` — agent proposes a fix, waits for operator sign-off  
+- `EXPLORATORY` — first time seeing this type; agent acts cautiously and logs everything  
+
+**Layer 3 — Multi-Agent Coordination**  
+Three specialized agents (Diagnostician → Remediator → Auditor) hand off work via `UPDATE … WHERE claimed_by_agent IS NULL RETURNING *` under `SERIALIZABLE` isolation. CockroachDB retries conflicts automatically — no external lock service, no Redis, no coordination overhead.
+
+**Real-time event bus via CDC:**  
+A CockroachDB webhook changefeed streams every incident state change to the API server, which fans out to all dashboard clients via SSE. The Live Audit tab shows a real-time trail of every agent action — no polling, zero lag.
+
+**Predictive detection:**  
+Before CloudWatch even fires an alarm, the anomaly detector ingests raw metrics (CPU, connection counts, p99 latency) and opens a predictive incident when a threshold is crossed. The agent self-heals before the outage.
+
+---
+
+## How we built it
+
+**Stack:** pnpm monorepo · Express 5 / TypeScript API server · Streamlit dashboard · CockroachDB Serverless (ap-south-1) · AWS SDK v3
+
+**The agent loop** runs as an MCP stdio server (`src/mcp/server.ts`) exposing five tools to Claude:
+- `crdb_cluster_health` — live CockroachDB Cloud REST API call (same endpoint ccloud wraps)
+- `execute_ccloud_command` — ccloud v0.6.12 REST API, authenticated via service-account Bearer token; every response includes a `ccloudEquivalent` field
+- `aws_repair_service` — ECS `UpdateService` / RDS `ModifyDBInstance` / Lambda `PutFunctionConcurrency` via live AWS SDK
+- `crdb_list_slow_queries` — direct SQL via `pg_stat_statements`
+- `crdb_query` — arbitrary read-only SQL for the Auditor agent
+
+**CockroachDB schema highlights:**
+```sql
+-- Layer 1: Vector knowledge base
+CREATE TABLE incident_vectors (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  embedding VECTOR(1024),
+  strategy_name TEXT NOT NULL,
+  outcome_success BOOL NOT NULL
+);
+CREATE VECTOR INDEX ON incident_vectors (embedding)
+  USING vector_cosine_ops;
+
+-- Layer 2: Contextual bandit
+CREATE TABLE strategy_calibration (
+  strategy_name TEXT PRIMARY KEY,
+  predicted_success_rate FLOAT8,
+  actual_success_rate FLOAT8,
+  correction_factor FLOAT8 DEFAULT 1.0
+);
+
+-- Layer 3: Serializable coordination
+BEGIN; SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+UPDATE incident_state
+  SET claimed_by_agent = $1, phase = $2
+  WHERE claimed_by_agent IS NULL
+  RETURNING *;
+COMMIT;
+
+## Challenges we ran into
+
+Bedrock geo-block from Replit's container.
+Every AWS region — us-east-1, us-east-2, us-west-2, eu-west-1 — returned HTTP 400 "Access to Anthropic models is not allowed from unsupported countries, regions, or territories". This is an IP-level block on Replit's datacenter IPs, not a region configuration issue. We confirmed this by testing all regions simultaneously. On an AWS-native deployment (ECS, Lambda), Bedrock activates automatically — the fallback chain is BEDROCK_API_KEY → SigV4 → Anthropic direct.
+
+OpenAI embeddings endpoint blocked by Replit's proxy.
+The AI_INTEGRATIONS_OPENAI_BASE_URL proxy supports chat completions but returns HTTP 400 on POST /embeddings. We built a keyword-aware infra-domain embedding (zero external dependencies): 16 infra signal categories (CPU, memory, connections, throttle, latency, ECS, RDS, Lambda…) mapped to stable 32-dim bands in VECTOR(1024) space, with L2 normalisation. Result: cosine distances of 0.17–0.34 for same-category alerts vs 0.55–0.90 across categories — meaningful RAG without any API key.
+
+ccloud CLI requires browser OAuth.
+ccloud v0.6.12 cannot authenticate headlessly. We reverse-engineered the REST API it wraps and call it directly with a service-account Bearer token. Every tool response includes a ccloudEquivalent field showing the exact ccloud command that would produce the same output.
+
+CockroachDB Serverless connection quirks.
+drizzle-kit push fails on Serverless (no pg_catalog access for DDL introspection). We use hand-written SQL migrations and ?sslrootcert=system in the connection string.
+
+
+
+## Accomplishments that we're proud of
+
+A real CRDB vector index serving live RAG queries — not mocked, not simulated. The C-SPANN ANN index returns the closest historical incident in < 5ms on a cold Serverless cluster.
+Crash recovery that actually works. SIGKILL the process mid-repair → restart → the agent reads its last committed phase from CockroachDB and continues exactly where it stopped. No lost work.
+Zero polling on the dashboard. The Live Audit tab is driven entirely by a CockroachDB webhook changefeed → SSE fan-out. Every incident state change appears in under 200ms.
+Three-layer routing with real calibration. The win-rate SQL updates after every resolved incident. Seed five failures for a strategy and watch the routing flip from AUTONOMOUS to PENDING_APPROVAL live on the dashboard.
+Live AWS tool calls. aws_repair_service calls real ECS, RDS, and Lambda APIs with live credentials — not stubbed responses.
+
+
+## What we learned
+
+Databases are underrated as agent memory. The instinct is to reach for a dedicated vector store, a separate lock service, and a message queue. CockroachDB replaced all three — and added ACID guarantees that none of those point solutions would have given us. The serializable transaction lock that prevents two agents from claiming the same incident is five lines of SQL.
+
+MCP makes tool integration genuinely clean. The agent doesn't need to know how AWS or CockroachDB work — it calls named tools and reasons about the results. Adding a new repair capability is one new tool registration.
+
+Keyword-aware embeddings beat pseudo-random fallbacks by a wide margin. A deterministic hash-based embedding gives cosine distances of ~0.93 for everything (useless). Mapping infra domain knowledge into vector bands gives 0.17–0.34 within categories (useful). You don't always need a foundation model for embeddings — domain structure often matters more.
+
+
+
+## What's next for Cloud-Surgeon
+
+Deploy on AWS ECS to unlock native Bedrock access — Claude Haiku 4.5 and Titan embeddings activate automatically with no code changes
+Real CloudWatch → SNS → webhook integration so any AWS alarm triggers the agent without manual intervention
+Multi-account support — one Cloud-Surgeon instance managing incidents across multiple AWS accounts, with per-account routing policies stored in CockroachDB
+Voyage AI embeddings once a key is provisioned — drop-in replacement in embeddings.ts, same interface
+Operator feedback loop — thumbs up/down on every repair directly updates strategy_calibration, closing the human-in-the-loop cycle
+
+Markdown tips (learn more)
+Text formatting
+## Headline
+**bold**
+_ italics _
+[link](http://foo.bar)
+![Alt text](/path/to/img.jpg)
+Code block example
+```ruby
+puts "Hello World!"
+```
+LaTeX math tips (learn more)
+\\( ... \\) for in-line math
+$$ ... $$ for displayed equations
+* Built with
+You can add up to 25 tags.
+
+* Built with
