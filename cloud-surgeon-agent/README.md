@@ -195,6 +195,14 @@ tableaux en interrogeant à nouveau le backend.
   déclenche automatiquement des actions destructives sur une vraie
   infrastructure sans garde-fou d'approbation humaine est un risque
   délibérément écarté de cette démo.
+- **Vrai test de crash (SIGKILL)** : `scripts/real-crash-test.sh` déclenche un
+  incident, attend l'écriture en base du 1er tour, puis tue *réellement* le
+  process serveur (`kill -9`, pas un early return simulé dans le même appel
+  HTTP). Après redémarrage du service, renvoyer la même alerte reprend
+  l'agent exactement au tour suivant, sans dupliquer le tour déjà exécuté —
+  validé manuellement le 12/07/2026. C'est la preuve de résilience à un vrai
+  crash de process, complémentaire à l'option "simulate crash" du dashboard
+  (qui reste un raccourci pédagogique in-process).
 
 Pour lancer le dashboard seul en local :
 

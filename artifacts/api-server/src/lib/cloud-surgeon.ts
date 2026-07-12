@@ -193,12 +193,22 @@ async function indexResolvedIncident(
   await db.insert(incidentVectorsTable).values({ errorMessageText, embedding });
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * Rejoue la boucle d'agent à partir de l'étape déjà persistée dans
  * `incident.contextJson.turns` (résilience : on ne rejoue jamais un tour
  * déjà terminé). Si `simulateCrash` est vrai, s'arrête après le premier tour
- * sans finaliser l'incident, pour prouver qu'un appel HTTP suivant reprend
- * l'agent exactement là où il s'est arrêté au lieu de repartir de zéro.
+ * sans finaliser l'incident — c'est le raccourci pédagogique utilisé par le
+ * dashboard pour la démo (early return, pas un vrai crash de process).
+ *
+ * `CLOUD_SURGEON_CRASH_TEST_DELAY_MS` (variable d'env, absente en usage
+ * normal) insère une pause entre deux tours *après* écriture en base, pour
+ * laisser un script externe tuer réellement ce process (SIGKILL) en pleine
+ * requête — voir `scripts/real-crash-test.sh`. C'est le seul moyen honnête
+ * de prouver la résilience à un vrai crash, pas juste à un early return.
  */
 export async function runAgentLoop(
   incident: IncidentState,
@@ -258,6 +268,11 @@ export async function runAgentLoop(
         context,
       );
       return current;
+    }
+
+    const crashTestDelayMs = Number(process.env.CLOUD_SURGEON_CRASH_TEST_DELAY_MS ?? 0);
+    if (crashTestDelayMs > 0 && turnIndex < SCRIPT.length - 1) {
+      await sleep(crashTestDelayMs);
     }
   }
 
