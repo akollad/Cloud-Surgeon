@@ -22,6 +22,7 @@ import { db, pool } from "@workspace/db";
 import { createHash } from "node:crypto";
 import { generateEmbedding } from "./embeddings";
 import { logger } from "./logger";
+import { runAgentLoop, getIncidentById } from "./cloud-surgeon";
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -390,6 +391,31 @@ export async function ingestMetrics(datapoints: MetricDatapoint[]): Promise<Inge
       { incidentId, metric: dp.metricName, strategy: predictedStrategy },
       "[ANOMALY] ✅ Predictive incident opened — agent acting before alarm fires",
     );
+
+    // ── 6. Fire-and-forget: run the full agent loop in the background ─────
+    // We do NOT await this — the HTTP response returns immediately with the
+    // incident ID, and the agent runs Diagnostician → Remediator → Auditor
+    // asynchronously. The incident status will progress in CockroachDB and
+    // the dashboard will show the self-healing in real time.
+    ;(async () => {
+      try {
+        const incident = await getIncidentById(incidentId);
+        if (!incident) {
+          logger.warn({ incidentId }, "[ANOMALY] Predictive incident not found for agent loop — skipping");
+          return;
+        }
+        await runAgentLoop(incident, predictiveAlertText, false);
+        logger.info(
+          { incidentId, metric: dp.metricName },
+          "[ANOMALY] 🩺 Predictive agent loop completed — incident self-resolved before alarm fired",
+        );
+      } catch (err) {
+        logger.error(
+          { err, incidentId, metric: dp.metricName },
+          "[ANOMALY] Predictive agent loop failed",
+        );
+      }
+    })();
 
     predictiveIncidents.push({
       incidentId,
