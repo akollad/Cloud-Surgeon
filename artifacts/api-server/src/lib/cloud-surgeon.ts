@@ -8,6 +8,7 @@ import {
   type IncidentState,
 } from "@workspace/db";
 import { callMcpTool } from "../mcp/client";
+import { invokeBedrockThought } from "./bedrock";
 
 // ----------------------------------------------------------------------------
 // Ce module joue le rôle du handler AWS Lambda (`backend/lambda_function.py`)
@@ -42,6 +43,7 @@ export function pseudoEmbedding(text: string): number[] {
 interface AgentTurn {
   turn: number;
   thought: string;
+  thoughtSource: "bedrock" | "simulated";
   toolName: string;
   toolInput: Record<string, unknown>;
   toolOutput: Record<string, unknown>;
@@ -87,25 +89,22 @@ const SCRIPT: Array<{
   },
 ];
 
-function simulateToolCall(
+/**
+ * Appelle l'outil via le serveur MCP (mcp/server.ts) plutôt que d'exécuter
+ * une fonction locale en dur. `execute_ccloud_command` y fera un vrai appel
+ * à l'API CockroachDB Cloud si `COCKROACH_CLOUD_API_KEY`/`_CLUSTER_ID` sont
+ * configurées, sinon reste en simulation transparente.
+ */
+async function callTool(
   toolName: string,
   toolInput: Record<string, unknown>,
-): Record<string, unknown> {
+): Promise<Record<string, unknown>> {
   if (toolName === "execute_ccloud_command") {
     const action = JSON.parse(String(toolInput.commandJson)).action ?? "unknown";
-    return {
-      success: true,
-      action,
-      output: `[SIMULATION] Commande ccloud '${action}' exécutée avec succès sur le cluster.`,
-    };
+    return callMcpTool(toolName, { action });
   }
   if (toolName === "aws_repair_service") {
-    return {
-      success: true,
-      serviceName: toolInput.serviceName,
-      action: toolInput.action,
-      output: `[SIMULATION] Action '${toolInput.action}' appliquée avec succès au service AWS '${toolInput.serviceName}'.`,
-    };
+    return callMcpTool(toolName, toolInput);
   }
   return { success: false, error: `Outil inconnu: ${toolName}` };
 }
@@ -222,7 +221,10 @@ export async function runAgentLoop(
   for (let turnIndex = startTurn; turnIndex < SCRIPT.length; turnIndex++) {
     const step = SCRIPT[turnIndex];
     const toolInput = step.toolInput(alertText);
-    const toolOutput = simulateToolCall(step.toolName, toolInput);
+    const priorToolOutput = context.turns[turnIndex - 1]?.toolOutput ?? null;
+    const bedrockThought = await invokeBedrockThought(alertText, turnIndex, priorToolOutput);
+    const thought = bedrockThought ?? step.thought;
+    const toolOutput = await callTool(step.toolName, toolInput);
 
     await logExecution(
       incident.incidentId,
@@ -232,7 +234,8 @@ export async function runAgentLoop(
 
     context.turns.push({
       turn: turnIndex,
-      thought: step.thought,
+      thought,
+      thoughtSource: bedrockThought ? "bedrock" : "simulated",
       toolName: step.toolName,
       toolInput,
       toolOutput,

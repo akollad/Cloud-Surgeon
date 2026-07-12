@@ -17,10 +17,14 @@ import { logger } from "../lib/logger";
 let clientPromise: Promise<Client> | null = null;
 
 function resolveServerEntry(): string {
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  // En dev (tsx/tsc --noEmit + esbuild bundle unique dist/index.mjs), le
-  // serveur MCP compilé vit à côté sous dist/mcp-server.mjs.
-  return path.resolve(here, "..", "mcp-server.mjs");
+  // Ce fichier est bundlé DANS dist/index.mjs par esbuild (il n'existe pas
+  // en tant que module séparé à l'exécution), donc `import.meta.url` ici
+  // pointe vers dist/index.mjs, pas vers un dist/mcp/client.mjs qui
+  // n'existe pas. Le serveur MCP, lui, est un entry point esbuild à part
+  // qui préserve l'arborescence src/ -> il finit toujours à côté, en
+  // dist/mcp/server.mjs.
+  const distDir = path.dirname(fileURLToPath(import.meta.url));
+  return path.resolve(distDir, "mcp", "server.mjs");
 }
 
 async function getClient(): Promise<Client> {
