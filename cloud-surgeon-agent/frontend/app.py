@@ -71,6 +71,14 @@ def fetch_impact() -> dict | None:
     return api_get("/metrics/impact")
 
 
+def fetch_calibration() -> dict | None:
+    return api_get("/metrics/calibration")
+
+
+def recalibrate_all() -> dict | None:
+    return api_post("/metrics/calibration/recalibrate", {})
+
+
 def fetch_handoffs(incident_id: str | None = None) -> list:
     if incident_id:
         return api_get(f"/incidents/{incident_id}/handoffs") or []
@@ -268,11 +276,12 @@ with st.sidebar:
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 
-tab_live, tab_decision, tab_incidents, tab_memory, tab_impact, tab_logs = st.tabs([
+tab_live, tab_decision, tab_incidents, tab_memory, tab_calibration, tab_impact, tab_logs = st.tabs([
     "🔴 Diagnostic en direct",
     "🧠 Pourquoi cette décision ?",
     "📋 Incidents",
     "📊 Mémoire & Win-rates",
+    "🎯 Calibration",
     "💰 Impact MTTR & Coût",
     "📜 Journal d'exécution",
 ])
@@ -589,6 +598,146 @@ with tab_memory:
 """)
     else:
         st.info("Aucune donnée dans la mémoire vectorielle. Déclenche quelques incidents d'abord.")
+
+
+with tab_calibration:
+    st.header("🎯 Calibration automatique du bandit contextuel")
+    st.caption(
+        "La Couche 1 enregistre le win-rate **prédit** au moment de chaque décision de routage et le compare "
+        "au win-rate **réellement observé** (issu de `incident_vectors`). Si l'écart dépasse 15%, un "
+        "facteur de correction multiplicatif est appliqué aux décisions suivantes — la mémoire s'auto-corrige. "
+        "Entièrement porté par **CockroachDB** — aucun service ML externe."
+    )
+
+    col_r_cal, col_recal, _ = st.columns([1, 2, 4])
+    with col_r_cal:
+        if st.button("🔄 Rafraîchir", key="refresh_calibration"):
+            st.rerun()
+    with col_recal:
+        if st.button("⚙️ Recalibrer toutes les stratégies", key="recalibrate_all"):
+            result = recalibrate_all()
+            if result:
+                st.success(result.get("message", "Recalibration terminée."))
+            else:
+                st.error(st.session_state.get("_api_error"))
+
+    cal_data = fetch_calibration()
+    if not cal_data:
+        st.error(f"Impossible de charger la calibration : {st.session_state.get('_api_error')}")
+    else:
+        rows = cal_data.get("calibration", [])
+        threshold = cal_data.get("threshold", 0.15)
+
+        if not rows:
+            st.info(
+                "Aucune donnée de calibration pour l'instant. "
+                "Déclenche plusieurs incidents et reviens ici — les prédictions s'accumulent automatiquement."
+            )
+        else:
+            # ── Métriques résumées ──────────────────────────────────────────
+            n_downgraded = sum(1 for r in rows if r["status"] == "downgraded")
+            n_upgraded   = sum(1 for r in rows if r["status"] == "upgraded")
+            n_calibrated = sum(1 for r in rows if r["status"] == "calibrated")
+            n_no_data    = sum(1 for r in rows if r["status"] == "no_data")
+
+            mc1, mc2, mc3, mc4 = st.columns(4)
+            mc1.metric("🟢 Bien calibrées",  n_calibrated, help="Écart ≤ 15% — aucune correction nécessaire")
+            mc2.metric("🔴 Dégradées",        n_downgraded, help="Observed < Predicted de > 15% — facteur < 1 appliqué")
+            mc3.metric("🔵 Améliorées",        n_upgraded,   help="Observed > Predicted de > 15% — facteur > 1 appliqué")
+            mc4.metric("⚪ Sans données",      n_no_data,    help="Aucune donnée observée encore disponible")
+
+            # ── Tableau principal ───────────────────────────────────────────
+            STATUS_LABELS = {
+                "calibrated": "🟢 Calibrée",
+                "downgraded": "🔴 Dégradée",
+                "upgraded":   "🔵 Améliorée",
+                "no_data":    "⚪ Sans données",
+            }
+
+            table_rows = []
+            for r in rows:
+                predicted = r["avgPredictedWinRate"]
+                observed  = r["observedWinRate"]
+                factor    = r["correctionFactor"]
+                deviation = r["deviation"]
+                table_rows.append({
+                    "Stratégie":              r["strategyName"],
+                    "Prédit (avg)":           f"{predicted * 100:.1f}%",
+                    "Observé (réel)":         f"{observed * 100:.1f}%" if observed is not None else "—",
+                    "Écart":                  (
+                        f"{'+' if deviation >= 0 else ''}{deviation * 100:.1f}%"
+                        if deviation is not None else "—"
+                    ),
+                    "Facteur correction":     f"×{factor:.3f}" if factor != 1.0 else "×1.000 (neutre)",
+                    "Décisions enregistrées": r["predictionCount"],
+                    "Statut":                 STATUS_LABELS.get(r["status"], r["status"]),
+                })
+
+            st.dataframe(table_rows, use_container_width=True, hide_index=True)
+
+            # ── Explication du mécanisme ────────────────────────────────────
+            with st.expander("📖 Comment fonctionne la calibration ?", expanded=False):
+                st.markdown(f"""
+### Bandit auto-correctif — CockroachDB, 0 service ML externe
+
+**Pourquoi ?** Un win-rate historique peut surestimer la fiabilité d'une stratégie si les
+derniers incidents révèlent une dégradation (infra changée, scénarios plus complexes, etc.).
+La calibration détecte cette dérive et applique une correction *avant* que la prochaine
+décision de routage ne soit prise.
+
+**Comment ?**
+
+1. À chaque décision de routage, le win-rate prédit est enregistré dans `strategy_calibration`
+   via un **UPSERT SQL** qui maintient une moyenne glissante pondérée :
+
+```sql
+INSERT INTO strategy_calibration (strategy_name, avg_predicted_win_rate, prediction_count)
+VALUES ($1, $2, 1)
+ON CONFLICT (strategy_name) DO UPDATE
+  SET avg_predicted_win_rate =
+        (avg_predicted_win_rate * prediction_count + EXCLUDED.avg_predicted_win_rate)
+        / (prediction_count + 1),
+      prediction_count = prediction_count + 1
+```
+
+2. Après chaque incident résolu, la requête de recalibration compare :
+   - **Prédit** = `avg_predicted_win_rate` (ce qu'on croyait)
+   - **Observé** = `COUNT(*) FILTER (WHERE outcome_success) / COUNT(*)` depuis `incident_vectors`
+
+3. Si `|observé − prédit| > {threshold * 100:.0f}%` → facteur de correction =
+   `clamp(observé / prédit, 0.1, 1.5)`
+
+4. Les décisions suivantes utilisent : `win-rate effectif = win-rate brut × facteur`
+
+| Situation | Facteur | Effet |
+|-----------|---------|-------|
+| Observé < prédit de > {threshold * 100:.0f}% | **< 1.0** | Stratégie **rétrogradée** → PENDING_APPROVAL même si win-rate historique > 80% |
+| Observé > prédit de > {threshold * 100:.0f}% | **> 1.0** | Stratégie **promue** → AUTONOMOUS plus facilement |
+| Écart ≤ {threshold * 100:.0f}% | **1.0** | Neutre — aucune correction |
+""")
+
+            # ── SQL expliqué pour le jury ─────────────────────────────────
+            with st.expander("🔧 Requête SQL de recalibration (portée par CockroachDB)", expanded=False):
+                st.code("""
+-- Calcul du win-rate observé depuis incident_vectors
+SELECT
+    COUNT(*) FILTER (WHERE outcome_success)::float
+    / NULLIF(COUNT(*), 0)  AS observed_win_rate
+FROM incident_vectors
+WHERE strategy_name = $1;
+
+-- Mise à jour du facteur de correction
+UPDATE strategy_calibration
+SET observed_win_rate    = $observed,
+    correction_factor    =
+        CASE
+          WHEN ABS($observed - avg_predicted_win_rate) > 0.15
+          THEN GREATEST(0.1, LEAST(1.5, $observed / NULLIF(avg_predicted_win_rate, 0)))
+          ELSE 1.0
+        END,
+    last_recalculated_at = now()
+WHERE strategy_name = $1;
+""", language="sql")
 
 
 with tab_impact:

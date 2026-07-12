@@ -7,6 +7,7 @@ import {
   executionLogsTable,
   incidentStateTable,
   incidentVectorsTable,
+  strategyCalibrationTable,
   type IncidentState,
 } from "@workspace/db";
 import { callMcpTool } from "../mcp/client";
@@ -42,10 +43,13 @@ export interface IncidentContext {
   // Couche 2 : décision de routage et données ayant conduit à la décision
   routingMode?: RoutingMode;
   routingDecisionComputed?: boolean;
-  ragScore?: number | null;       // distance cosinus (0 = identique, 1 = opposé)
-  ragStrategyHint?: string | null; // stratégie de l'incident le plus similaire
-  winRate?: number | null;         // taux de succès historique de la stratégie
-  winRateSampleSize?: number;      // nombre de samples ayant servi au calcul
+  ragScore?: number | null;         // distance cosinus (0 = identique, 1 = opposé)
+  ragStrategyHint?: string | null;  // stratégie de l'incident le plus similaire
+  winRate?: number | null;          // win-rate brut historique de la stratégie
+  winRateSampleSize?: number;       // nombre de samples ayant servi au calcul
+  // Couche 1 — calibration automatique (Tâche 8)
+  correctionFactor?: number | null; // facteur de correction de la stratégie (1.0 = neutre)
+  effectiveWinRate?: number | null; // winRate × correctionFactor (utilisé pour le routage)
   turns?: AgentTurn[];
   finalResponse?: string | null;
   crashed?: boolean;
@@ -191,6 +195,182 @@ async function indexResolvedIncident(
     strategyName,
     outcomeSuccess,
   });
+  // Immediately recalibrate this strategy so future routing decisions benefit
+  // from the latest outcome.
+  await recalibrateStrategy(strategyName);
+}
+
+// ── Couche 1 : calibration automatique du bandit ──────────────────────────
+
+/**
+ * Seuil de déviation (valeur absolue) entre win-rate prédit et win-rate
+ * observé au-delà duquel le facteur de correction est activé.
+ * Configurable via CALIBRATION_THRESHOLD env var (défaut : 0.15 = 15 %).
+ */
+const CALIBRATION_THRESHOLD = Number(process.env.CALIBRATION_THRESHOLD ?? 0.15);
+
+/**
+ * Enregistre le win-rate prédit au moment d'une décision de routage.
+ *
+ * Maintient une moyenne glissante pondérée par le nombre de décisions
+ * (`prediction_count`) de façon à ce que les décisions récentes ne biaisent
+ * pas excessivement l'historique. Utilise un UPSERT CockroachDB :
+ *
+ *   new_avg = (old_avg × old_count + new_prediction) / (old_count + 1)
+ *
+ * Appelé une fois par incident, juste avant la décision de routage.
+ */
+async function recordRoutingPrediction(
+  strategyName: string,
+  predictedWinRate: number,
+): Promise<void> {
+  // CockroachDB rejects FLOAT * INT — cast prediction_count to FLOAT explicitly.
+  await db.execute(sql`
+    INSERT INTO strategy_calibration (strategy_name, avg_predicted_win_rate, prediction_count, last_recalculated_at)
+    VALUES (${strategyName}, ${predictedWinRate}, 1, now())
+    ON CONFLICT (strategy_name) DO UPDATE
+    SET avg_predicted_win_rate =
+          (strategy_calibration.avg_predicted_win_rate * strategy_calibration.prediction_count::float
+            + EXCLUDED.avg_predicted_win_rate)
+          / (strategy_calibration.prediction_count::float + 1.0),
+        prediction_count      = strategy_calibration.prediction_count + 1,
+        last_recalculated_at  = now()
+  `);
+}
+
+/**
+ * Recalcule le win-rate réel (observé) depuis `incident_vectors` pour une
+ * stratégie et met à jour le facteur de correction dans `strategy_calibration`.
+ *
+ * Formule du facteur de correction :
+ *   - Si |observed − predicted| ≤ CALIBRATION_THRESHOLD → correction_factor = 1.0 (neutre)
+ *   - Sinon → correction_factor = clamp(observed / predicted, 0.1, 1.5)
+ *
+ * Un facteur < 1 dégrade les décisions futures (trop d'échecs imprévus).
+ * Un facteur > 1 améliore les décisions futures (meilleure performance que prévu).
+ *
+ * Entièrement porté par CockroachDB — aucun service ML externe.
+ */
+export async function recalibrateStrategy(strategyName: string): Promise<void> {
+  // Observed win-rate = SQL aggregate from incident_vectors (all time)
+  const observed = await getStrategyWinRate(strategyName);
+  if (observed.count === 0) return; // aucune donnée — on ne modifie pas le facteur
+
+  const observedWinRate = observed.winRate;
+
+  // Fetch current predicted average (if any row exists)
+  const rows = await db.execute<{ avg_predicted_win_rate: string; prediction_count: string }>(sql`
+    SELECT avg_predicted_win_rate, prediction_count
+    FROM strategy_calibration
+    WHERE strategy_name = ${strategyName}
+  `);
+  if (rows.rows.length === 0) return; // no routing decisions recorded yet for this strategy
+
+  const predictedWinRate = Number(rows.rows[0].avg_predicted_win_rate);
+  const deviation = Math.abs(observedWinRate - predictedWinRate);
+
+  const correctionFactor =
+    deviation > CALIBRATION_THRESHOLD
+      ? Math.max(0.1, Math.min(1.5, predictedWinRate > 0 ? observedWinRate / predictedWinRate : 1.0))
+      : 1.0;
+
+  await db.execute(sql`
+    UPDATE strategy_calibration
+    SET observed_win_rate     = ${observedWinRate},
+        correction_factor     = ${correctionFactor},
+        last_recalculated_at  = now()
+    WHERE strategy_name = ${strategyName}
+  `);
+}
+
+/**
+ * Récupère le facteur de correction actuel d'une stratégie.
+ * Retourne 1.0 si aucune donnée de calibration n'est encore disponible.
+ */
+async function getCorrectionFactor(strategyName: string): Promise<number> {
+  const rows = await db.execute<{ correction_factor: string }>(sql`
+    SELECT correction_factor FROM strategy_calibration WHERE strategy_name = ${strategyName}
+  `);
+  if (rows.rows.length === 0) return 1.0;
+  return Number(rows.rows[0].correction_factor);
+}
+
+export type CalibrationStatus = "calibrated" | "downgraded" | "upgraded" | "no_data";
+
+export interface CalibrationRow {
+  strategyName: string;
+  avgPredictedWinRate: number;
+  observedWinRate: number | null;
+  correctionFactor: number;
+  predictionCount: number;
+  deviation: number | null;
+  status: CalibrationStatus;
+  lastRecalculatedAt: Date;
+}
+
+/**
+ * Retourne la table complète de calibration pour le dashboard et l'endpoint API.
+ */
+export async function getAllCalibrationData(): Promise<CalibrationRow[]> {
+  const rows = await db.execute<{
+    strategy_name: string;
+    avg_predicted_win_rate: string;
+    observed_win_rate: string | null;
+    correction_factor: string;
+    prediction_count: string;
+    last_recalculated_at: string;
+  }>(sql`
+    SELECT strategy_name, avg_predicted_win_rate, observed_win_rate,
+           correction_factor, prediction_count, last_recalculated_at
+    FROM strategy_calibration
+    ORDER BY prediction_count DESC, strategy_name
+  `);
+
+  return rows.rows.map((r) => {
+    const predicted = Number(r.avg_predicted_win_rate);
+    const observed = r.observed_win_rate != null ? Number(r.observed_win_rate) : null;
+    const factor = Number(r.correction_factor);
+    const count = Number(r.prediction_count);
+    const deviation = observed != null ? observed - predicted : null;
+
+    let status: CalibrationStatus;
+    if (count === 0 || observed == null) {
+      status = "no_data";
+    } else if (factor < 1.0 - 0.001) {
+      status = "downgraded"; // observed < predicted by > 15%
+    } else if (factor > 1.0 + 0.001) {
+      status = "upgraded"; // observed > predicted by > 15%
+    } else {
+      status = "calibrated"; // within threshold
+    }
+
+    return {
+      strategyName: r.strategy_name,
+      avgPredictedWinRate: predicted,
+      observedWinRate: observed,
+      correctionFactor: factor,
+      predictionCount: count,
+      deviation,
+      status,
+      lastRecalculatedAt: new Date(r.last_recalculated_at),
+    };
+  });
+}
+
+/**
+ * Recalibrates all strategies present in strategy_calibration in one pass.
+ * Exposed via POST /api/metrics/calibration/recalibrate for the dashboard button.
+ */
+export async function recalibrateAllStrategies(): Promise<{ updated: number }> {
+  const rows = await db.execute<{ strategy_name: string }>(sql`
+    SELECT strategy_name FROM strategy_calibration
+  `);
+  let updated = 0;
+  for (const row of rows.rows) {
+    await recalibrateStrategy(row.strategy_name);
+    updated++;
+  }
+  return { updated };
 }
 
 // ── Couche 2 : décision de routage ────────────────────────────────────────
@@ -633,18 +813,33 @@ export async function runAgentLoop(
     // RAG hit) : la stratégie détectée est la décision de l'agent, le RAG
     // hit est utilisé comme signal de similarité historique pour l'affichage.
     const winRateResult = await getStrategyWinRate(strategyName);
-    const routingMode = computeRoutingMode(strategyName, ragHit?.distance, winRateResult.winRate, winRateResult.count);
+
+    // ── Calibration automatique (Couche 1 — Tâche 8) ────────────────────
+    // 1. Enregistre la prédiction courante avant d'appliquer la correction
+    await recordRoutingPrediction(strategyName, winRateResult.winRate);
+    // 2. Récupère le facteur de correction (1.0 si pas encore de calibration)
+    const correctionFactor = await getCorrectionFactor(strategyName);
+    // 3. win-rate effectif = win-rate brut × facteur de correction
+    //    Si la stratégie a été surdimensionnée (beaucoup d'échecs récents),
+    //    le facteur < 1 et le routage bascule vers PENDING_APPROVAL même si
+    //    le win-rate brut historique reste élevé — la mémoire se corrige.
+    const effectiveWinRate = winRateResult.winRate * correctionFactor;
+    // ────────────────────────────────────────────────────────────────────
+
+    const routingMode = computeRoutingMode(strategyName, ragHit?.distance, effectiveWinRate, winRateResult.count);
 
     context.routingMode = routingMode;
     context.ragScore = ragHit?.distance ?? null;
     context.ragStrategyHint = ragHit?.strategyName ?? null;
     context.winRate = winRateResult.count > 0 ? winRateResult.winRate : null;
+    context.effectiveWinRate = winRateResult.count > 0 ? effectiveWinRate : null;
+    context.correctionFactor = correctionFactor !== 1.0 ? correctionFactor : null;
     context.winRateSampleSize = winRateResult.count;
     context.routingDecisionComputed = true;
 
     if (routingMode === "PENDING_APPROVAL") {
       const ragInfo = ragHit
-        ? `RAG distance: ${ragHit.distance.toFixed(3)}, win-rate: ${(winRateResult.winRate * 100).toFixed(0)}% (${winRateResult.count} samples)`
+        ? `RAG distance: ${ragHit.distance.toFixed(3)}, effective win-rate: ${(effectiveWinRate * 100).toFixed(0)}% (raw: ${(winRateResult.winRate * 100).toFixed(0)}%, correction: ×${correctionFactor.toFixed(2)}, ${winRateResult.count} samples)`
         : "no RAG match";
       await logAgentHandoff(
         incident.incidentId,

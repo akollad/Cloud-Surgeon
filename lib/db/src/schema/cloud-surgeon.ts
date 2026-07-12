@@ -1,6 +1,7 @@
 import {
   boolean,
   customType,
+  doublePrecision,
   integer,
   jsonb,
   pgTable,
@@ -132,3 +133,38 @@ export const executionLogsTable = pgTable("execution_logs", {
 });
 
 export type ExecutionLog = typeof executionLogsTable.$inferSelect;
+
+/**
+ * Calibration automatique des stratégies (Couche 1 — bandit auto-correctif)
+ *
+ * Une ligne par stratégie. Enregistre :
+ *  - avgPredictedWinRate : moyenne glissante des win-rates prédits au moment
+ *    de chaque décision de routage (ce qu'on croyait qu'allait se passer)
+ *  - observedWinRate : win-rate réel calculé depuis incident_vectors
+ *    (ce qui s'est réellement passé, mis à jour après chaque incident résolu)
+ *  - correctionFactor : facteur multiplicatif appliqué au win-rate brut dans
+ *    les décisions futures. 1.0 = neutre ; < 1 = dégradé ; > 1 = promu.
+ *    Activé quand |observed − predicted| > 15%.
+ *
+ * Entièrement porté par CockroachDB — aucun service ML externe.
+ */
+export const strategyCalibrationTable = pgTable("strategy_calibration", {
+  strategyName: varchar("strategy_name", { length: 100 }).primaryKey(),
+  /** Moyenne glissante pondérée du win-rate prédit à chaque décision. */
+  avgPredictedWinRate: doublePrecision("avg_predicted_win_rate").notNull().default(0.5),
+  /** Win-rate réel observé (recalculé depuis incident_vectors). NULL si aucune donnée. */
+  observedWinRate: doublePrecision("observed_win_rate"),
+  /**
+   * Facteur de correction appliqué au win-rate brut lors des décisions suivantes.
+   * = observed / predicted si |écart| > seuil (15%), sinon 1.0.
+   * Borné à [0.1 ; 1.5].
+   */
+  correctionFactor: doublePrecision("correction_factor").notNull().default(1.0),
+  /** Nombre de décisions enregistrées pour cette stratégie. */
+  predictionCount: integer("prediction_count").notNull().default(0),
+  lastRecalculatedAt: timestamp("last_recalculated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type StrategyCalibration = typeof strategyCalibrationTable.$inferSelect;

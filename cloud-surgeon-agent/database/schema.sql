@@ -163,3 +163,21 @@ ALTER TABLE incident_state
     ADD COLUMN IF NOT EXISTS triggered_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     ADD COLUMN IF NOT EXISTS resolved_at  TIMESTAMPTZ,
     ADD COLUMN IF NOT EXISTS ru_consumed  INT NOT NULL DEFAULT 0;
+
+-- ----------------------------------------------------------------------------
+-- Table strategy_calibration (Tâche 8 — calibration automatique du bandit)
+--
+-- Une ligne par stratégie. Enregistre le win-rate moyen PRÉDIT au moment
+-- de chaque décision de routage et le win-rate RÉEL observé en post-hoc.
+-- Si l'écart dépasse 15%, un facteur de correction multiplicatif est calculé
+-- et appliqué aux décisions futures. Entièrement porté par CockroachDB —
+-- aucun service ML externe requis.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS strategy_calibration (
+    strategy_name         VARCHAR(100) PRIMARY KEY,
+    avg_predicted_win_rate FLOAT NOT NULL DEFAULT 0.5,
+    observed_win_rate     FLOAT,
+    correction_factor     FLOAT NOT NULL DEFAULT 1.0,
+    prediction_count      INT NOT NULL DEFAULT 0,
+    last_recalculated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);

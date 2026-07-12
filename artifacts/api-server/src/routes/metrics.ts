@@ -20,7 +20,12 @@ import { Router, type IRouter } from "express";
 import { sql } from "drizzle-orm";
 import { db } from "@workspace/db";
 import { apiKeyAuth } from "../middleware/apiKeyAuth";
-import { getAllStrategyWinRates, BASE_RU_PER_INCIDENT } from "../lib/cloud-surgeon";
+import {
+  getAllStrategyWinRates,
+  getAllCalibrationData,
+  recalibrateAllStrategies,
+  BASE_RU_PER_INCIDENT,
+} from "../lib/cloud-surgeon";
 import { seedVectorMemory } from "../lib/seed";
 
 const router: IRouter = Router();
@@ -204,6 +209,44 @@ router.get("/metrics/impact", async (_req, res): Promise<void> => {
       mttrMinSeconds: r.mttr_min_seconds != null ? Number(r.mttr_min_seconds) : null,
       mttrMaxSeconds: r.mttr_max_seconds != null ? Number(r.mttr_max_seconds) : null,
     })),
+  });
+});
+
+// ── Calibration automatique du bandit (Couche 1 — Tâche 8) ──────────────
+
+/**
+ * GET /api/metrics/calibration
+ *
+ * Retourne la table de calibration par stratégie : win-rate prédit (average
+ * au moment des décisions passées) vs win-rate réel observé (depuis
+ * incident_vectors), facteur de correction, et statut (calibré/dégradé/amélioré).
+ *
+ * Entièrement porté par CockroachDB — aucun service ML externe.
+ */
+router.get("/metrics/calibration", async (_req, res): Promise<void> => {
+  const calibration = await getAllCalibrationData();
+  res.json({
+    calibration,
+    threshold: Number(process.env.CALIBRATION_THRESHOLD ?? 0.15),
+    note:
+      "Bandit auto-correctif : si |win-rate_observé − win-rate_prédit| > seuil (15%), " +
+      "un facteur de correction est appliqué aux décisions suivantes. " +
+      "Calcul SQL pur sur CockroachDB — aucun service ML externe.",
+  });
+});
+
+/**
+ * POST /api/metrics/calibration/recalibrate
+ *
+ * Force le recalcul du win-rate observé et du facteur de correction pour
+ * toutes les stratégies enregistrées dans strategy_calibration.
+ * Utile après un seed ou un import de données historiques.
+ */
+router.post("/metrics/calibration/recalibrate", async (_req, res): Promise<void> => {
+  const result = await recalibrateAllStrategies();
+  res.json({
+    ...result,
+    message: `Recalibration terminée : ${result.updated} stratégie(s) mise(s) à jour.`,
   });
 });
 
