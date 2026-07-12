@@ -302,11 +302,23 @@ st.caption(
 
 st.session_state.pop("_api_error", None)
 health = api_get("/healthz")
-if health and health.get("status") == "ok":
+_api_healthy = bool(health and health.get("status") == "ok")
+if _api_healthy:
     st.success(f"✅ Backend connected ({API_BASE_URL}) — state persisted in CockroachDB Serverless")
+    # If the server was previously unreachable, force an immediate CDC re-poll
+    # so the badge shows the restarted server's true state without waiting 30 s.
+    if st.session_state.pop("_api_was_down", False):
+        st.session_state.pop("_cdc_status_ts", None)
+        st.session_state.pop("_cdc_status", None)
+        st.session_state.pop("_cdc_status_ok_ts", None)
 else:
     reason = st.session_state.get("_api_error", "unexpected response")
     st.error(f"❌ Backend unreachable at {API_BASE_URL}: {reason}")
+    # Remember that the API was down so the next successful healthcheck above
+    # knows to invalidate the stale cached CDC status.
+    st.session_state["_api_was_down"] = True
+    # Reset the poll timer so the fragment retries immediately on reconnect.
+    st.session_state.pop("_cdc_status_ts", None)
 
 # ── Home summary row (CDC badge · event counter · incident counts) ────────
 # Defined here (before sidebar) so it renders at the top of the main body.
@@ -320,18 +332,36 @@ def _home_summary_widget() -> None:
     # Strategy: only overwrite the cached status when a real result comes back.
     # If the SSE read times out or fails, keep the previous good value so the
     # badge label never flickers to "Connecting…" mid-cycle.
+    #
+    # Staleness / restart resilience:
+    #   _cdc_status_ts   — when we last *attempted* a poll (gate: retry if > 30 s old)
+    #   _cdc_status_ok_ts — when we last got a *successful* response (used for staleness label)
+    #
+    # On failure we roll _cdc_status_ts back by 25 s so the next fragment tick
+    # (5 s later) will retry immediately rather than waiting a full 30 s cycle.
+    # The main healthcheck block clears both keys when the API goes down so
+    # the very first successful reconnect always does a fresh SSE poll.
     _now = _time.time()
     _cache_age = _now - st.session_state.get("_cdc_status_ts", 0)
     if _cache_age > 30 or "_cdc_status" not in st.session_state:
         _fresh = fetch_audit_stream_status()
-        # Always advance the timestamp to avoid hammering the SSE endpoint.
-        st.session_state["_cdc_status_ts"] = _now
         if _fresh is not None:
-            # Successful read — update the displayed status.
+            # Successful read — update status and record the success time.
             st.session_state["_cdc_status"] = _fresh
+            st.session_state["_cdc_status_ok_ts"] = _now
+            # Full 30 s cool-down before next poll.
+            st.session_state["_cdc_status_ts"] = _now
+        else:
+            # Failed read — roll the attempt timestamp back so we retry in
+            # ~5 s (the fragment interval) rather than blocking for 30 s.
+            st.session_state["_cdc_status_ts"] = _now - 25
 
     # Use whatever the last successful read returned; None only on first boot.
     _status = st.session_state.get("_cdc_status")
+    # How long since the last *successful* CDC fetch (used for staleness label).
+    _ok_ts = st.session_state.get("_cdc_status_ok_ts")
+    _status_age = int(_now - _ok_ts) if _ok_ts else None
+    _is_stale = _status is not None and _status_age is not None and _status_age > 30
 
     # ── Audit event counter (since session start) ────────────────────────────
     # Uses /logs/count so the total is accurate even when /logs is paginated.
@@ -355,12 +385,17 @@ def _home_summary_widget() -> None:
     col_cdc, col_events, col_inc, col_pred = st.columns(4)
 
     with col_cdc:
+        # Build an optional staleness suffix shown when the last successful
+        # CDC read is more than one full poll cycle (30 s) old — signals
+        # judges that the badge may lag behind a server restart.
+        _stale_suffix = f" · last checked {_status_age}s ago" if _is_stale else ""
+
         if _status and _status.get("cdcActive"):
             st.success("🟢 CDC LIVE")
-            st.caption("CockroachDB changefeed — real-time push")
+            st.caption(f"CockroachDB changefeed — real-time push{_stale_suffix}")
         elif _status and _status.get("type") in ("connected", "heartbeat"):
             st.info("🔵 Polling fallback")
-            st.caption("2-second polling (no changefeed tier)")
+            st.caption(f"2-second polling (no changefeed tier){_stale_suffix}")
         else:
             # No successful reading yet — server may still be booting.
             st.info("⏳ Connecting…")
