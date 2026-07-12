@@ -416,6 +416,30 @@ router.get("/incidents/:incidentId", async (req, res): Promise<void> => {
 
 // ── Execution logs ────────────────────────────────────────────────────────
 
+/**
+ * GET /logs/count
+ * Returns the true total row count from CockroachDB, unaffected by pagination.
+ * Optional query param: incidentId — scopes the count to one incident.
+ */
+router.get("/logs/count", async (req, res): Promise<void> => {
+  const query = ListExecutionLogsQueryParams.safeParse(req.query);
+  if (!query.success) {
+    res.status(400).json({ error: query.error.message });
+    return;
+  }
+
+  const [row] = query.data.incidentId
+    ? await db
+        .select({ count: sql<number>`cast(count(*) as integer)` })
+        .from(executionLogsTable)
+        .where(eq(executionLogsTable.incidentId, query.data.incidentId))
+    : await db
+        .select({ count: sql<number>`cast(count(*) as integer)` })
+        .from(executionLogsTable);
+
+  res.json({ count: row?.count ?? 0 });
+});
+
 router.get("/logs", async (req, res): Promise<void> => {
   const query = ListExecutionLogsQueryParams.safeParse(req.query);
   if (!query.success) {

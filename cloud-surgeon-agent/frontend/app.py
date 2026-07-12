@@ -64,6 +64,15 @@ def fetch_logs() -> list:
     return api_get("/logs") or []
 
 
+def fetch_logs_count(incident_id: str | None = None) -> int:
+    """Return the true total row count from CockroachDB (unaffected by pagination)."""
+    params = {"incidentId": incident_id} if incident_id else None
+    result = api_get("/logs/count", params=params)
+    if isinstance(result, dict):
+        return int(result.get("count", 0))
+    return 0
+
+
 def fetch_win_rates() -> dict | None:
     return api_get("/metrics/win-rates")
 
@@ -318,8 +327,8 @@ def _home_summary_widget() -> None:
         _status = st.session_state["_cdc_status"]
 
     # ── Audit event counter (since session start) ────────────────────────────
-    _logs = api_get("/logs") or []
-    _current_count = len(_logs)
+    # Uses /logs/count so the total is accurate even when /logs is paginated.
+    _current_count = fetch_logs_count()
     if "_audit_baseline" not in st.session_state:
         st.session_state["_audit_baseline"] = _current_count
     _delta = _current_count - st.session_state["_audit_baseline"]
