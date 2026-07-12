@@ -152,3 +152,14 @@ ALTER TABLE incident_state
     ADD CONSTRAINT incident_state_status_check
     CHECK (status IN ('TRIGGERED', 'DIAGNOSING', 'REPAIRING',
                       'RESOLVED', 'FAILED', 'PENDING_APPROVAL'));
+
+-- ----------------------------------------------------------------------------
+-- Migration : MTTR et coût par incident
+-- triggered_at = timestamp de déclenchement (ex: arrivée de l'alerte)
+-- resolved_at  = timestamp de résolution/échec (permet de calculer le MTTR)
+-- ru_consumed  = estimation des Request Units CockroachDB consommées (demo)
+-- ----------------------------------------------------------------------------
+ALTER TABLE incident_state
+    ADD COLUMN IF NOT EXISTS triggered_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    ADD COLUMN IF NOT EXISTS resolved_at  TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS ru_consumed  INT NOT NULL DEFAULT 0;

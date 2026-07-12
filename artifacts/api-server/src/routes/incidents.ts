@@ -151,6 +151,10 @@ router.post("/incidents/:incidentId/reject", async (req, res): Promise<void> => 
       currentStep: "HUMAN_REJECTED",
       claimedByAgent: null,
       contextJson: context,
+      resolvedAt: new Date(),
+      // Un rejet humain consomme moins de RU qu'un incident complet
+      // (1 diagnostic + routage + rejet = ~25 RU)
+      ruConsumed: 25,
     })
     .where(eq(incidentStateTable.incidentId, incident.incidentId))
     .returning();

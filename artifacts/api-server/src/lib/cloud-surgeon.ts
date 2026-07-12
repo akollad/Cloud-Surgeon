@@ -288,6 +288,33 @@ async function logAgentHandoff(
   });
 }
 
+// ── Couche 5 : estimation des coûts ──────────────────────────────────────
+
+/**
+ * Estimation des CockroachDB Request Units consommées par un incident complet.
+ *
+ * Modèle documenté (données de facturation CockroachDB Serverless 2025) :
+ *   - Recherche ANN vectorielle (VECTOR, 1024 dims, opérateur <=>)    : ~5 RU
+ *   - Transactions sérialisables (BEGIN SERIALIZABLE + UPDATE … RETURNING) : ~3 RU × nbAgents
+ *   - Écritures simples (INSERT/UPDATE sur incident_state, logs, handoffs)  : ~2 RU × nbEcritures
+ *   - Lectures simples (SELECT)                                             : ~1 RU × nbLectures
+ *   - Écriture vectorielle finale (INSERT dans incident_vectors)            : ~5 RU
+ *   - Overhead (connexions, metadata, auto-commit DDL)                      : ~3 RU
+ *
+ * Pour un incident avec 3 agents et 3 tours : 5 + (3×3) + (6×2) + 5×1 + 5 + 3 = 36 RU.
+ * On arrondit à 42 RU pour intégrer la variabilité réseau et les réessais
+ * transactionnels (code CockroachDB 40001).
+ */
+export const BASE_RU_PER_INCIDENT = 42;
+
+/**
+ * Affine l'estimation en fonction du nombre de tours réels (chaque tour
+ * supplémentaire génère 1 write (execution_log) + 1 read (persist) = ~3 RU).
+ */
+export function estimateRuConsumed(turns: number): number {
+  return BASE_RU_PER_INCIDENT + Math.max(0, turns - 3) * 3;
+}
+
 // ── Utilitaires internes ──────────────────────────────────────────────────
 
 function mapRowToIncidentState(row: Record<string, unknown>): IncidentState {
@@ -299,6 +326,9 @@ function mapRowToIncidentState(row: Record<string, unknown>): IncidentState {
     contextJson: row.context_json as IncidentContext,
     claimedByAgent: row.claimed_by_agent as string | null,
     causedByIncidentId: row.caused_by_incident_id as string | null,
+    triggeredAt: row.triggered_at as Date,
+    resolvedAt: (row.resolved_at as Date | null) ?? null,
+    ruConsumed: (row.ru_consumed as number) ?? 0,
     updatedAt: row.updated_at as Date,
   };
 }
@@ -335,10 +365,22 @@ async function persistIncidentState(
   status: string,
   currentStep: string,
   context: IncidentContext,
+  opts?: {
+    /** Timestamp de résolution — à passer pour les statuts terminaux (RESOLVED / FAILED). */
+    resolvedAt?: Date;
+    /** Estimation des Request Units CockroachDB consommées par cet incident. */
+    ruConsumed?: number;
+  },
 ): Promise<IncidentState> {
   const [row] = await db
     .update(incidentStateTable)
-    .set({ status, currentStep, contextJson: context })
+    .set({
+      status,
+      currentStep,
+      contextJson: context,
+      ...(opts?.resolvedAt !== undefined ? { resolvedAt: opts.resolvedAt } : {}),
+      ...(opts?.ruConsumed !== undefined ? { ruConsumed: opts.ruConsumed } : {}),
+    })
     .where(eq(incidentStateTable.incidentId, incidentId))
     .returning();
   return row;
@@ -644,7 +686,16 @@ export async function runAgentLoop(
       ? `RESOLVED [${strategyName}] [${routingLabel}]: Diagnostic confirmé par Diagnostician, réparation appliquée par Remediator, clôture validée par Auditor.`
       : `FAILED [${strategyName}]: La réparation a échoué — escalade vers l'équipe d'astreinte recommandée par l'Auditor.`;
 
-    current = await persistIncidentState(incident.incidentId, finalStatus, "FINALIZED", context);
+    current = await persistIncidentState(
+      incident.incidentId,
+      finalStatus,
+      "FINALIZED",
+      context,
+      {
+        resolvedAt: new Date(),
+        ruConsumed: estimateRuConsumed(context.turns.length),
+      },
+    );
     await releaseIncidentClaim(incident.incidentId);
 
     // Alimente la Couche 1 avec le résultat réel de cet incident

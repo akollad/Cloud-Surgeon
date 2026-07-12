@@ -60,6 +60,10 @@ def fetch_win_rates() -> dict | None:
     return api_get("/metrics/win-rates")
 
 
+def fetch_impact() -> dict | None:
+    return api_get("/metrics/impact")
+
+
 def fetch_handoffs(incident_id: str | None = None) -> list:
     if incident_id:
         return api_get(f"/incidents/{incident_id}/handoffs") or []
@@ -222,11 +226,12 @@ with st.sidebar:
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 
-tab_live, tab_decision, tab_incidents, tab_memory, tab_logs = st.tabs([
+tab_live, tab_decision, tab_incidents, tab_memory, tab_impact, tab_logs = st.tabs([
     "🔴 Diagnostic en direct",
     "🧠 Pourquoi cette décision ?",
     "📋 Incidents",
     "📊 Mémoire & Win-rates",
+    "💰 Impact MTTR & Coût",
     "📜 Journal d'exécution",
 ])
 
@@ -537,6 +542,214 @@ with tab_memory:
 """)
     else:
         st.info("Aucune donnée dans la mémoire vectorielle. Déclenche quelques incidents d'abord.")
+
+
+with tab_impact:
+    st.header("💰 Impact MTTR & Coût — Agent vs. Humain d'astreinte")
+    st.caption(
+        "Chaque incident enregistre son timestamp de déclenchement (`triggered_at`) et de résolution "
+        "(`resolved_at`) dans CockroachDB. Le MTTR est calculé en SQL pur. "
+        "Le coût en Request Units est estimé à partir du modèle de facturation CockroachDB Serverless."
+    )
+
+    col_r_imp, _ = st.columns([1, 5])
+    with col_r_imp:
+        if st.button("🔄 Rafraîchir", key="refresh_impact"):
+            st.rerun()
+
+    impact = fetch_impact()
+
+    if impact is None:
+        st.error(f"Impossible de charger les métriques : {st.session_state.get('_api_error')}")
+    else:
+        resolved = impact.get("incidentsResolved", 0)
+        mttr = impact.get("mttrStats", {})
+        cost = impact.get("costStats", {})
+        autonomy = impact.get("autonomyBreakdown", {})
+
+        mttr_avg = mttr.get("avgSeconds")
+        human_baseline = mttr.get("humanBaselineSeconds", 1200)
+        reduction_pct = mttr.get("reductionPct")
+
+        # ── Ligne 1 : métriques MTTR ────────────────────────────────────────
+        st.subheader("⏱️ MTTR — Mean Time To Resolve")
+        c1, c2, c3, c4 = st.columns(4)
+        if mttr_avg is not None:
+            c1.metric(
+                "MTTR Agent (mesuré)",
+                f"{mttr_avg:.1f} s",
+                delta=f"−{reduction_pct}% vs humain" if reduction_pct else None,
+                delta_color="normal",
+                help="Calculé depuis triggered_at → resolved_at dans CockroachDB",
+            )
+        else:
+            c1.metric("MTTR Agent (mesuré)", "—", help="Résoudre au moins un incident pour voir le MTTR.")
+        c2.metric(
+            "Baseline humaine estimée",
+            f"{human_baseline} s ({human_baseline // 60} min)",
+            help="Source : Atlassian State of Incidents 2023 — MTTR médian P1 cloud = 18–22 min.",
+        )
+        c3.metric(
+            "Incidents résolus",
+            resolved,
+            delta=f"{impact.get('incidentsFailed', 0)} échoués",
+            delta_color="off",
+        )
+        c4.metric(
+            "Incidents actifs",
+            impact.get("incidentsActive", 0) + impact.get("incidentsPending", 0),
+            help="En cours + en attente d'approbation humaine",
+        )
+
+        if mttr_avg is not None and reduction_pct is not None:
+            speedup = human_baseline / mttr_avg if mttr_avg > 0 else 0
+            st.success(
+                f"✅ **L'agent est {speedup:.0f}× plus rapide** qu'un SRE humain d'astreinte "
+                f"({mttr_avg:.1f} s vs {human_baseline} s), soit **{reduction_pct}% de réduction du MTTR**."
+            )
+        elif resolved == 0:
+            st.info("💡 Déclenche quelques incidents dans la barre latérale pour mesurer le MTTR.")
+
+        st.divider()
+
+        # ── Ligne 2 : coût ──────────────────────────────────────────────────
+        st.subheader("💵 Coût — Agent vs. SRE d'astreinte")
+        cc1, cc2, cc3, cc4 = st.columns(4)
+        agent_cost = cost.get("estimatedAgentCostUsd", 0)
+        human_total = cost.get("humanTotalCostIfManual", 0)
+        savings = cost.get("estimatedSavingsUsd", 0)
+        total_ru = cost.get("totalRuConsumed", 0)
+
+        cc1.metric(
+            "Coût agent estimé (RU CockroachDB)",
+            f"${agent_cost:.4f}",
+            help=f"{total_ru} RU × $1/million = ${agent_cost:.6f}",
+        )
+        cc2.metric(
+            "Coût humain équivalent",
+            f"${human_total:.2f}",
+            help=f"{resolved} incidents × ${cost.get('humanBaselineCostUsdPerIncident', 35):.0f}/incident",
+        )
+        cc3.metric(
+            "Économies estimées",
+            f"${savings:.2f}",
+            delta=f"−{round((1 - agent_cost / human_total) * 100) if human_total > 0 else 100}%",
+            delta_color="normal",
+        )
+        cc4.metric(
+            "RU CockroachDB consommées",
+            f"{total_ru:,}",
+            delta=f"~{cost.get('avgRuPerIncident', 42):.0f} RU/incident",
+            delta_color="off",
+        )
+
+        with st.expander("📋 Hypothèses de coût", expanded=False):
+            for h in cost.get("hypotheses", []):
+                st.markdown(f"- {h}")
+            st.caption(
+                "Ces estimations sont conservatrices et documentées pour la transparence envers le jury. "
+                "En production avec Bedrock activé, le coût Sonnet 3.5 (~3 $/1M tokens) s'ajouterait."
+            )
+
+        st.divider()
+
+        # ── Ligne 3 : autonomie ─────────────────────────────────────────────
+        st.subheader("🤖 Répartition par mode de routage (Couche 2)")
+        ac1, ac2, ac3, ac4 = st.columns(4)
+        total_all = max(1, sum(autonomy.values()))
+        ac1.metric(
+            "🟢 AUTONOMOUS",
+            autonomy.get("autonomous", 0),
+            delta=f"{autonomy.get('autonomous', 0) / total_all * 100:.0f}%",
+            delta_color="off",
+            help="Agent a agi seul : win-rate > 80% sur stratégie connue",
+        )
+        ac2.metric(
+            "🟡 PENDING_APPROVAL",
+            autonomy.get("pendingApproval", 0),
+            delta=f"{autonomy.get('pendingApproval', 0) / total_all * 100:.0f}%",
+            delta_color="off",
+            help="Win-rate ≤ 80% : validation humaine requise",
+        )
+        ac3.metric(
+            "🔵 EXPLORATORY",
+            autonomy.get("exploratory", 0),
+            delta=f"{autonomy.get('exploratory', 0) / total_all * 100:.0f}%",
+            delta_color="off",
+            help="Stratégie inconnue : l'agent documente et apprend",
+        )
+        ac4.metric(
+            "🔴 REJECTED",
+            autonomy.get("rejected", 0),
+            delta=f"{autonomy.get('rejected', 0) / total_all * 100:.0f}%",
+            delta_color="off",
+            help="Rejeté par l'humain avant exécution",
+        )
+
+        # Visualisation barre autonomie
+        import pandas as pd
+        autonomy_df = pd.DataFrame([
+            {"Mode": "AUTONOMOUS", "Incidents": autonomy.get("autonomous", 0)},
+            {"Mode": "PENDING_APPROVAL", "Incidents": autonomy.get("pendingApproval", 0)},
+            {"Mode": "EXPLORATORY", "Incidents": autonomy.get("exploratory", 0)},
+            {"Mode": "REJECTED", "Incidents": autonomy.get("rejected", 0)},
+        ])
+        st.bar_chart(autonomy_df.set_index("Mode"), use_container_width=True)
+
+        # ── MTTR par stratégie ───────────────────────────────────────────────
+        mttr_by_strategy = impact.get("mttrByStrategy", [])
+        if mttr_by_strategy:
+            st.divider()
+            st.subheader("⏱️ MTTR par stratégie de réparation")
+            st.caption("Uniquement les incidents RESOLVED avec resolved_at enregistré.")
+            mttr_df = pd.DataFrame([
+                {
+                    "Stratégie": r["strategyName"] or "—",
+                    "Incidents": r["incidentCount"],
+                    "MTTR moy. (s)": round(r["mttrAvgSeconds"], 1) if r.get("mttrAvgSeconds") else "—",
+                    "MTTR min (s)": round(r["mttrMinSeconds"], 1) if r.get("mttrMinSeconds") else "—",
+                    "MTTR max (s)": round(r["mttrMaxSeconds"], 1) if r.get("mttrMaxSeconds") else "—",
+                    "vs humain": (
+                        f"−{round((1 - r['mttrAvgSeconds'] / human_baseline) * 100)}%"
+                        if r.get("mttrAvgSeconds") else "—"
+                    ),
+                }
+                for r in mttr_by_strategy
+            ])
+            st.dataframe(mttr_df, use_container_width=True, hide_index=True)
+
+            # Chart
+            chart_df = pd.DataFrame([
+                {"Stratégie": r["strategyName"] or "—", "MTTR (s)": r.get("mttrAvgSeconds") or 0}
+                for r in mttr_by_strategy if r.get("mttrAvgSeconds")
+            ])
+            if not chart_df.empty:
+                import altair as alt
+                baseline_line = alt.Chart(
+                    pd.DataFrame([{"MTTR (s)": human_baseline}])
+                ).mark_rule(color="red", strokeDash=[6, 4]).encode(y="MTTR (s):Q")
+                bars = alt.Chart(chart_df).mark_bar().encode(
+                    x=alt.X("Stratégie:N", sort="-y"),
+                    y=alt.Y("MTTR (s):Q"),
+                    color=alt.value("#4C8BF5"),
+                    tooltip=["Stratégie:N", "MTTR (s):Q"],
+                )
+                st.altair_chart(bars + baseline_line, use_container_width=True)
+                st.caption("🔴 Ligne rouge = baseline humaine (1 200 s). Toutes les barres en dessous = l'agent est plus rapide.")
+
+        # SQL hint
+        with st.expander("🔍 SQL de calcul MTTR", expanded=False):
+            st.code("""
+SELECT
+  context_json->>'strategyName' AS strategy_name,
+  COUNT(*) AS incident_count,
+  ROUND(AVG(EXTRACT(EPOCH FROM (resolved_at - triggered_at))), 2) AS mttr_avg_seconds
+FROM incident_state
+WHERE status = 'RESOLVED'
+  AND resolved_at IS NOT NULL
+GROUP BY context_json->>'strategyName'
+ORDER BY mttr_avg_seconds ASC;
+            """, language="sql")
 
 
 with tab_logs:

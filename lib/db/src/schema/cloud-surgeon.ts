@@ -1,6 +1,7 @@
 import {
   boolean,
   customType,
+  integer,
   jsonb,
   pgTable,
   text,
@@ -50,6 +51,16 @@ export const incidentStateTable = pgTable("incident_state", {
   // autre incident déjà résolu ? Auto-référence traversable par une CTE
   // récursive (WITH RECURSIVE) pour reconstruire une chaîne causale.
   causedByIncidentId: uuid("caused_by_incident_id"),
+  // MTTR et coût par incident (Tâche 5)
+  // triggeredAt : timestamp d'arrivée de l'alerte (immutable après INSERT)
+  triggeredAt: timestamp("triggered_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  // resolvedAt : mis à jour quand le statut passe à RESOLVED ou FAILED
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  // ruConsumed : estimation des CockroachDB Request Units consommées par
+  // cet incident (lecture + écriture + vecteur ANN + transactions sérialisables)
+  ruConsumed: integer("ru_consumed").notNull().default(0),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()
     .defaultNow()
