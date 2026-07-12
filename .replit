@@ -24,17 +24,21 @@ args = "Cloud-Surgeon Dashboard"
 task = "workflow.run"
 args = "predictive-detection-tests"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "API Server"
+
 [[workflows.workflow]]
 name = "Cloud-Surgeon Dashboard"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "cd cloud-surgeon-agent && streamlit run frontend/app.py --server.port 5000"
-waitForPort = 5000
-
 [workflows.workflow.metadata]
 outputType = "webview"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd cloud-surgeon-agent && /home/runner/workspace/.pythonlibs/bin/streamlit run frontend/app.py --server.port 5000 --server.address 0.0.0.0"
+waitForPort = 5000
 
 [[workflows.workflow]]
 name = "predictive-detection-tests"
@@ -46,6 +50,18 @@ args = "pnpm --filter @workspace/api-server run test"
 
 [workflows.workflow.metadata]
 isValidation = true
+
+[[workflows.workflow]]
+name = "API Server"
+author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "PORT=8080 pnpm --filter @workspace/api-server run dev"
+waitForPort = 8080
 
 [agent]
 stack = "PNPM_WORKSPACE"
