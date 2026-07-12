@@ -2,6 +2,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { seedVectorMemory } from "./lib/seed";
 import { pool } from "@workspace/db";
+import { bedrockIsConfigured, bedrockAuthMethod } from "./lib/bedrock";
 
 const rawPort = process.env["PORT"];
 
@@ -28,9 +29,17 @@ app.listen(port, async (err) => {
   // ── Startup diagnostic log ─────────────────────────────────────────────
   // Surfaces the production-readiness story in the workflow logs so judges
   // can see it at a glance.
-  const aiProvider = process.env.AI_PROVIDER ?? (process.env.ANTHROPIC_API_KEY ? "anthropic" : "simulated");
-  const awsStatus = process.env.AWS_ACCESS_KEY_ID ? "LIVE" : "SIMULATED";
-  const rateLimitingEnabled = true; // always on — see app.ts
+  const provider = (process.env.AI_PROVIDER ?? "bedrock").toLowerCase();
+  const bedrockAuth = bedrockAuthMethod();
+  const bedrockStatus = bedrockIsConfigured()
+    ? `LIVE (${bedrockAuth}, region: ${process.env.BEDROCK_REGION ?? "eu-west-1"})`
+    : "SIMULATED (no credentials)";
+  const aiProviderLabel =
+    provider === "anthropic"
+      ? `anthropic (Replit integration)`
+      : `bedrock — ${bedrockStatus}`;
+
+  const awsStatus = process.env.AWS_ACCESS_KEY_ID ? "LIVE" : "SIMULATED (no AWS_ACCESS_KEY_ID)";
 
   let dbStatus = "unknown";
   try {
@@ -43,14 +52,17 @@ app.listen(port, async (err) => {
   }
 
   logger.info(
-    `[BOOT] AI provider: ${aiProvider} | AWS: ${awsStatus} | DB: ${dbStatus} | Rate limiting: ${rateLimitingEnabled ? "on (100 req/15 min)" : "off"}`,
+    `[BOOT] AI: ${aiProviderLabel} | AWS tools: ${awsStatus} | DB: ${dbStatus} | Rate limiting: on`,
   );
 
   if (dbStatus === "UNREACHABLE") {
     logger.warn("[BOOT] CockroachDB is unreachable — check COCKROACHDB_URL and cluster status");
   }
-  if (awsStatus === "SIMULATED") {
-    logger.info("[BOOT] AWS tools running in SIMULATED mode — set AWS_ACCESS_KEY_ID to enable live calls");
+  if (!process.env.AWS_ACCESS_KEY_ID) {
+    logger.info("[BOOT] AWS tools in SIMULATED mode — set AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY to enable live calls");
+  }
+  if (!bedrockIsConfigured()) {
+    logger.warn("[BOOT] Bedrock unconfigured — set BEDROCK_API_KEY or AWS credentials; thoughts will be simulated");
   }
   // ──────────────────────────────────────────────────────────────────────
 
