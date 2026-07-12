@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import healthRouter from "./health";
+import chaosRouter from "./chaos";
 import incidentsRouter from "./incidents";
 import metricsRouter from "./metrics";
 import webhookRouter from "./webhook";
@@ -15,9 +16,10 @@ router.use(healthRouter);
 // les subscriptions HTTP SNS.
 router.use(webhookRouter);
 
-// metricsRouter avant incidentsRouter pour la même raison (apiKeyAuth global
-// est dans incidentsRouter ; metricsRouter applique son propre apiKeyAuth).
+// metricsRouter et chaosRouter avant incidentsRouter pour la même raison
+// (apiKeyAuth global est dans incidentsRouter ; les autres appliquent leur propre).
 router.use(metricsRouter);
+router.use(chaosRouter);
 router.use(incidentsRouter);
 
 export default router;

@@ -20,6 +20,7 @@ import {
   type IncidentContext,
 } from "../lib/cloud-surgeon";
 import { sanitizeAlertText, validateAlertText } from "../lib/prompt-guard";
+import { createChaosConfig } from "../lib/chaos";
 import { apiKeyAuth } from "../middleware/apiKeyAuth";
 
 const router: IRouter = Router();
@@ -93,7 +94,15 @@ router.post("/incidents/trigger", async (req, res): Promise<void> => {
     }
   }
 
-  const result = await runAgentLoop(incident, alertText, simulateCrash);
+  // chaosMode is an extension beyond the generated schema — read directly from body
+  const chaosMode = typeof req.body?.chaosMode === "string" ? req.body.chaosMode : "none";
+  const chaosConfig = createChaosConfig(chaosMode);
+
+  if (chaosConfig.mode !== "none") {
+    req.log.info({ chaosMode: chaosConfig.mode }, "Chaos engineering mode activated");
+  }
+
+  const result = await runAgentLoop(incident, alertText, simulateCrash, chaosConfig);
   res.json(TriggerIncidentResponse.parse(result));
 });
 

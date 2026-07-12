@@ -11,6 +11,7 @@ import {
 } from "@workspace/db";
 import { callMcpTool } from "../mcp/client";
 import { invokeBedrockThought } from "./bedrock";
+import { type ChaosConfig, ChaosPartitionError, injectChaos, sleep as chaosSleep } from "./chaos";
 
 // ============================================================================
 // Cloud-Surgeon — Architecture à 3 couches
@@ -360,6 +361,77 @@ async function callTool(
   return { success: false, error: `Outil inconnu: ${toolName}` };
 }
 
+/**
+ * Enveloppe `persistIncidentState` avec une logique de retry pour les modes chaos.
+ *
+ * - LATENCY  : attend `chaos.latencyMs` ms avant d'écrire (réseau lent simulé).
+ * - PARTITION: `injectChaos` lève `ChaosPartitionError` → l'écriture DB est
+ *              annulée sur la 1re tentative (vrai échec de write, pas juste un
+ *              délai). On logue l'événement, on attend 500 ms (recovery réseau),
+ *              puis on réessaie sans chaos. Le contexte persisté lors de la
+ *              PHASE PRÉCÉDENTE est intact en base — c'est exactement ce que
+ *              démontre la résilience de CockroachDB face à une partition.
+ * - NONE/null: délégation directe à `persistIncidentState`.
+ */
+async function persistWithChaosRetry(
+  incidentId: string,
+  status: string,
+  currentStep: string,
+  context: IncidentContext,
+  chaos: ChaosConfig | undefined,
+  phase: number,
+  opts?: { resolvedAt?: Date; ruConsumed?: number },
+): Promise<IncidentState> {
+  const PHASE_NAMES = ["diagnostician", "remediator", "auditor"] as const;
+  const phaseName = PHASE_NAMES[phase] ?? `phase-${phase}`;
+
+  if (chaos) {
+    try {
+      const event = await injectChaos(chaos, phase);
+      if (event?.mode === "latency") {
+        // Latency was injected (sleep already done inside injectChaos); log it.
+        await logExecution(
+          incidentId,
+          "CHAOS_INJECTED",
+          JSON.stringify({
+            mode: "latency",
+            phase: phaseName,
+            delayMs: event.delayMs,
+            wasPartition: false,
+            message: `Latence réseau simulée : ${event.delayMs} ms ajoutés avant écriture DB (${phaseName})`,
+          }),
+        );
+      }
+    } catch (err) {
+      if (err instanceof ChaosPartitionError) {
+        // ── Real partition failure: write was NOT attempted ───────────────
+        // Log the event (previous phase state is still intact in CockroachDB).
+        await logExecution(
+          incidentId,
+          "CHAOS_INJECTED",
+          JSON.stringify({
+            mode: "partition",
+            phase: phaseName,
+            wasPartition: true,
+            error: (err as Error).message,
+            recovery: "auto-retry after 500ms — état de la phase précédente intact en base",
+            message:
+              `Partition simulée (${phaseName}) : écriture DB avortée. ` +
+              `L'état persisté lors de la phase précédente est intègre en CockroachDB. ` +
+              `Reprise automatique dans 500 ms.`,
+          }),
+        );
+        // Simulate network recovery window, then retry WITHOUT chaos.
+        await sleep(500);
+        return persistIncidentState(incidentId, status, currentStep, context, opts);
+      }
+      throw err; // unexpected error — propagate
+    }
+  }
+
+  return persistIncidentState(incidentId, status, currentStep, context, opts);
+}
+
 async function persistIncidentState(
   incidentId: string,
   status: string,
@@ -394,9 +466,7 @@ async function logExecution(
   await db.insert(executionLogsTable).values({ incidentId, actionTaken, result });
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
+const sleep = chaosSleep;
 
 // ── Pensées par défaut (fallback si Bedrock non disponible) ────────────────
 
@@ -483,6 +553,7 @@ export async function runAgentLoop(
   incident: IncidentState,
   alertText: string,
   simulateCrash: boolean,
+  chaos?: ChaosConfig,
 ): Promise<IncidentState> {
   // Statuts terminaux : ne pas retraiter
   if (incident.status === "RESOLVED" || incident.status === "FAILED") return incident;
@@ -540,7 +611,7 @@ export async function runAgentLoop(
       toolOutput,
     });
 
-    current = await persistIncidentState(incident.incidentId, "DIAGNOSING", "AGENT_TURN_0", context);
+    current = await persistWithChaosRetry(incident.incidentId, "DIAGNOSING", "AGENT_TURN_0", context, chaos, 0);
     await releaseIncidentClaim(incident.incidentId);
 
     if (simulateCrash && startTurn === 0) {
@@ -635,7 +706,7 @@ export async function runAgentLoop(
       toolOutput,
     });
 
-    current = await persistIncidentState(incident.incidentId, "REPAIRING", "AGENT_TURN_1", context);
+    current = await persistWithChaosRetry(incident.incidentId, "REPAIRING", "AGENT_TURN_1", context, chaos, 1);
     await releaseIncidentClaim(incident.incidentId);
   }
 
@@ -686,15 +757,14 @@ export async function runAgentLoop(
       ? `RESOLVED [${strategyName}] [${routingLabel}]: Diagnostic confirmé par Diagnostician, réparation appliquée par Remediator, clôture validée par Auditor.`
       : `FAILED [${strategyName}]: La réparation a échoué — escalade vers l'équipe d'astreinte recommandée par l'Auditor.`;
 
-    current = await persistIncidentState(
+    current = await persistWithChaosRetry(
       incident.incidentId,
       finalStatus,
       "FINALIZED",
       context,
-      {
-        resolvedAt: new Date(),
-        ruConsumed: estimateRuConsumed(context.turns.length),
-      },
+      chaos,
+      2,
+      { resolvedAt: new Date(), ruConsumed: estimateRuConsumed(context.turns.length) },
     );
     await releaseIncidentClaim(incident.incidentId);
 

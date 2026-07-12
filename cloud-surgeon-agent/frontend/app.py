@@ -44,8 +44,15 @@ def api_get(path: str, params: dict | None = None) -> list | dict | None:
         return None
 
 
-def trigger_agent(alert_text: str, simulate_crash: bool) -> dict | None:
-    return api_post("/incidents/trigger", {"alertText": alert_text, "simulateCrash": simulate_crash})
+def trigger_agent(alert_text: str, simulate_crash: bool, chaos_mode: str = "none") -> dict | None:
+    return api_post(
+        "/incidents/trigger",
+        {"alertText": alert_text, "simulateCrash": simulate_crash, "chaosMode": chaos_mode},
+    )
+
+
+def api_post_chaos_sigkill() -> dict | None:
+    return api_post("/chaos/sigkill", {})
 
 
 def fetch_incidents() -> list:
@@ -182,14 +189,49 @@ with st.sidebar:
     )
     alert_text = custom_text.strip() or selected_alert_text
 
-    crash_choice = st.selectbox(
-        "Simuler un crash de la Lambda",
-        ["Aucun (exécution normale)", "Après le diagnostic (tour 1)"],
-        help="Démontre que la base conserve l'état exact même si l'agent est interrompu.",
+    st.divider()
+    st.subheader("💥 Chaos engineering")
+
+    chaos_choice = st.selectbox(
+        "Mode chaos",
+        [
+            "Aucun (exécution normale)",
+            "🌐 Latence réseau (500 ms / write DB)",
+            "🔌 Partition DB (timeout simulé × 2)",
+            "💀 Crash SIGKILL après diagnostic",
+        ],
+        help=(
+            "Latence : injecte 500 ms avant chaque écriture DB — prouve que l'agent résiste à un réseau lent.\n"
+            "Partition : simule 2 timeouts DB qui se rétablissent — prouve la reprise sans perte de contexte.\n"
+            "SIGKILL : tue le process au tour 1 — déclenche à nouveau pour prouver la reprise post-crash."
+        ),
     )
-    simulate_crash = crash_choice.startswith("Après")
+    simulate_crash = chaos_choice.startswith("💀")
+    chaos_mode = (
+        "latency" if chaos_choice.startswith("🌐")
+        else "partition" if chaos_choice.startswith("🔌")
+        else "none"
+    )
 
     trigger = st.button("⚡ Déclencher l'agent", type="primary", use_container_width=True)
+
+    st.divider()
+    st.subheader("☠️ Vrai crash de process")
+    st.caption(
+        "Envoie SIGKILL au process Node (comme un OOMKiller AWS). "
+        "Le workflow manager le redémarre automatiquement. "
+        "Déclenche ensuite le même incident pour prouver la reprise depuis CockroachDB."
+    )
+    if st.button("💀 SIGKILL le serveur API", use_container_width=True, type="secondary"):
+        kill_result = api_post_chaos_sigkill()
+        if kill_result:
+            st.warning(
+                f"⚡ SIGKILL envoyé (PID {kill_result.get('pid')}) — "
+                "le serveur redémarre dans ~2 s. "
+                "Re-déclenche le même scénario pour prouver la reprise."
+            )
+        else:
+            st.error(f"Erreur : {st.session_state.get('_api_error')}")
 
     st.divider()
     st.subheader("🌐 Webhook CloudWatch")
@@ -254,8 +296,13 @@ def render_incident_turns(incident: dict) -> None:
 
 with tab_live:
     if trigger:
-        with st.spinner("Exécution de la boucle d'agent (Diagnostician → Remediator → Auditor)…"):
-            incident = trigger_agent(alert_text, simulate_crash)
+        spinner_msg = {
+            "none": "Exécution de la boucle d'agent (Diagnostician → Remediator → Auditor)…",
+            "latency": "🌐 Mode latence activé — 500 ms injectés avant chaque write DB…",
+            "partition": "🔌 Mode partition activé — 2 timeouts DB simulés, reprise automatique…",
+        }.get(chaos_mode, "Exécution…")
+        with st.spinner(spinner_msg):
+            incident = trigger_agent(alert_text, simulate_crash, chaos_mode)
 
         if incident is None:
             st.error(f"La requête a échoué : {st.session_state.get('_api_error')}")
