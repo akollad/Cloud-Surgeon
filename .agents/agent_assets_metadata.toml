@@ -1,0 +1,20 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "RtGHj5aukp5Us_Q50wVNi"
+uri = "file://assets/logo-v1-scalpel-cloud.png"
+type = "image"
+title = "V1 — Scalpel × Cloud"
+
+[[outputs]]
+id = "01a0ED89MSCm3V9dqDbXf"
+uri = "file://assets/logo-v2-circuit-cross.png"
+type = "image"
+title = "V2 — Circuit Cross"
+
+[[outputs]]
+id = "x1yc88YwFybwOtRkN4YbT"
+uri = "file://assets/logo-v3-watchful-eye.png"
+type = "image"
+title = "V3 — Watchful Eye"
