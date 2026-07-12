@@ -311,6 +311,14 @@ if _api_healthy:
         st.session_state.pop("_cdc_status_ts", None)
         st.session_state.pop("_cdc_status", None)
         st.session_state.pop("_cdc_status_ok_ts", None)
+        # Transient reconnect banner — disappears on the next rerun automatically.
+        st.toast("✅ API reconnected — CDC status refreshed", icon="⚡")
+        st.info(
+            "⚡ **API reconnected — auto-recovery complete.** "
+            "The API server restarted and state was restored from CockroachDB. "
+            "CDC changefeed status is being refreshed now.",
+            icon="✅",
+        )
 else:
     reason = st.session_state.get("_api_error", "unexpected response")
     st.error(f"❌ Backend unreachable at {API_BASE_URL}: {reason}")
