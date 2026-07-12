@@ -438,6 +438,12 @@ _home_summary_widget()
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 
 with st.sidebar:
+    # ── Logo ──────────────────────────────────────────────────────────────
+    _logo_path = os.path.join(os.path.dirname(__file__), "logo.png")
+    if os.path.exists(_logo_path):
+        st.image(_logo_path, use_container_width=True)
+        st.divider()
+
     st.header("🚨 Trigger an Incident")
 
     scenario_label = st.selectbox("Preset scenario", list(PRESET_SCENARIOS.keys()))
