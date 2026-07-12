@@ -299,6 +299,90 @@ else:
     reason = st.session_state.get("_api_error", "unexpected response")
     st.error(f"❌ Backend unreachable at {API_BASE_URL}: {reason}")
 
+# ── Home summary row (CDC badge · event counter · incident counts) ────────
+# Defined here (before sidebar) so it renders at the top of the main body.
+
+@st.fragment(run_every=5)
+def _home_summary_widget() -> None:
+    """Top-of-page summary: CDC badge, live event counter, incident counts."""
+    import time as _time
+
+    # ── CDC badge (refresh every 30 s — SSE connection is not free) ─────────
+    _now = _time.time()
+    _cache_age = _now - st.session_state.get("_cdc_status_ts", 0)
+    if _cache_age > 30 or "_cdc_status" not in st.session_state:
+        _status = fetch_audit_stream_status()
+        st.session_state["_cdc_status"] = _status
+        st.session_state["_cdc_status_ts"] = _now
+    else:
+        _status = st.session_state["_cdc_status"]
+
+    # ── Audit event counter (since session start) ────────────────────────────
+    _logs = api_get("/logs") or []
+    _current_count = len(_logs)
+    if "_audit_baseline" not in st.session_state:
+        st.session_state["_audit_baseline"] = _current_count
+    _delta = _current_count - st.session_state["_audit_baseline"]
+
+    # ── Incident counts ──────────────────────────────────────────────────────
+    _incidents = api_get("/incidents") or []
+    _total = len(_incidents)
+    _predictive = sum(
+        1 for i in _incidents
+        if (i.get("contextJson") or {}).get("source") == "predictive"
+    )
+    _active = sum(
+        1 for i in _incidents
+        if i.get("status") in ("TRIGGERED", "DIAGNOSING", "REPAIRING")
+    )
+
+    col_cdc, col_events, col_inc, col_pred = st.columns(4)
+
+    with col_cdc:
+        if _status and _status.get("cdcActive"):
+            st.success("🟢 CDC LIVE")
+            st.caption("CockroachDB changefeed — real-time push")
+        elif _status and _status.get("type") in ("connected", "heartbeat"):
+            st.info("🔵 Polling fallback")
+            st.caption("2-second polling (no changefeed tier)")
+        else:
+            st.warning("⚠️ Stream unknown")
+            st.caption("SSE endpoint unreachable")
+
+    with col_events:
+        st.metric(
+            "📡 Audit events",
+            _current_count,
+            delta=f"+{_delta} this session" if _delta > 0 else "0 this session",
+            delta_color="normal",
+            help=(
+                "Total audit log entries in CockroachDB. "
+                "The delta counts events received since this browser session started — "
+                "increments in real time as the CDC stream delivers new rows."
+            ),
+        )
+
+    with col_inc:
+        st.metric(
+            "🚨 Incidents",
+            _total,
+            delta=f"{_active} active" if _active else None,
+            delta_color="inverse" if _active else "off",
+            help="Total incidents in CockroachDB. Delta shows how many are currently in-progress.",
+        )
+
+    with col_pred:
+        st.metric(
+            "🔮 Pre-alarm",
+            _predictive,
+            help=(
+                "Incidents opened by vector similarity BEFORE CloudWatch fired an alarm. "
+                "Cloud-Surgeon predicted the failure from metric anomalies alone."
+            ),
+        )
+
+_home_summary_widget()
+
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 
 with st.sidebar:
