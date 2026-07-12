@@ -1,0 +1,466 @@
+# 🩺 Cloud-Surgeon
+
+> **Autonomous AI DevOps agent** — detects, diagnoses, and repairs cloud infrastructure incidents using a three-layer CockroachDB memory system that learns from every repair.
+
+Built for the **CockroachDB × AWS Hackathon 2026**.
+
+---
+
+## What it does
+
+Cloud-Surgeon receives infrastructure alerts (CloudWatch, webhooks, or manual injection), runs a multi-agent reasoning loop powered by Claude (Anthropic / AWS Bedrock), and executes targeted repairs against live AWS services — all while storing every thought, tool call, and outcome transactionally in CockroachDB Serverless.
+
+**Key properties:**
+
+- **Crash-resilient** — kill the agent mid-repair; the next invocation picks up from the exact last persisted turn, zero context loss
+- **Self-learning** — per-strategy success rates computed by pure SQL aggregation; the routing changes automatically as win-rates shift
+- **Pre-alarm healing** — anomaly detection ingests live metrics and opens predictive incidents *before* an outage triggers
+- **Human-in-the-loop** — low-confidence repairs pause for approval; human corrections feed back into the vector memory
+- **Real tools, real infra** — MCP server with live AWS ECS/RDS/Lambda repair + live CockroachDB Cloud REST API
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         CLOUD-SURGEON SYSTEM                                │
+│                                                                             │
+│  ┌───────────────────┐   HTTP/SSE    ┌──────────────────────────────────┐  │
+│  │  Streamlit UI     │◄─────────────►│     Express 5 API Server         │  │
+│  │  (Python)         │              │     (Node.js / TypeScript)        │  │
+│  │                   │              │                                    │  │
+│  │  • Incident feed  │              │  ┌─────────────────────────────┐  │  │
+│  │  • Live CDC stream│              │  │  Agent Loop (3 phases)      │  │  │
+│  │  • Win-rate chart │              │  │                             │  │  │
+│  │  • Calibration    │              │  │  0. Diagnostician           │  │  │
+│  │  • Chaos controls │              │  │     └─ ccloud REST API      │  │  │
+│  │  • Predictive     │              │  │     └─ crdb_cluster_health  │  │  │
+│  │    anomaly ingest │              │  │                             │  │  │
+│  └───────────────────┘              │  │  1. Remediator              │  │  │
+│                                     │  │     └─ aws_repair_service   │  │  │
+│  ┌───────────────────┐              │  │        (ECS / RDS / Lambda) │  │  │
+│  │  CloudWatch /     │  webhook     │  │                             │  │  │
+│  │  PagerDuty /      │─────────────►│  │  2. Auditor                 │  │  │
+│  │  Manual trigger   │              │  │     └─ verify_resolution    │  │  │
+│  └───────────────────┘              │  └──────────┬──────────────────┘  │  │
+│                                     │             │ stdio MCP             │  │
+│                                     │  ┌──────────▼──────────────────┐  │  │
+│                                     │  │  MCP Tool Server             │  │  │
+│                                     │  │                              │  │  │
+│                                     │  │  • execute_ccloud_command   │  │  │
+│                                     │  │    (CRDB Cloud REST API)    │  │  │
+│                                     │  │  • aws_repair_service       │  │  │
+│                                     │  │    (ECS / RDS / Lambda)     │  │  │
+│                                     │  │  • crdb_cluster_health      │  │  │
+│                                     │  │  • crdb_list_slow_queries   │  │  │
+│                                     │  │  • crdb_query               │  │  │
+│                                     │  └─────────────────────────────┘  │  │
+│                                     └──────────────────┬─────────────────┘  │
+│                                                        │ SQL (TLS)           │
+│  ┌─────────────────────────────────────────────────────▼─────────────────┐  │
+│  │                    CockroachDB Serverless                              │  │
+│  │                    (Three-layer agent memory)                          │  │
+│  │                                                                        │  │
+│  │  Layer 0 — Durable State         Layer 1 — RAG Vector Memory          │  │
+│  │  ┌─────────────────────────┐     ┌────────────────────────────────┐   │  │
+│  │  │ incident_state          │     │ incident_vectors               │   │  │
+│  │  │  • Full context_json    │     │  • VECTOR(1024) embeddings     │   │  │
+│  │  │  • Per-turn history     │     │  • C-SPANN cosine ANN index    │   │  │
+│  │  │  • Serializable lock    │     │  • strategy_name + win-rate    │   │  │
+│  │  │    (claimed_by_agent)   │     │  • Causal FK chain (WITH       │   │  │
+│  │  │  • Crash resumption     │     │    RECURSIVE CTE)              │   │  │
+│  │  └─────────────────────────┘     └────────────────────────────────┘   │  │
+│  │                                                                        │  │
+│  │  Layer 2 — Calibration           Layer 3 — CDC Event Bus              │  │
+│  │  ┌─────────────────────────┐     ┌────────────────────────────────┐   │  │
+│  │  │ strategy_calibration    │     │ CockroachDB Changefeed         │   │  │
+│  │  │  • Predicted vs actual  │     │  → webhook → SSE stream        │   │  │
+│  │  │    win-rate per strategy│     │  → dashboard live audit feed   │   │  │
+│  │  │  • Auto correction      │     │                                │   │  │
+│  │  │    factor (×0.5 if gap  │     │ metric_snapshots               │   │  │
+│  │  │    > 15%)               │     │  • Anomaly detection           │   │  │
+│  │  │  • Human signal weight  │     │  • Predictive incidents        │   │  │
+│  │  └─────────────────────────┘     └────────────────────────────────┘   │  │
+│  └────────────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### How CockroachDB powers every layer
+
+| Layer | CockroachDB feature | Why it matters |
+|---|---|---|
+| **Durable state** | `JSONB` + serializable transactions | Agent crashes mid-repair → resumes from last committed turn |
+| **Multi-agent locking** | `UPDATE … WHERE claimed_by_agent IS NULL RETURNING *` in SERIALIZABLE isolation | Three agents coordinate without a separate lock service |
+| **RAG search** | Native `VECTOR(1024)` column + `CREATE VECTOR INDEX … USING C-SPANN` | No Pinecone/Chroma required; cosine ANN inside the same DB |
+| **Contextual bandit** | Pure SQL `COUNT(*) FILTER (WHERE outcome_success)` | Per-strategy win-rate with zero external ML |
+| **Calibration** | `strategy_calibration` table + correction factor | Memory self-corrects when predicted ≠ actual win-rate |
+| **Causal chain** | `caused_by_incident_id` self-FK + `WITH RECURSIVE` CTE | Side-effect incidents traceable to root cause |
+| **CDC event bus** | CockroachDB changefeed → webhook → SSE | Dashboard live-updates without polling |
+
+---
+
+## Mermaid Architecture Diagram
+
+```mermaid
+graph TB
+    subgraph UI["Streamlit Dashboard (Python)"]
+        A[Incident Feed] 
+        B[Live CDC Stream]
+        C[Win-Rate / Calibration]
+        D[Predictive Anomaly Ingest]
+    end
+
+    subgraph API["Express 5 API Server (TypeScript)"]
+        E[POST /api/incidents/trigger]
+        F[Agent Loop<br/>Diagnostician → Remediator → Auditor]
+        G[MCP Client]
+    end
+
+    subgraph MCP["MCP Tool Server (stdio subprocess)"]
+        H[execute_ccloud_command<br/>CRDB Cloud REST API]
+        I[aws_repair_service<br/>ECS · RDS · Lambda]
+        J[crdb_cluster_health<br/>crdb_query · slow_queries]
+    end
+
+    subgraph CRDB["CockroachDB Serverless"]
+        K[(incident_state<br/>JSONB · serializable lock)]
+        L[(incident_vectors<br/>VECTOR 1024 · C-SPANN index)]
+        M[(strategy_calibration<br/>contextual bandit)]
+        N[(metric_snapshots<br/>anomaly detection)]
+        O[Changefeed → webhook → SSE]
+    end
+
+    subgraph AWS["AWS"]
+        P[ECS · RDS · Lambda]
+        Q[CloudWatch / Alerts]
+    end
+
+    UI -->|HTTP + SSE| API
+    Q -->|webhook| E
+    E --> F
+    F --> G
+    G -->|stdio| MCP
+    H -->|HTTPS Bearer| CRDB
+    I -->|AWS SDK| P
+    F -->|SQL| K
+    F -->|cosine ANN| L
+    F -->|win-rate SQL| M
+    D -->|POST /api/metrics/ingest| N
+    O -->|POST /api/internal/cdc| B
+    M -->|correction factor| F
+```
+
+---
+
+## Quick Start
+
+### Prerequisites
+
+- Node.js 20+ and pnpm 9+
+- Python 3.11+
+- A [CockroachDB Serverless](https://cockroachlabs.cloud) cluster (free tier works)
+- An [Anthropic API key](https://console.anthropic.com) **or** AWS credentials with Bedrock access
+
+### 1. Clone and install
+
+```bash
+git clone https://github.com/<your-org>/cloud-surgeon.git
+cd cloud-surgeon
+
+# Node dependencies (all workspaces)
+pnpm install
+
+# Python dependencies (Streamlit dashboard)
+pip install -r cloud-surgeon-agent/requirements.txt
+```
+
+### 2. Configure environment
+
+```bash
+cp .env.example .env
+# Edit .env and fill in the required values (see table below)
+```
+
+### 3. Apply the database schema
+
+```bash
+# One-time (idempotent — safe to re-run)
+psql "$COCKROACHDB_URL&sslrootcert=system" \
+  -f cloud-surgeon-agent/database/schema.sql
+```
+
+> **Note on `drizzle-kit push`**: CockroachDB Serverless requires `sslrootcert=system` in the connection string and the `VECTOR` type syntax diverges from pgvector. We use raw SQL DDL at startup instead. Never run `drizzle-kit push` against CockroachDB Serverless.
+
+### 4. Start both services
+
+| Service | Command | Default port |
+|---|---|---|
+| API server | `pnpm --filter @workspace/api-server run dev` | `8080` |
+| Dashboard | `cd cloud-surgeon-agent && streamlit run frontend/app.py --server.port 5000` | `5000` |
+
+Or, if running on Replit, both workflows are pre-configured in `.replit`.
+
+### 5. Seed vector memory (optional but recommended)
+
+```bash
+curl -X POST http://localhost:8080/api/metrics/seed \
+  -H "X-API-Key: $CLOUD_SURGEON_API_KEY"
+```
+
+This seeds `incident_vectors` with representative historical incidents so the contextual bandit has a starting win-rate to route from.
+
+### 6. Trigger a test incident
+
+```bash
+curl -X POST http://localhost:8080/api/incidents/trigger \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $CLOUD_SURGEON_API_KEY" \
+  -d '{"alertText": "ECS checkout-service CPU 92% — task count 2/5"}'
+```
+
+---
+
+## Environment Variables
+
+Copy `.env.example` to `.env` and fill in these values:
+
+| Variable | Required | Description |
+|---|---|---|
+| `COCKROACHDB_URL` | ✅ | CockroachDB connection string. Format: `postgresql://user:pass@host:26257/db?sslmode=verify-full` |
+| `CLOUD_SURGEON_API_KEY` | ✅ | Shared secret between dashboard and API server. Generate: `openssl rand -hex 32` |
+| `AI_INTEGRATIONS_ANTHROPIC_API_KEY` | ✅ | Anthropic Claude API key (Replit AI Integration) |
+| `AI_INTEGRATIONS_ANTHROPIC_BASE_URL` | ✅ | Anthropic base URL (Replit AI Integration) |
+| `COCKROACH_CLOUD_API_KEY` | ⭐ Recommended | CockroachDB Cloud service-account key. Enables live `execute_ccloud_command` tool calls. [Generate here](https://cockroachlabs.cloud/access-management) |
+| `COCKROACH_CLOUD_CLUSTER_ID` | ⭐ Recommended | UUID of the cluster (visible in the Cloud Console URL) |
+| `AWS_ACCESS_KEY_ID` | Optional | AWS credentials for live ECS/RDS/Lambda repair. Without these, the agent uses safe simulated mode |
+| `AWS_SECRET_ACCESS_KEY` | Optional | (paired with above) |
+| `AWS_REGION` | Optional | AWS region (default: `us-east-1`) |
+| `BEDROCK_API_KEY` | Optional | AWS Bedrock API key (`bdak-…`). Takes priority over `AWS_ACCESS_KEY_ID` for LLM calls |
+| `VOYAGE_API_KEY` | Optional | Voyage AI key for semantic embeddings. Without it, the agent uses deterministic hash embeddings |
+| `SESSION_SECRET` | Optional | Cookie signing secret for express-session |
+| `CALIBRATION_THRESHOLD` | Optional | Win-rate deviation that triggers calibration (default: `0.15` = 15%) |
+| `ECS_DEFAULT_CLUSTER` | Optional | Default ECS cluster name for repair calls (default: `prod-cluster`) |
+
+---
+
+## API Reference
+
+All endpoints require `X-API-Key: <CLOUD_SURGEON_API_KEY>` header.
+
+### Incidents
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/incidents/trigger` | Trigger an incident from an alert text. Runs the full agent loop. |
+| `GET` | `/api/incidents` | List all incidents (latest first) |
+| `GET` | `/api/incidents/:id` | Get a single incident with full context |
+| `POST` | `/api/incidents/:id/approve` | Approve a pending repair (PENDING_APPROVAL → REPAIRING) |
+| `POST` | `/api/incidents/:id/reject` | Reject a repair; records human signal in calibration |
+| `POST` | `/api/incidents/:id/correct` | Inject a human correction into vector memory (weighted ×0.5) |
+| `GET` | `/api/incidents/:id/causal-chain` | Traverse the causal chain via `WITH RECURSIVE` CTE |
+| `GET` | `/api/incidents/:id/handoffs` | Agent handoff log for a given incident |
+| `GET` | `/api/logs` | Immutable execution log (all tool calls and results) |
+| `GET` | `/api/handoffs` | All agent handoffs across all incidents |
+
+### Metrics & Calibration
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/metrics/win-rates` | Per-strategy win-rate from `incident_vectors` (contextual bandit) |
+| `GET` | `/api/metrics/impact` | MTTR and cost-per-incident vs. human on-call |
+| `GET` | `/api/metrics/calibration` | Predicted vs. actual win-rate and correction factors |
+| `POST` | `/api/metrics/calibration/recalibrate` | Trigger a full calibration pass for all strategies |
+| `GET` | `/api/metrics/ccloud?action=<cmd>` | CockroachDB Cloud REST API (ccloud-equivalent). Actions: `cluster:status`, `cluster:list`, `cluster:sql-users`, `cluster:backups` |
+| `GET` | `/api/metrics/cluster` | Live cluster health via official CockroachDB Cloud MCP |
+| `POST` | `/api/metrics/ingest` | Ingest metric datapoints for predictive anomaly detection |
+| `POST` | `/api/metrics/seed` | Seed vector memory with representative historical incidents |
+
+### Streaming & Chaos
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/stream/audit` | SSE stream of live incident events (powered by CockroachDB changefeed) |
+| `POST` | `/api/internal/cdc` | Webhook receiver for CockroachDB changefeed events |
+| `POST` | `/api/chaos/sigkill` | Crash the agent mid-repair (chaos resilience demo) |
+
+---
+
+## MCP Tool Server
+
+Cloud-Surgeon exposes its tools via the [Model Context Protocol](https://modelcontextprotocol.io) — the same interface used by Claude Desktop and Bedrock AgentCore. The MCP server runs as a stdio subprocess launched by the API server.
+
+### Registered tools
+
+| Tool | Description | Live / Simulated |
+|---|---|---|
+| `execute_ccloud_command` | CockroachDB Cloud REST API wrapper. Actions: `cluster:status`, `cluster:list`, `cluster:sql-users`, `cluster:backups`, `cluster:version`, `cluster:sql-dns`. Each response includes `ccloudEquivalent` (exact ccloud command). | 🟢 **Live** (with `COCKROACH_CLOUD_API_KEY`) |
+| `aws_repair_service` | Live ECS force-redeploy, RDS connection scaling, Lambda concurrency scale-up. Infers service type from name. | 🟢 **Live** (with AWS creds) · 🔵 Simulated fallback |
+| `crdb_cluster_health` | Official CockroachDB Cloud MCP — `get_cluster` + `show_running_queries` | 🟢 **Live** (with `COCKROACH_CLOUD_API_KEY`) |
+| `crdb_list_slow_queries` | Official CockroachDB Cloud MCP — slow query diagnostics | 🟢 **Live** |
+| `crdb_query` | Official CockroachDB Cloud MCP — run diagnostic SQL | 🟢 **Live** |
+
+> **Note on ccloud CLI**: `ccloud v0.6.12` (the latest binary) requires browser-based OAuth and cannot authenticate headlessly in containerised environments. Cloud-Surgeon calls the same CockroachDB Cloud REST API that ccloud wraps, authenticated via service-account API key. The `ccloudEquivalent` field in every response documents the exact ccloud command that would produce identical output.
+
+---
+
+## Database Schema
+
+All tables use CockroachDB-native features. The full schema is in [`cloud-surgeon-agent/database/schema.sql`](cloud-surgeon-agent/database/schema.sql).
+
+```
+incident_state         — core incident row; JSONB context; serializable write lock
+incident_vectors       — VECTOR(1024) RAG memory; C-SPANN cosine ANN index
+execution_logs         — immutable journal of every tool call and result
+agent_handoffs         — handoff log between Diagnostician / Remediator / Auditor
+strategy_calibration   — predicted vs. actual win-rate; correction factor per strategy
+metric_snapshots       — time-series metric datapoints for anomaly detection
+```
+
+### Key CockroachDB-specific patterns
+
+**Serializable multi-agent locking:**
+```sql
+UPDATE incident_state
+  SET claimed_by_agent = $1, updated_at = now()
+  WHERE incident_id = $2
+    AND claimed_by_agent IS NULL
+  RETURNING incident_id;
+-- CockroachDB retries automatically on serialization conflict.
+```
+
+**Contextual bandit — win-rate by strategy:**
+```sql
+SELECT strategy_name,
+       COUNT(*) FILTER (WHERE outcome_success) * 1.0 / COUNT(*) AS win_rate,
+       COUNT(*) AS sample_count
+  FROM incident_vectors
+ GROUP BY strategy_name;
+```
+
+**RAG vector search (cosine ANN):**
+```sql
+SELECT error_message_text, strategy_name, outcome_success,
+       embedding <=> $1 AS distance
+  FROM incident_vectors
+ ORDER BY embedding <=> $1
+ LIMIT 5;
+```
+
+**Causal chain traversal:**
+```sql
+WITH RECURSIVE chain AS (
+  SELECT * FROM incident_state WHERE incident_id = $1
+  UNION ALL
+  SELECT i.* FROM incident_state i
+    JOIN chain c ON i.caused_by_incident_id = c.incident_id
+)
+SELECT * FROM chain;
+```
+
+---
+
+## Project Structure
+
+```
+cloud-surgeon/
+├── README.md                          ← you are here
+├── LICENSE                            ← MIT
+├── .env.example                       ← environment variable template
+├── pnpm-workspace.yaml                ← pnpm monorepo config
+│
+├── artifacts/
+│   └── api-server/                    ← Express 5 + TypeScript API server
+│       └── src/
+│           ├── index.ts               ← entry point; startup DDL init
+│           ├── lib/
+│           │   ├── cloud-surgeon.ts   ← 3-phase agent loop (1 000+ lines)
+│           │   ├── aws.ts             ← ECS / RDS / Lambda repair
+│           │   ├── bedrock.ts         ← Bedrock / Anthropic LLM client
+│           │   ├── llm.ts             ← LLM thought generation
+│           │   ├── anomaly.ts         ← predictive anomaly detection
+│           │   ├── cdc.ts             ← CockroachDB changefeed + SSE
+│           │   ├── crdbMcp.ts         ← official CockroachDB Cloud MCP client
+│           │   ├── embeddings.ts      ← Voyage AI / hash fallback embeddings
+│           │   ├── prompt-guard.ts    ← injection sanitizer (length / patterns)
+│           │   └── seed.ts            ← vector memory seeder
+│           ├── mcp/
+│           │   ├── server.ts          ← MCP tool server (stdio)
+│           │   └── client.ts          ← MCP client (spawns server subprocess)
+│           └── routes/
+│               ├── incidents.ts       ← incident CRUD + approve/reject/correct
+│               ├── metrics.ts         ← win-rates, MTTR, calibration, ccloud
+│               ├── stream.ts          ← SSE audit stream + CDC webhook
+│               └── chaos.ts           ← chaos engineering endpoints
+│
+├── cloud-surgeon-agent/
+│   ├── frontend/
+│   │   └── app.py                     ← Streamlit dashboard (1 300+ lines)
+│   ├── database/
+│   │   └── schema.sql                 ← canonical CockroachDB DDL (source of truth)
+│   └── requirements.txt               ← Python dependencies
+│
+├── lib/
+│   ├── db/src/schema/                 ← Drizzle schema definitions (query builder)
+│   └── api-zod/src/generated/api.ts   ← Zod types for API contract
+│
+└── scripts/
+    └── post-merge.sh                  ← post-merge setup (pnpm install + build + ccloud)
+```
+
+---
+
+## Hackathon Criteria Coverage
+
+| Criterion | Implementation |
+|---|---|
+| **Technical implementation** | Native CockroachDB VECTOR index, serializable transactions as multi-agent lock, CDC changefeed as event bus, contextual bandit by pure SQL, recursive CTE causal chains |
+| **Use of CockroachDB** | Every layer of agent intelligence runs in CockroachDB: state, RAG, locking, bandit, calibration, CDC — not just as a store but as the reasoning substrate |
+| **Creativity & originality** | Pre-alarm healing via anomaly detection; calibration that self-corrects win-rates; human corrections that inject weighted signals back into vector memory |
+| **Completeness** | End-to-end: alert → diagnose → vector search → route → repair → audit → calibrate → dashboard. All flows demonstrated live. |
+| **Presentation** | Live dashboard with CDC stream, ccloud LIVE badge, chaos resilience timeline, predictive detection, win-rate chart, MTTR metrics |
+
+---
+
+## Chaos Resilience Demo
+
+Cloud-Surgeon can survive a crash at any point during incident processing:
+
+```bash
+# 1. Start a long repair
+curl -X POST http://localhost:8080/api/incidents/trigger \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $CLOUD_SURGEON_API_KEY" \
+  -d '{"alertText": "RDS prod-db connection pool exhausted — 500 active connections"}'
+
+# 2. Kill the API server mid-repair
+curl -X POST http://localhost:8080/api/chaos/sigkill \
+  -H "X-API-Key: $CLOUD_SURGEON_API_KEY"
+
+# 3. Restart
+pnpm --filter @workspace/api-server run dev
+
+# 4. Resume — the agent picks up from the last committed turn
+curl -X POST http://localhost:8080/api/incidents/trigger \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $CLOUD_SURGEON_API_KEY" \
+  -d '{"alertText": "RDS prod-db connection pool exhausted — 500 active connections"}'
+# Same fingerprint → same incident row → picks up from DIAGNOSING / REPAIRING
+```
+
+The entire conversation history (Claude messages + tool calls + tool results) is stored in `incident_state.context_json` as a JSONB array. The agent reconstitutes its Bedrock conversation exactly, with no context loss.
+
+---
+
+## Security
+
+- **API key auth** — every endpoint requires `X-API-Key` header (middleware in `apiKeyAuth.ts`)
+- **Prompt injection guard** — `prompt-guard.ts` enforces length limits, strips control characters, and matches jailbreak patterns before any alert text reaches the LLM
+- **Simulated AWS** — destructive AWS actions are simulated by default; live mode requires explicit credential presence and is always labelled in the dashboard
+- **MCP permission model** — the MCP service account for CockroachDB Cloud has read-only access to cluster state; it cannot delete clusters or modify replication
+
+---
+
+## License
+
+[MIT](LICENSE) — © 2026 Cloud-Surgeon Contributors
