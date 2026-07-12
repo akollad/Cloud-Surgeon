@@ -76,6 +76,10 @@ def fetch_calibration() -> dict | None:
     return api_get("/metrics/calibration")
 
 
+def fetch_cluster_health() -> dict | None:
+    return api_get("/metrics/cluster")
+
+
 def recalibrate_all() -> dict | None:
     return api_post("/metrics/calibration/recalibrate", {})
 
@@ -720,6 +724,51 @@ with tab_memory:
 """)
     else:
         st.info("No data in vector memory. Trigger some incidents first.")
+
+    # ── CockroachDB Cluster Health (official Cloud MCP) ────────────────────
+    st.divider()
+    st.subheader("🐛 Live Cluster Health — CockroachDB Cloud MCP")
+    st.caption(
+        "Sourced from the **official CockroachDB Cloud MCP Server** at `cockroachlabs.cloud/mcp` "
+        "(not a custom REST call). Combines `get_cluster` + `show_running_queries` in one session."
+    )
+
+    cluster_data = fetch_cluster_health()
+    if cluster_data is None:
+        st.warning(f"Could not reach `/metrics/cluster`: {st.session_state.get('_api_error')}")
+    elif cluster_data.get("simulated"):
+        st.info(
+            "🔵 **Simulated** — `COCKROACH_CLOUD_API_KEY` not configured. "
+            "Set it to see live cluster metrics from the official CockroachDB Cloud MCP."
+        )
+    else:
+        # Parse cluster info from the nested result
+        cluster_info = cluster_data.get("cluster", {})
+        running_queries = cluster_data.get("runningQueriesRaw", {})
+        fetched_at = cluster_data.get("fetchedAt", "")
+
+        # The get_cluster result may be nested further depending on official MCP response shape
+        c_inner = cluster_info.get("cluster", cluster_info) if isinstance(cluster_info, dict) else {}
+
+        col_h1, col_h2, col_h3, col_h4 = st.columns(4)
+        col_h1.metric("State", c_inner.get("state", "—"))
+        col_h2.metric("Plan", c_inner.get("plan", "—"))
+
+        active_conns = cluster_data.get("activeConnections")
+        col_h3.metric(
+            "Active queries",
+            str(active_conns) if active_conns is not None else "—",
+            help="Count from show_running_queries via official Cloud MCP",
+        )
+
+        regions = c_inner.get("regions", [])
+        region_str = ", ".join(r.get("name", str(r)) for r in regions) if isinstance(regions, list) else str(regions)
+        col_h4.metric("Regions", region_str or "—")
+
+        st.caption(f"🟢 Sourced from official CockroachDB Cloud MCP · fetched {fetched_at[:19] if fetched_at else '—'}")
+
+        with st.expander("📄 Raw cluster response (official MCP)", expanded=False):
+            st.json(cluster_data)
 
 
 with tab_calibration:

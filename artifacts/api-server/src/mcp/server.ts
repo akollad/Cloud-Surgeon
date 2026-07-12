@@ -150,5 +150,79 @@ server.registerTool(
   },
 );
 
+// ── CockroachDB Cloud Managed MCP tools (official hosted MCP) ─────────────
+//
+// These three tools proxy to https://cockroachlabs.cloud/mcp using
+// the CrdbCloudMcpSession client (StreamableHTTP + Bearer token auth).
+// This makes the agent's toolbox span TWO MCP servers simultaneously:
+//   1. This process (stdio) — AWS infrastructure repair
+//   2. cockroachlabs.cloud/mcp (HTTP) — CockroachDB cluster observability
+//
+// Auth: COCKROACH_CLOUD_API_KEY (Bearer token)
+// Cluster: COCKROACH_CLOUD_CLUSTER_ID
+
+import { crdbMcp } from "../lib/crdbMcp";
+
+server.registerTool(
+  "crdb_cluster_health",
+  {
+    title: "CockroachDB Cluster Health (official Cloud MCP)",
+    description:
+      "Fetches real-time cluster health from the official CockroachDB Cloud MCP server at " +
+      "cockroachlabs.cloud/mcp. Returns cluster state, plan, regions, and active query count. " +
+      "Combines the `get_cluster` and `show_running_queries` MCP tools in one call. " +
+      "Use this for any database-related alert (RDS connection errors, CPU spikes, pool exhaustion).",
+    inputSchema: {},
+  },
+  async () => {
+    const result = await crdbMcp.clusterHealth();
+    return { content: [{ type: "text", text: JSON.stringify(result) }] };
+  },
+);
+
+server.registerTool(
+  "crdb_list_slow_queries",
+  {
+    title: "List slow/running queries (official Cloud MCP)",
+    description:
+      "Fetches currently executing queries that have been running longer than a configurable " +
+      "threshold (default: 1 second) from the official CockroachDB Cloud MCP. " +
+      "Calls `select_query` on crdb_internal.cluster_queries. " +
+      "Use this to diagnose high-latency alerts or connection pool exhaustion.",
+    inputSchema: {
+      thresholdSeconds: z
+        .number()
+        .optional()
+        .describe("Minimum duration in seconds to include a query (default: 1)"),
+    },
+  },
+  async ({ thresholdSeconds }) => {
+    const result = await crdbMcp.listSlowQueries(thresholdSeconds ?? 1);
+    return { content: [{ type: "text", text: JSON.stringify(result) }] };
+  },
+);
+
+server.registerTool(
+  "crdb_query",
+  {
+    title: "Run diagnostic SQL (official Cloud MCP)",
+    description:
+      "Executes a read-only SELECT query against the live CockroachDB cluster through " +
+      "the official CockroachDB Cloud MCP server (cockroachlabs.cloud/mcp). " +
+      "Use for schema introspection, table statistics, replication health, or incident diagnostics.",
+    inputSchema: {
+      sql: z.string().describe("Read-only SELECT SQL to execute"),
+      database: z
+        .string()
+        .optional()
+        .describe("Database to run the query against (default: defaultdb)"),
+    },
+  },
+  async ({ sql, database }) => {
+    const result = await crdbMcp.query(sql, database ?? "defaultdb");
+    return { content: [{ type: "text", text: JSON.stringify(result) }] };
+  },
+);
+
 const transport = new StdioServerTransport();
 await server.connect(transport);

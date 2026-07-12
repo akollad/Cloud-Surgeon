@@ -610,6 +610,24 @@ function mapRowToIncidentState(row: Record<string, unknown>): IncidentState {
   };
 }
 
+/** Returns true when the alert is DB / CockroachDB / connection related. */
+function isDbRelatedAlert(alertText: string): boolean {
+  const t = alertText.toLowerCase();
+  return (
+    t.includes("rds") ||
+    t.includes("postgres") ||
+    t.includes("mysql") ||
+    t.includes("max_connections") ||
+    t.includes("connection pool") ||
+    t.includes("pg_stat") ||
+    t.includes("database") ||
+    t.includes("cockroach") ||
+    t.includes("crdb") ||
+    t.includes("db cpu") ||
+    t.includes("db latency")
+  );
+}
+
 async function callTool(
   toolName: string,
   toolInput: Record<string, unknown>,
@@ -619,6 +637,16 @@ async function callTool(
     return callMcpTool(toolName, { action });
   }
   if (toolName === "aws_repair_service") {
+    return callMcpTool(toolName, toolInput);
+  }
+  // ── Official CockroachDB Cloud MCP tools (proxied via our MCP server) ──
+  if (toolName === "crdb_cluster_health") {
+    return callMcpTool(toolName, {});
+  }
+  if (toolName === "crdb_list_slow_queries") {
+    return callMcpTool(toolName, toolInput);
+  }
+  if (toolName === "crdb_query") {
     return callMcpTool(toolName, toolInput);
   }
   if (toolName === "verify_resolution") {
@@ -836,15 +864,20 @@ export async function runAgentLoop(
       "Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API",
     );
 
-    const toolInput = {
-      commandJson: JSON.stringify({ action: "cluster:status", target: alertText.slice(0, 40) }),
-    };
+    // DB-related alerts → use the official CockroachDB Cloud MCP for diagnosis.
+    // All other alerts → use the local ccloud API tool (cluster:status).
+    const useOfficialCrdbMcp = isDbRelatedAlert(alertText);
+    const diagToolName = useOfficialCrdbMcp ? "crdb_cluster_health" : "execute_ccloud_command";
+    const toolInput = useOfficialCrdbMcp
+      ? {}
+      : { commandJson: JSON.stringify({ action: "cluster:status", target: alertText.slice(0, 40) }) };
+
     const { thought, source: thoughtSource } = await invokeLLMThought(alertText, 0, null);
-    const toolOutput = await callTool("execute_ccloud_command", toolInput);
+    const toolOutput = await callTool(diagToolName, toolInput);
 
     await logExecution(
       incident.incidentId,
-      `execute_ccloud_command(${JSON.stringify(toolInput)})`,
+      `${diagToolName}(${JSON.stringify(toolInput)})`,
       JSON.stringify(toolOutput),
     );
 
@@ -853,7 +886,7 @@ export async function runAgentLoop(
       agent: "diagnostician",
       thought,
       thoughtSource,
-      toolName: "execute_ccloud_command",
+      toolName: diagToolName,
       toolInput,
       toolOutput,
     });

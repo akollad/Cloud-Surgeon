@@ -26,6 +26,7 @@ import {
   BASE_RU_PER_INCIDENT,
 } from "../lib/cloud-surgeon";
 import { seedVectorMemory } from "../lib/seed";
+import { crdbMcp } from "../lib/crdbMcp";
 
 const router: IRouter = Router();
 
@@ -247,6 +248,43 @@ router.post("/metrics/calibration/recalibrate", async (_req, res): Promise<void>
     ...result,
     message: `Recalibration complete: ${result.updated} strategy(ies) updated.`,
   });
+});
+
+// ── CockroachDB Cluster Health (official Cloud MCP) ─────────────────────
+//
+// GET /api/metrics/cluster
+//
+// Fetches live cluster health from the official CockroachDB Cloud MCP server
+// (cockroachlabs.cloud/mcp). Powers the "Cluster Health" widget in the
+// Memory & Win-rates dashboard tab.
+//
+// Sources:
+//   - `get_cluster`             → state, plan, regions
+//   - `show_running_queries`    → active connection count
+//
+// When COCKROACH_CLOUD_API_KEY is absent, returns a simulated response so the
+// dashboard renders gracefully without crashing.
+
+router.get("/metrics/cluster", async (_req, res): Promise<void> => {
+  if (!crdbMcp.isConfigured) {
+    res.json({
+      simulated: true,
+      note: "COCKROACH_CLOUD_API_KEY not configured — set it to enable live cluster health.",
+      source: "cockroachdb-cloud-mcp",
+      fetchedAt: new Date().toISOString(),
+    });
+    return;
+  }
+
+  try {
+    const health = await crdbMcp.clusterHealth();
+    res.json(health);
+  } catch (err) {
+    res.status(502).json({
+      error: err instanceof Error ? err.message : String(err),
+      source: "cockroachdb-cloud-mcp",
+    });
+  }
 });
 
 // ── Seed ──────────────────────────────────────────────────────────────────
