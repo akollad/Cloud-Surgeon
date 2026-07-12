@@ -27,13 +27,22 @@ CREATE EXTENSION IF NOT EXISTS vector;
 -- reconstruire sa conversation Bedrock exactement où elle s'est arrêtée.
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS incident_state (
-    incident_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    alert_fingerprint VARCHAR(255) UNIQUE NOT NULL,
-    status            VARCHAR(50) NOT NULL DEFAULT 'TRIGGERED'
-                          CHECK (status IN ('TRIGGERED', 'DIAGNOSING', 'REPAIRING', 'RESOLVED', 'FAILED')),
-    current_step      VARCHAR(100),
-    context_json      JSONB NOT NULL DEFAULT '{}'::JSONB,
-    updated_at        TIMESTAMP NOT NULL DEFAULT now()
+    incident_id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    alert_fingerprint   VARCHAR(255) UNIQUE NOT NULL,
+    status              VARCHAR(50) NOT NULL DEFAULT 'TRIGGERED'
+                            CHECK (status IN ('TRIGGERED', 'DIAGNOSING', 'REPAIRING',
+                                              'RESOLVED', 'FAILED', 'PENDING_APPROVAL')),
+    current_step        VARCHAR(100),
+    context_json        JSONB NOT NULL DEFAULT '{}'::JSONB,
+    -- Coordination multi-agents : quel agent (diagnostician/remediator/auditor)
+    -- détient actuellement le droit d'écrire sur cet incident. Réclamé et
+    -- libéré via une transaction sérialisable CockroachDB.
+    claimed_by_agent    VARCHAR(50),
+    -- Chaînage causal : cet incident a-t-il été déclenché en réaction à un
+    -- autre incident déjà résolu ? Auto-référence traversable par une CTE
+    -- récursive (WITH RECURSIVE) pour reconstruire la chaîne causale.
+    caused_by_incident_id UUID REFERENCES incident_state (incident_id),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- Recherche rapide des incidents actifs (non résolus/échoués) au démarrage
@@ -42,6 +51,11 @@ CREATE INDEX IF NOT EXISTS idx_incident_state_status
     ON incident_state (status)
     WHERE status NOT IN ('RESOLVED', 'FAILED');
 
+-- Recherche rapide des incidents réclamés par un agent donné.
+CREATE INDEX IF NOT EXISTS idx_incident_state_claimed_by_agent
+    ON incident_state (claimed_by_agent)
+    WHERE claimed_by_agent IS NOT NULL;
+
 -- ----------------------------------------------------------------------------
 -- Table incident_vectors
 --
@@ -49,12 +63,21 @@ CREATE INDEX IF NOT EXISTS idx_incident_state_status
 -- déjà résolu, vectorisé via Amazon Titan Text Embeddings V2 (dimension 1024).
 -- L'agent interroge cette table par similarité cosinus avant de choisir une
 -- action, pour réutiliser les solutions déjà connues.
+--
+-- strategy_name + outcome_success permettent de calculer un taux de succès
+-- par stratégie via une agrégation SQL pure — un bandit contextuel appuyé
+-- sur CockroachDB, sans service ML externe.
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS incident_vectors (
-    vector_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    error_message_text TEXT NOT NULL,
-    embedding          VECTOR(1024) NOT NULL,
-    created_at         TIMESTAMP NOT NULL DEFAULT now()
+    vector_id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    -- FK optionnelle vers l'incident source (NULL pour les entrées seed
+    -- insérées manuellement lors de l'initialisation de la mémoire).
+    incident_id         UUID REFERENCES incident_state (incident_id),
+    error_message_text  TEXT NOT NULL,
+    embedding           VECTOR(1024) NOT NULL,
+    strategy_name       VARCHAR(100) NOT NULL DEFAULT 'default_repair',
+    outcome_success     BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- Index de similarité vectorielle. CockroachDB implémente la recherche ANN
@@ -63,6 +86,30 @@ CREATE TABLE IF NOT EXISTS incident_vectors (
 -- La distance utilisée à la requête (opérateur <=>) est la distance cosinus.
 CREATE VECTOR INDEX IF NOT EXISTS idx_incident_vectors_embedding
     ON incident_vectors (embedding vector_cosine_ops);
+
+-- Index sur strategy_name pour les agrégations de win-rate.
+CREATE INDEX IF NOT EXISTS idx_incident_vectors_strategy
+    ON incident_vectors (strategy_name);
+
+-- ----------------------------------------------------------------------------
+-- Table agent_handoffs
+--
+-- Traçabilité des passations entre agents spécialisés (Diagnostician,
+-- Remediator, Auditor). Chaque réclamation/libération d'un incident est
+-- journalisée, avec le mode de décision retenu par le Remediator
+-- (autonomous / needs_approval / cautious) selon le score RAG et le win-rate.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS agent_handoffs (
+    handoff_id      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    incident_id     UUID NOT NULL REFERENCES incident_state (incident_id),
+    agent_name      VARCHAR(50) NOT NULL,
+    decision_mode   VARCHAR(50),
+    note            TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_handoffs_incident_id
+    ON agent_handoffs (incident_id);
 
 -- ----------------------------------------------------------------------------
 -- Table execution_logs
@@ -76,8 +123,21 @@ CREATE TABLE IF NOT EXISTS execution_logs (
     incident_id  UUID NOT NULL REFERENCES incident_state (incident_id),
     action_taken TEXT NOT NULL,
     result       TEXT,
-    created_at   TIMESTAMP NOT NULL DEFAULT now()
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_execution_logs_incident_id
     ON execution_logs (incident_id);
+
+-- ----------------------------------------------------------------------------
+-- Migrations idempotentes — colonnes ajoutées après la création initiale
+-- (ADD COLUMN IF NOT EXISTS est supporté par CockroachDB >= v21.1)
+-- ----------------------------------------------------------------------------
+ALTER TABLE incident_state
+    ADD COLUMN IF NOT EXISTS claimed_by_agent    VARCHAR(50),
+    ADD COLUMN IF NOT EXISTS caused_by_incident_id UUID REFERENCES incident_state (incident_id);
+
+ALTER TABLE incident_vectors
+    ADD COLUMN IF NOT EXISTS incident_id     UUID REFERENCES incident_state (incident_id),
+    ADD COLUMN IF NOT EXISTS strategy_name   VARCHAR(100) NOT NULL DEFAULT 'default_repair',
+    ADD COLUMN IF NOT EXISTS outcome_success BOOLEAN NOT NULL DEFAULT TRUE;

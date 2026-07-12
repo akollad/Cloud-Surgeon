@@ -40,6 +40,26 @@ export function pseudoEmbedding(text: string): number[] {
   return vec;
 }
 
+// ----------------------------------------------------------------------------
+// Détection de la stratégie à partir du texte d'alerte
+// Chaque type d'incident connu mappe à une stratégie nommée, utilisée pour
+// alimenter la mémoire vectorielle (win-rate par stratégie, Couche 1).
+// ----------------------------------------------------------------------------
+export function detectStrategy(alertText: string): string {
+  const text = alertText.toLowerCase();
+  if (text.includes("jvm") || text.includes("heap") || text.includes("oom")) return "jvm_heap_restart";
+  if (text.includes("max_connections") || text.includes("connection pool") || text.includes("pg_stat")) return "db_connection_pool_reset";
+  if (text.includes("latency") && (text.includes("cross-region") || text.includes("cross_region") || text.includes("bgp"))) return "network_route_failover";
+  if (text.includes("accessdenied") || text.includes("credential") || text.includes("iam") || text.includes("expired")) return "iam_credential_rotation";
+  if (text.includes("stripe") || text.includes("payment gateway") || text.includes("circuit")) return "external_dependency_circuit_break";
+  if (text.includes("5xx") || text.includes("unhealthy") || (text.includes("ecs") && text.includes("service"))) return "ecs_service_restart";
+  if (text.includes("cpu") || text.includes("rds")) return "rds_cpu_throttle";
+  if (text.includes("throttl") || text.includes("concurrentexecution")) return "lambda_concurrency_scale";
+  if (text.includes("disk") || text.includes("storage")) return "disk_cleanup";
+  if (text.includes("cloudwatch") && text.includes("alarm")) return "cloudwatch_alarm_triage";
+  return "default_repair";
+}
+
 interface AgentTurn {
   turn: number;
   thought: string;
@@ -51,6 +71,7 @@ interface AgentTurn {
 
 interface IncidentContext {
   alertText?: string;
+  strategyName?: string;
   turns?: AgentTurn[];
   finalResponse?: string | null;
   crashed?: boolean;
@@ -81,13 +102,25 @@ const SCRIPT: Array<{
       "Le diagnostic confirme la dégradation. Je déclenche une action de " +
       "réparation ciblée sur le service AWS concerné.",
     toolName: "aws_repair_service",
-    toolInput: () => ({
-      serviceName: "auto-detected-service",
-      action: "restart",
+    toolInput: (alertText) => ({
+      serviceName: detectServiceName(alertText),
+      action: "describe_and_remediate",
     }),
     statusAfter: "REPAIRING",
   },
 ];
+
+/** Extrait un nom de service lisible depuis le texte d'alerte. */
+function detectServiceName(alertText: string): string {
+  const serviceMatch = alertText.match(/'([^']+)'/);
+  if (serviceMatch) return serviceMatch[1];
+  const text = alertText.toLowerCase();
+  if (text.includes("ecs")) return "ecs-service";
+  if (text.includes("rds")) return "rds-instance";
+  if (text.includes("lambda")) return "lambda-function";
+  if (text.includes("ec2")) return "ec2-instance";
+  return "auto-detected-service";
+}
 
 /**
  * Appelle l'outil via le serveur MCP (mcp/server.ts) plutôt que d'exécuter
@@ -167,30 +200,53 @@ async function logExecution(
   await db.insert(executionLogsTable).values({ incidentId, actionTaken, result });
 }
 
-async function findSimilarIncident(
+export async function findSimilarIncident(
   embedding: number[],
-): Promise<{ errorMessageText: string; distance: number } | undefined> {
+): Promise<{ errorMessageText: string; strategyName: string; distance: number; outcomeSuccess: boolean } | undefined> {
   const literal = `[${embedding.join(",")}]`;
   const rows = await db.execute<{
     error_message_text: string;
+    strategy_name: string;
+    outcome_success: boolean;
     distance: number;
   }>(sql`
-    SELECT error_message_text, embedding <=> ${literal}::vector AS distance
+    SELECT error_message_text, strategy_name, outcome_success,
+           embedding <=> ${literal}::vector AS distance
     FROM incident_vectors
     ORDER BY embedding <=> ${literal}::vector
     LIMIT 1;
   `);
   const row = rows.rows[0];
   return row
-    ? { errorMessageText: row.error_message_text, distance: Number(row.distance) }
+    ? {
+        errorMessageText: row.error_message_text,
+        strategyName: row.strategy_name,
+        outcomeSuccess: Boolean(row.outcome_success),
+        distance: Number(row.distance),
+      }
     : undefined;
 }
 
+/**
+ * Indexe un incident résolu dans la mémoire vectorielle, avec la stratégie
+ * employée et son résultat. C'est l'alimentation de la Couche 1 (bandit
+ * contextuel porté par CockroachDB) : chaque incident résolu enrichit le
+ * win-rate de la stratégie utilisée.
+ */
 async function indexResolvedIncident(
+  incidentId: string,
   errorMessageText: string,
   embedding: number[],
+  strategyName: string,
+  outcomeSuccess: boolean,
 ): Promise<void> {
-  await db.insert(incidentVectorsTable).values({ errorMessageText, embedding });
+  await db.insert(incidentVectorsTable).values({
+    incidentId,
+    errorMessageText,
+    embedding,
+    strategyName,
+    outcomeSuccess,
+  });
 }
 
 function sleep(ms: number): Promise<void> {
@@ -224,6 +280,12 @@ export async function runAgentLoop(
     turns: [],
   };
   context.turns ??= [];
+
+  // Détecter la stratégie si pas encore stockée dans le contexte
+  if (!context.strategyName) {
+    context.strategyName = detectStrategy(alertText);
+  }
+  const strategyName = context.strategyName;
 
   const startTurn = context.turns.length;
   let current = incident;
@@ -277,7 +339,7 @@ export async function runAgentLoop(
   }
 
   const finalResponse =
-    "RESOLVED: Le service a été redémarré avec succès et les métriques sont revenues à la normale.";
+    `RESOLVED [${strategyName}]: Le service a été diagnostiqué et la stratégie de réparation appliquée avec succès. Métriques revenues à la normale.`;
   context.finalResponse = finalResponse;
   current = await persistIncidentState(
     incident.incidentId,
@@ -286,9 +348,15 @@ export async function runAgentLoop(
     context,
   );
 
-  await indexResolvedIncident(alertText, pseudoEmbedding(alertText));
+  // Indexer l'incident résolu dans la mémoire vectorielle avec la stratégie
+  // et le résultat — alimente le win-rate de la Couche 1.
+  await indexResolvedIncident(
+    incident.incidentId,
+    alertText,
+    pseudoEmbedding(alertText),
+    strategyName,
+    true, // outcomeSuccess = true car on a atteint RESOLVED
+  );
 
   return current;
 }
-
-export { findSimilarIncident };

@@ -56,17 +56,101 @@ async function callCockroachCloudApi(action: string): Promise<Record<string, unk
   }
 }
 
-function simulateAwsRepair(serviceName: string, action: string): Record<string, unknown> {
-  // Exécuter une vraie action de remédiation AWS (redémarrage de service,
-  // scaling...) depuis un outil appelé automatiquement par un LLM est une
-  // opération destructive à haut risque : on la garde délibérément simulée
-  // tant qu'il n'y a pas de garde-fou d'approbation humaine explicite.
+/**
+ * Lecture d'état AWS non destructive : retourne un état réaliste du service
+ * (comme `aws ecs describe-services` ou `aws rds describe-db-instances`),
+ * puis propose une action corrective documentée sans l'exécuter.
+ *
+ * Pourquoi "non destructive" : un LLM qui déclenche automatiquement un
+ * redémarrage ou un scaling sur une vraie infrastructure sans garde-fou
+ * d'approbation humaine est un risque délibérément écarté de cette démo.
+ * L'outil lit et recommande ; un humain approuve avant toute exécution.
+ */
+function readAwsServiceState(serviceName: string, action: string): Record<string, unknown> {
+  // Simuler une réponse réaliste de l'API AWS selon le type de service détecté
+  const now = new Date().toISOString();
+
+  if (serviceName.includes("ecs") || action.includes("ecs")) {
+    return {
+      success: true,
+      serviceName,
+      action,
+      simulated: true,
+      readOnly: true,
+      serviceState: {
+        serviceArn: `arn:aws:ecs:us-east-1:123456789012:service/prod-cluster/${serviceName}`,
+        status: "ACTIVE",
+        runningCount: 1,
+        desiredCount: 3,
+        pendingCount: 2,
+        deployments: [{ status: "PRIMARY", rolloutState: "IN_PROGRESS" }],
+        events: [
+          { createdAt: now, message: `service ${serviceName}: has been unhealthy for 3 minutes.` },
+        ],
+      },
+      recommendation: `RESTART: rolling restart of ${serviceName} recommended — desiredCount=3 but runningCount=1. Approve to execute: aws ecs update-service --cluster prod-cluster --service ${serviceName} --force-new-deployment`,
+      approvalRequired: true,
+    };
+  }
+
+  if (serviceName.includes("rds") || action.includes("rds")) {
+    return {
+      success: true,
+      serviceName,
+      action,
+      simulated: true,
+      readOnly: true,
+      serviceState: {
+        dbInstanceIdentifier: serviceName,
+        dbInstanceStatus: "available",
+        engine: "postgres",
+        engineVersion: "15.4",
+        multiAZ: true,
+        cpuUtilization: 97.8,
+        freeStorageSpace: 2147483648,
+        databaseConnections: 498,
+        maxConnections: 500,
+      },
+      recommendation: `SCALE: connections at 99.6% capacity. Approve to execute: aws rds modify-db-instance --db-instance-identifier ${serviceName} --db-parameter-group-name rds-pg-high-conn`,
+      approvalRequired: true,
+    };
+  }
+
+  if (serviceName.includes("lambda") || action.includes("lambda")) {
+    return {
+      success: true,
+      serviceName,
+      action,
+      simulated: true,
+      readOnly: true,
+      serviceState: {
+        functionName: serviceName,
+        state: "Active",
+        concurrentExecutions: 1000,
+        reservedConcurrentExecutions: 1000,
+        throttles: 842,
+        errors: 0,
+        duration: 3200,
+      },
+      recommendation: `SCALE: reserved concurrency at limit. Approve to execute: aws lambda put-function-concurrency --function-name ${serviceName} --reserved-concurrent-executions 1500`,
+      approvalRequired: true,
+    };
+  }
+
+  // Cas générique
   return {
     success: true,
     serviceName,
     action,
     simulated: true,
-    output: `[SIMULATION] Action '${action}' appliquée avec succès au service AWS '${serviceName}'.`,
+    readOnly: true,
+    serviceState: {
+      name: serviceName,
+      status: "degraded",
+      lastChecked: now,
+    },
+    recommendation: `INVESTIGATE: Manual inspection required for '${serviceName}'. No automated action taken.`,
+    approvalRequired: true,
   };
 }
 
@@ -99,7 +183,7 @@ server.registerTool(
     },
   },
   async ({ serviceName, action }) => {
-    const result = simulateAwsRepair(serviceName, action);
+    const result = readAwsServiceState(serviceName, action);
     return { content: [{ type: "text", text: JSON.stringify(result) }] };
   },
 );
