@@ -19,6 +19,7 @@ import {
   runAgentLoop,
   type IncidentContext,
 } from "../lib/cloud-surgeon";
+import { sanitizeAlertText, validateAlertText } from "../lib/prompt-guard";
 import { apiKeyAuth } from "../middleware/apiKeyAuth";
 
 const router: IRouter = Router();
@@ -36,13 +37,48 @@ router.post("/incidents/trigger", async (req, res): Promise<void> => {
     return;
   }
 
-  const { alertText, simulateCrash } = parsed.data;
+  const { alertText: rawAlertText, simulateCrash } = parsed.data;
+
+  // ── Défense contre l'injection de prompt (Couche 0) ────────────────────
+  // Validate before any DB write to avoid creating incidents from malicious input.
+  const validation = validateAlertText(rawAlertText);
+  if (!validation.ok) {
+    req.log.warn({ reason: validation.error }, "Prompt injection guard: hard-rejected input");
+    res.status(400).json({ error: `Invalid alertText: ${validation.error}` });
+    return;
+  }
+
+  const guard = sanitizeAlertText(rawAlertText);
+  if (guard.injectionDetected) {
+    req.log.warn(
+      { reasons: guard.reasons, original: rawAlertText.slice(0, 200) },
+      "Prompt injection guard: injection patterns detected — text sanitized before LLM injection",
+    );
+  }
+
+  const alertText = guard.sanitized;
+  // ──────────────────────────────────────────────────────────────────────
+
   const incident = await getOrCreateIncident(alertText);
 
   req.log.info(
     { incidentId: incident.incidentId, status: incident.status },
     "Incident triggered",
   );
+
+  // Log the injection attempt to execution_logs so the dashboard journal shows it.
+  if (guard.injectionDetected) {
+    const { db: dbMod, executionLogsTable: logsTable } = await import("@workspace/db");
+    await dbMod.insert(logsTable).values({
+      incidentId: incident.incidentId,
+      actionTaken: "INJECTION_BLOCKED",
+      result: JSON.stringify({
+        reasons: guard.reasons,
+        sanitizedText: alertText.slice(0, 200),
+        originalLength: rawAlertText.length,
+      }),
+    }).catch(() => { /* best-effort — don't fail the request */ });
+  }
 
   const alreadyTerminal = incident.status === "RESOLVED" || incident.status === "FAILED";
 

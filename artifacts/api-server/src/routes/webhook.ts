@@ -21,6 +21,8 @@
 import { Router, type IRouter } from "express";
 import { z } from "zod/v4";
 import { getOrCreateIncident, runAgentLoop, pseudoEmbedding, findSimilarIncident } from "../lib/cloud-surgeon";
+import { sanitizeAlertText, validateAlertText } from "../lib/prompt-guard";
+import { db, executionLogsTable } from "@workspace/db";
 
 const router: IRouter = Router();
 
@@ -102,7 +104,7 @@ router.post("/webhook/cloudwatch", async (req, res): Promise<void> => {
   }
 
   // Construire l'alertText à partir des champs CloudWatch
-  const alertText = [
+  const rawAlertText = [
     `CloudWatch ALARM: ${alarmBody.AlarmName}`,
     alarmBody.NewStateValue ? `State: ${alarmBody.NewStateValue}` : null,
     alarmBody.NewStateReason ? `Reason: ${alarmBody.NewStateReason}` : null,
@@ -111,9 +113,39 @@ router.post("/webhook/cloudwatch", async (req, res): Promise<void> => {
     .filter(Boolean)
     .join(" | ");
 
+  // ── Défense contre l'injection de prompt ─────────────────────────────
+  // Les champs SNS/CloudWatch peuvent être contrôlés par un attaquant ayant
+  // accès au compte AWS ou interceptant la notification SNS en transit.
+  const validation = validateAlertText(rawAlertText);
+  if (!validation.ok) {
+    req.log.warn({ reason: validation.error }, "Prompt injection guard: webhook hard-rejected");
+    res.status(400).json({ error: `Invalid alert payload: ${validation.error}` });
+    return;
+  }
+
+  const guard = sanitizeAlertText(rawAlertText);
+  const alertText = guard.sanitized;
+
+  if (guard.injectionDetected) {
+    req.log.warn(
+      { reasons: guard.reasons, alarmName: alarmBody.AlarmName },
+      "Prompt injection guard: webhook payload contained injection patterns — sanitized",
+    );
+  }
+  // ─────────────────────────────────────────────────────────────────────
+
   req.log.info({ alarmName: alarmBody.AlarmName, alertText }, "CloudWatch webhook received");
 
   const incident = await getOrCreateIncident(alertText);
+
+  // Log injection attempt to execution_logs if detected.
+  if (guard.injectionDetected) {
+    await db.insert(executionLogsTable).values({
+      incidentId: incident.incidentId,
+      actionTaken: "INJECTION_BLOCKED",
+      result: JSON.stringify({ reasons: guard.reasons, source: "cloudwatch-webhook" }),
+    }).catch(() => {});
+  }
   const alreadyTerminal = incident.status === "RESOLVED" || incident.status === "FAILED";
 
   if (!alreadyTerminal) {

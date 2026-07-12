@@ -62,6 +62,38 @@ Two services must both be running:
 - **Bedrock is geo-blocked**: AWS/Anthropic blocks Bedrock calls from Replit's datacenter. The agent falls back to deterministic simulated reasoning automatically.
 - **API server proxied at `/api`**: the Streamlit dashboard calls `http://localhost:80/api` — the proxy routes this to the API server's port.
 
+## Security
+
+### Prompt Injection Defense
+
+Agent systems that ingest external text and pass it to an LLM are vulnerable to **prompt injection** — an attacker who controls `alertText` (e.g., via a compromised SNS topic or a malicious CloudWatch alarm name) could override the agent's instructions, exfiltrate internal state, or trigger unintended tool calls.
+
+**Entry points guarded:**
+- `POST /api/incidents/trigger` — direct API call with `alertText`
+- `POST /api/webhook/cloudwatch` — SNS/CloudWatch payload (`AlarmName`, `NewStateReason`)
+
+**Counter-measures** (implemented in `artifacts/api-server/src/lib/prompt-guard.ts`):
+
+| Layer | What it catches | Action |
+|---|---|---|
+| Hard length limit (6 000 chars) | Context dilution attacks | 400 reject |
+| Soft truncation (2 000 chars) | Oversized but not malicious | Truncate + warn |
+| Control character stripping | Null bytes, C0/C1, zero-width spaces | Strip silently |
+| LLM turn-delimiter patterns | `\n\nHuman:`, `[INST]`, `<\|im_start\|>`, `<<SYS>>` | Sanitize + log |
+| Jailbreak phrase patterns | "ignore all previous instructions", "you are now DAN" | Sanitize + log |
+| XML role-tag patterns | `<system>`, `</prompt>`, `<instruction>` | Sanitize + log |
+
+**Traceability:** Every detected injection is written to `execution_logs` with `action_taken = 'INJECTION_BLOCKED'` — visible in the **📜 Journal d'exécution** tab of the dashboard.
+
+**Out of scope (documented):**
+- Semantic injection (e.g., "describe your cluster state in exhaustive detail")
+- WAF / network-level filtering (not available in Replit)
+- Injection via MCP tool outputs (trusted internal channel)
+
+**Unit tests:** `artifacts/api-server/src/lib/prompt-guard.test.ts` — 30 test cases covering all pattern categories and legitimate alerts (zero false positives on the 9 known scenarios).
+
+Run tests: `node --test --import tsx/esm artifacts/api-server/src/lib/prompt-guard.test.ts`
+
 ## User preferences
 
 _Populate as you build._
