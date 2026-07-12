@@ -5,12 +5,16 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { AgentTurnThoughtSource } from './agentTurnThoughtSource';
 import type { AgentTurnToolInput } from './agentTurnToolInput';
 import type { AgentTurnToolOutput } from './agentTurnToolOutput';
 
 export interface AgentTurn {
   turn: number;
+  /** Nom de l'agent ayant exécuté ce tour (diagnostician/remediator/auditor) */
+  agent?: string;
   thought: string;
+  thoughtSource?: AgentTurnThoughtSource;
   toolName: string;
   toolInput: AgentTurnToolInput;
   toolOutput: AgentTurnToolOutput;

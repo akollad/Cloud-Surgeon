@@ -137,8 +137,14 @@ components:
       properties:
         turn:
           type: integer
+        agent:
+          type: string
+          description: Nom de l'agent ayant exécuté ce tour (diagnostician/remediator/auditor)
         thought:
           type: string
+        thoughtSource:
+          type: string
+          enum: [bedrock, simulated]
         toolName:
           type: string
         toolInput:
@@ -152,12 +158,38 @@ components:
       properties:
         alertText:
           type: string
+        strategyName:
+          type: string
+          description: Stratégie de réparation détectée/choisie pour cet incident
+        # Couche 2 — décision de routage
+        routingMode:
+          type: string
+          enum: [AUTONOMOUS, PENDING_APPROVAL, EXPLORATORY, REJECTED]
+          description: Mode de routage décidé par la Couche 2 (mémoire → confiance → action)
+        routingDecisionComputed:
+          type: boolean
+        ragScore:
+          type: number
+          nullable: true
+          description: Distance cosinus RAG (0 = identique, 1 = opposé)
+        ragStrategyHint:
+          type: string
+          nullable: true
+          description: Stratégie de l'incident le plus similaire dans la mémoire vectorielle
+        winRate:
+          type: number
+          nullable: true
+          description: Taux de succès historique de la stratégie (0–1)
+        winRateSampleSize:
+          type: integer
+          description: Nombre de samples ayant servi au calcul du win-rate
         turns:
           type: array
           items:
             $ref: "#/components/schemas/AgentTurn"
         finalResponse:
-          type: ["string", "null"]
+          type: string
+          nullable: true
         crashed:
           type: boolean
       additionalProperties: true
@@ -179,11 +211,19 @@ components:
           type: string
         status:
           type: string
-          enum: [TRIGGERED, DIAGNOSING, REPAIRING, RESOLVED, FAILED]
+          enum: [TRIGGERED, DIAGNOSING, REPAIRING, RESOLVED, FAILED, PENDING_APPROVAL]
         currentStep:
           type: ["string", "null"]
         contextJson:
           $ref: "#/components/schemas/IncidentContext"
+        claimedByAgent:
+          type: string
+          nullable: true
+          description: Agent ayant réclamé cet incident via transaction sérialisable
+        causedByIncidentId:
+          type: string
+          nullable: true
+          description: Incident parent dans la chaîne causale (CTE récursive)
         updatedAt:
           type: string
           format: date-time

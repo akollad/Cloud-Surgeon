@@ -6,11 +6,24 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { AgentTurn } from './agentTurn';
+import type { IncidentContextRoutingMode } from './incidentContextRoutingMode';
 
 export interface IncidentContext {
   alertText?: string;
+  /** Stratégie de réparation détectée/choisie pour cet incident */
+  strategyName?: string;
+  /** Mode de routage décidé par la Couche 2 (mémoire → confiance → action) */
+  routingMode?: IncidentContextRoutingMode;
+  routingDecisionComputed?: boolean;
+  /** Distance cosinus RAG (0 = identique, 1 = opposé) */
+  ragScore?: number | null;
+  /** Stratégie de l'incident le plus similaire dans la mémoire vectorielle */
+  ragStrategyHint?: string | null;
+  /** Taux de succès historique de la stratégie (0–1) */
+  winRate?: number | null;
+  /** Nombre de samples ayant servi au calcul du win-rate */
+  winRateSampleSize?: number;
   turns?: AgentTurn[];
-  /** @nullable */
   finalResponse?: string | null;
   crashed?: boolean;
   [key: string]: unknown;

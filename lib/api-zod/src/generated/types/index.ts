@@ -7,6 +7,7 @@
  */
 
 export * from './agentTurn';
+export * from './agentTurnThoughtSource';
 export * from './agentTurnToolInput';
 export * from './agentTurnToolOutput';
 export * from './alertInput';
@@ -14,5 +15,6 @@ export * from './executionLog';
 export * from './healthStatus';
 export * from './incident';
 export * from './incidentContext';
+export * from './incidentContextRoutingMode';
 export * from './incidentStatus';
 export * from './listExecutionLogsParams';

@@ -16,22 +16,58 @@ export interface AlertInput {
   simulateCrash?: boolean;
 }
 
+export type AgentTurnThoughtSource = typeof AgentTurnThoughtSource[keyof typeof AgentTurnThoughtSource];
+
+
+export const AgentTurnThoughtSource = {
+  bedrock: 'bedrock',
+  simulated: 'simulated',
+} as const;
+
 export type AgentTurnToolInput = { [key: string]: unknown };
 
 export type AgentTurnToolOutput = { [key: string]: unknown };
 
 export interface AgentTurn {
   turn: number;
+  /** Nom de l'agent ayant exécuté ce tour (diagnostician/remediator/auditor) */
+  agent?: string;
   thought: string;
+  thoughtSource?: AgentTurnThoughtSource;
   toolName: string;
   toolInput: AgentTurnToolInput;
   toolOutput: AgentTurnToolOutput;
 }
 
+/**
+ * Mode de routage décidé par la Couche 2 (mémoire → confiance → action)
+ */
+export type IncidentContextRoutingMode = typeof IncidentContextRoutingMode[keyof typeof IncidentContextRoutingMode];
+
+
+export const IncidentContextRoutingMode = {
+  AUTONOMOUS: 'AUTONOMOUS',
+  PENDING_APPROVAL: 'PENDING_APPROVAL',
+  EXPLORATORY: 'EXPLORATORY',
+  REJECTED: 'REJECTED',
+} as const;
+
 export interface IncidentContext {
   alertText?: string;
+  /** Stratégie de réparation détectée/choisie pour cet incident */
+  strategyName?: string;
+  /** Mode de routage décidé par la Couche 2 (mémoire → confiance → action) */
+  routingMode?: IncidentContextRoutingMode;
+  routingDecisionComputed?: boolean;
+  /** Distance cosinus RAG (0 = identique, 1 = opposé) */
+  ragScore?: number | null;
+  /** Stratégie de l'incident le plus similaire dans la mémoire vectorielle */
+  ragStrategyHint?: string | null;
+  /** Taux de succès historique de la stratégie (0–1) */
+  winRate?: number | null;
+  /** Nombre de samples ayant servi au calcul du win-rate */
+  winRateSampleSize?: number;
   turns?: AgentTurn[];
-  /** @nullable */
   finalResponse?: string | null;
   crashed?: boolean;
   [key: string]: unknown;
@@ -46,6 +82,7 @@ export const IncidentStatus = {
   REPAIRING: 'REPAIRING',
   RESOLVED: 'RESOLVED',
   FAILED: 'FAILED',
+  PENDING_APPROVAL: 'PENDING_APPROVAL',
 } as const;
 
 export interface Incident {
@@ -55,6 +92,10 @@ export interface Incident {
   /** @nullable */
   currentStep: string | null;
   contextJson: IncidentContext;
+  /** Agent ayant réclamé cet incident via transaction sérialisable */
+  claimedByAgent?: string | null;
+  /** Incident parent dans la chaîne causale (CTE récursive) */
+  causedByIncidentId?: string | null;
   updatedAt: string;
 }
 

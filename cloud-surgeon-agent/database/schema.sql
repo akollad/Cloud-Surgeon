@@ -141,3 +141,14 @@ ALTER TABLE incident_vectors
     ADD COLUMN IF NOT EXISTS incident_id     UUID REFERENCES incident_state (incident_id),
     ADD COLUMN IF NOT EXISTS strategy_name   VARCHAR(100) NOT NULL DEFAULT 'default_repair',
     ADD COLUMN IF NOT EXISTS outcome_success BOOLEAN NOT NULL DEFAULT TRUE;
+
+-- ----------------------------------------------------------------------------
+-- Migration : ajout de PENDING_APPROVAL au CHECK de incident_state.status
+-- CockroachDB ne supporte pas ALTER CONSTRAINT ; on doit supprimer et recréer.
+-- Le nom du CHECK généré est <table>_status_check (convention CockroachDB).
+-- ----------------------------------------------------------------------------
+ALTER TABLE incident_state DROP CONSTRAINT IF EXISTS incident_state_status_check;
+ALTER TABLE incident_state
+    ADD CONSTRAINT incident_state_status_check
+    CHECK (status IN ('TRIGGERED', 'DIAGNOSING', 'REPAIRING',
+                      'RESOLVED', 'FAILED', 'PENDING_APPROVAL'));

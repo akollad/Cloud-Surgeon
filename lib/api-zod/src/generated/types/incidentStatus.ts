@@ -15,4 +15,5 @@ export const IncidentStatus = {
   REPAIRING: 'REPAIRING',
   RESOLVED: 'RESOLVED',
   FAILED: 'FAILED',
+  PENDING_APPROVAL: 'PENDING_APPROVAL',
 } as const;
