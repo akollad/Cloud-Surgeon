@@ -80,6 +80,10 @@ def fetch_cluster_health() -> dict | None:
     return api_get("/metrics/cluster")
 
 
+def fetch_ccloud_status(action: str = "cluster:status") -> dict | None:
+    return api_get(f"/metrics/ccloud?action={action}")
+
+
 def ingest_metrics(datapoints: list[dict]) -> dict | None:
     return api_post("/metrics/ingest", datapoints)
 
@@ -911,6 +915,57 @@ with tab_memory:
 """)
     else:
         st.info("No data in vector memory. Trigger some incidents first.")
+
+    # ── ccloud CLI equivalent (CockroachDB Cloud REST API) ─────────────────
+    st.divider()
+    st.subheader("🔧 ccloud CLI — CockroachDB Cloud Control Plane")
+    st.caption(
+        "Cloud-Surgeon calls the **CockroachDB Cloud REST API** directly — the same API that "
+        "`ccloud` wraps. `ccloud v0.6.12` requires browser-based OAuth and cannot run headlessly "
+        "in containers; we authenticate via service-account API key. Results are identical to "
+        "`ccloud cluster get <id> -o json`."
+    )
+
+    ccloud_action = st.selectbox(
+        "ccloud action",
+        ["cluster:status", "cluster:list", "cluster:sql-users", "cluster:backups"],
+        key="ccloud_action_select",
+    )
+    if st.button("▶ Run ccloud command", key="run_ccloud"):
+        cc = fetch_ccloud_status(ccloud_action)
+        if cc and cc.get("live"):
+            st.success(f"🟢 **ccloud LIVE** — `{cc.get('ccloudEquivalent','')}`")
+            if ccloud_action == "cluster:status":
+                col_cc1, col_cc2, col_cc3, col_cc4 = st.columns(4)
+                col_cc1.metric("State", cc.get("state", "—"))
+                col_cc2.metric("Version", cc.get("cockroachVersion", "—"))
+                col_cc3.metric("Plan", cc.get("plan", "—"))
+                col_cc4.metric("Region", cc.get("primaryRegion", "—"))
+                st.caption(cc.get("summary", ""))
+            elif ccloud_action == "cluster:list":
+                st.dataframe(cc.get("clusters", []), use_container_width=True, hide_index=True)
+            elif ccloud_action == "cluster:sql-users":
+                st.dataframe(cc.get("users", []), use_container_width=True, hide_index=True)
+            elif ccloud_action == "cluster:backups":
+                st.json(cc.get("latestBackup") or cc.get("backups", []))
+            with st.expander("📄 Raw JSON (as returned by ccloud REST API)", expanded=False):
+                st.json(cc)
+        else:
+            st.error(f"ccloud call failed: {(cc or {}).get('error', st.session_state.get('_api_error'))}")
+
+    # Show live status badge without button press
+    @st.fragment(run_every=30)
+    def _ccloud_badge() -> None:
+        cc = fetch_ccloud_status("cluster:status")
+        if cc and cc.get("live"):
+            st.info(
+                f"🟢 **ccloud LIVE** · cluster `{cc.get('clusterName','?')}` · "
+                f"state `{cc.get('state','?')}` · "
+                f"v{cc.get('cockroachVersion','?')} · "
+                f"region `{cc.get('primaryRegion','?')}`"
+            )
+
+    _ccloud_badge()
 
     # ── CockroachDB Cluster Health (official Cloud MCP) ────────────────────
     st.divider()

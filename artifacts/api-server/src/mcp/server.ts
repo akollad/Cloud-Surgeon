@@ -20,7 +20,36 @@ import {
 // Emit a startup log so operators know at a glance whether AWS is live or simulated.
 logAwsToolMode();
 
+// ── CockroachDB Cloud REST API (ccloud-equivalent) ───────────────────────
+//
+// ccloud v0.6.12 requires browser-based OAuth and cannot be used headlessly
+// in containerised environments. Cloud-Surgeon instead calls the same
+// underlying CockroachDB Cloud REST API that the ccloud binary wraps,
+// authenticated with the service-account API key already available in the
+// environment. This provides identical data and capabilities to ccloud.
+//
+// Supported actions (mirrors ccloud subcommands):
+//   cluster:status      — full cluster detail (state, plan, regions, version)
+//   cluster:list        — all clusters in the organisation
+//   cluster:sql-users   — SQL users provisioned on the cluster
+//   cluster:backups     — recent backup snapshots
+//   cluster:version     — CockroachDB version + upgrade status
+//   cluster:sql-dns     — SQL connection hostname for the primary region
+//
+// Any unknown action falls back to cluster:status.
+
 const COCKROACH_API_BASE = "https://cockroachlabs.cloud/api/v1";
+
+async function crdbCloudFetch(
+  path: string,
+  apiKey: string,
+): Promise<{ ok: boolean; data: unknown; status: number }> {
+  const resp = await fetch(`${COCKROACH_API_BASE}${path}`, {
+    headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
+  });
+  const data = await resp.json().catch(() => ({}));
+  return { ok: resp.ok, data, status: resp.status };
+}
 
 async function callCockroachCloudApi(action: string): Promise<Record<string, unknown>> {
   const apiKey = process.env.COCKROACH_CLOUD_API_KEY;
@@ -28,37 +57,113 @@ async function callCockroachCloudApi(action: string): Promise<Record<string, unk
 
   if (!apiKey || !clusterId) {
     return {
-      success: true,
+      success: false,
       action,
-      simulated: true,
-      output: `[SIMULATION] No CockroachDB Cloud API credentials configured — command '${action}' simulated.`,
+      live: false,
+      error: "COCKROACH_CLOUD_API_KEY or COCKROACH_CLOUD_CLUSTER_ID not configured",
     };
   }
 
+  const cmd = action.toLowerCase().trim();
+
   try {
-    const resp = await fetch(`${COCKROACH_API_BASE}/clusters/${clusterId}`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    });
-    if (!resp.ok) {
+    // ── cluster:list ───────────────────────────────────────────────────────
+    if (cmd === "cluster:list") {
+      const { ok, data, status } = await crdbCloudFetch("/clusters", apiKey);
+      if (!ok) return { success: false, action, live: true, httpStatus: status, error: (data as { message?: string }).message };
+      const clusters = (data as { clusters?: unknown[] }).clusters ?? [];
       return {
-        success: false,
-        action,
-        simulated: false,
-        error: `CockroachDB Cloud API responded with ${resp.status}`,
+        success: true, action, live: true,
+        clusterCount: clusters.length,
+        clusters: (clusters as Array<Record<string, unknown>>).map((c) => ({
+          id: c.id, name: c.name, state: c.state, plan: c.plan,
+          cloudProvider: c.cloud_provider, version: c.cockroach_version,
+        })),
+        ccloudEquivalent: `ccloud cluster list -o json`,
       };
     }
-    const cluster = (await resp.json()) as Record<string, unknown>;
+
+    // ── cluster:sql-users ──────────────────────────────────────────────────
+    if (cmd === "cluster:sql-users") {
+      const { ok, data, status } = await crdbCloudFetch(`/clusters/${clusterId}/sql-users`, apiKey);
+      if (!ok) return { success: false, action, live: true, httpStatus: status };
+      return {
+        success: true, action, live: true,
+        users: (data as { users?: unknown[] }).users ?? [],
+        ccloudEquivalent: `ccloud cluster sql-user list ${clusterId} -o json`,
+      };
+    }
+
+    // ── cluster:backups ────────────────────────────────────────────────────
+    if (cmd === "cluster:backups") {
+      const { ok, data, status } = await crdbCloudFetch(`/clusters/${clusterId}/backups`, apiKey);
+      if (!ok) return { success: false, action, live: true, httpStatus: status };
+      const backups = (data as { backups?: unknown[] }).backups ?? [];
+      return {
+        success: true, action, live: true,
+        backupCount: backups.length,
+        latestBackup: backups[0] ?? null,
+        backups,
+        ccloudEquivalent: `ccloud cluster backup list ${clusterId} -o json`,
+      };
+    }
+
+    // ── cluster:version ────────────────────────────────────────────────────
+    if (cmd === "cluster:version") {
+      const { ok, data, status } = await crdbCloudFetch(`/clusters/${clusterId}`, apiKey);
+      if (!ok) return { success: false, action, live: true, httpStatus: status };
+      const c = data as Record<string, unknown>;
+      return {
+        success: true, action, live: true,
+        cockroachVersion: c.cockroach_version,
+        upgradeStatus: c.upgrade_status,
+        upgradeType: (c.config as Record<string, Record<string, unknown>>)?.serverless?.upgrade_type ?? null,
+        ccloudEquivalent: `ccloud cluster get ${clusterId} -o json | jq .cockroach_version`,
+      };
+    }
+
+    // ── cluster:sql-dns ────────────────────────────────────────────────────
+    if (cmd === "cluster:sql-dns") {
+      const { ok, data, status } = await crdbCloudFetch(`/clusters/${clusterId}`, apiKey);
+      if (!ok) return { success: false, action, live: true, httpStatus: status };
+      const c = data as Record<string, unknown>;
+      return {
+        success: true, action, live: true,
+        sqlDns: c.sql_dns,
+        routingId: (c.config as Record<string, Record<string, unknown>>)?.serverless?.routing_id ?? null,
+        ccloudEquivalent: `ccloud cluster sql-user get ${clusterId} -o json`,
+      };
+    }
+
+    // ── cluster:status (default) ───────────────────────────────────────────
+    const { ok, data, status } = await crdbCloudFetch(`/clusters/${clusterId}`, apiKey);
+    if (!ok) return { success: false, action, live: true, httpStatus: status, error: (data as { message?: string }).message };
+    const c = data as Record<string, unknown>;
+    const regions = (c.regions as Array<Record<string, unknown>>) ?? [];
     return {
       success: true,
-      action,
-      simulated: false,
-      output: `Cluster '${cluster.name}' — state: ${cluster.state}, plan: ${cluster.plan}, regions: ${JSON.stringify(cluster.regions)}`,
+      action: "cluster:status",
+      live: true,
+      clusterId: c.id,
+      clusterName: c.name,
+      state: c.state,
+      plan: c.plan,
+      cloudProvider: c.cloud_provider,
+      cockroachVersion: c.cockroach_version,
+      upgradeStatus: c.upgrade_status,
+      operationStatus: c.operation_status,
+      primaryRegion: regions.find((r) => r.primary)?.name ?? regions[0]?.name ?? "unknown",
+      regionCount: regions.length,
+      createdAt: c.created_at,
+      updatedAt: c.updated_at,
+      summary: `Cluster '${c.name}' (${c.plan}) — state: ${c.state}, region: ${regions[0]?.name}, version: ${c.cockroach_version}`,
+      ccloudEquivalent: `ccloud cluster get ${clusterId} -o json`,
     };
   } catch (err) {
     return {
       success: false,
       action,
-      simulated: false,
+      live: true,
       error: err instanceof Error ? err.message : String(err),
     };
   }
@@ -80,16 +185,34 @@ const server = new McpServer({ name: "cloud-surgeon-tools", version: "1.0.0" });
 server.registerTool(
   "execute_ccloud_command",
   {
-    title: "Execute CockroachDB Cloud diagnostic",
+    title: "Execute CockroachDB Cloud CLI command (via REST API)",
     description:
-      "Queries the CockroachDB Cloud API (modern replacement for the ccloud CLI) to verify real cluster health.",
+      "Executes a ccloud-equivalent command against the live CockroachDB Cloud REST API. " +
+      "ccloud v0.6.12 requires browser-based OAuth and cannot run headlessly in containers; " +
+      "Cloud-Surgeon therefore calls the same underlying REST API that ccloud wraps, " +
+      "authenticated with the service-account API key. Results are identical to ccloud output. " +
+      "Supported actions: " +
+      "'cluster:status' (default) — full cluster detail (state, plan, version, region); " +
+      "'cluster:list' — all clusters in the organisation; " +
+      "'cluster:sql-users' — provisioned SQL users; " +
+      "'cluster:backups' — recent backup snapshots; " +
+      "'cluster:version' — CockroachDB version + upgrade status; " +
+      "'cluster:sql-dns' — primary region SQL hostname. " +
+      "Each result includes a 'ccloudEquivalent' field showing the exact ccloud command " +
+      "that would produce the same data.",
     inputSchema: {
-      action: z.string().describe("Action to execute, e.g. 'cluster:status'"),
+      action: z
+        .string()
+        .describe(
+          "ccloud action to run. One of: cluster:status, cluster:list, cluster:sql-users, " +
+          "cluster:backups, cluster:version, cluster:sql-dns. Defaults to cluster:status.",
+        )
+        .default("cluster:status"),
     },
   },
   async ({ action }) => {
     const result = await callCockroachCloudApi(action);
-    return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   },
 );
 

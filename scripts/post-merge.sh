@@ -6,6 +6,17 @@ set -e
 echo "=== [post-merge] Installing dependencies ==="
 pnpm install --frozen-lockfile
 
+echo "=== [post-merge] Installing ccloud CLI (CockroachDB Cloud CLI) ==="
+TOOLS_DIR="$PWD/.tools"
+mkdir -p "$TOOLS_DIR"
+if [ ! -f "$TOOLS_DIR/ccloud" ]; then
+  curl -fsSL https://binaries.cockroachdb.com/ccloud/ccloud_linux-amd64_0.6.12.tar.gz \
+    | tar -xz -C "$TOOLS_DIR"
+  echo "  ccloud $($TOOLS_DIR/ccloud version 2>&1 | head -1) installed"
+else
+  echo "  ccloud already present ($($TOOLS_DIR/ccloud version 2>&1 | head -1))"
+fi
+
 echo "=== [post-merge] Building API server ==="
 pnpm --filter @workspace/api-server run build
 

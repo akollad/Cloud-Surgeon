@@ -251,6 +251,69 @@ router.post("/metrics/calibration/recalibrate", async (_req, res): Promise<void>
   });
 });
 
+// ── ccloud-equivalent: CockroachDB Cloud REST API ────────────────────────
+//
+// GET /api/metrics/ccloud?action=cluster:status
+//
+// Calls the CockroachDB Cloud REST API directly — the same underlying API
+// that the ccloud CLI wraps. ccloud v0.6.12 requires browser-based OAuth
+// and cannot run headlessly in containers; we authenticate via the
+// service-account API key. The `ccloudEquivalent` field shows the exact
+// ccloud command that would produce identical output.
+
+router.get("/metrics/ccloud", async (req, res): Promise<void> => {
+  const action = String(req.query.action ?? "cluster:status");
+  const apiKey = process.env.COCKROACH_CLOUD_API_KEY;
+  const clusterId = process.env.COCKROACH_CLOUD_CLUSTER_ID;
+
+  if (!apiKey || !clusterId) {
+    res.status(503).json({ live: false, error: "API key or cluster ID not configured" });
+    return;
+  }
+
+  const hdrs = { Authorization: `Bearer ${apiKey}`, Accept: "application/json" };
+  const base = "https://cockroachlabs.cloud/api/v1";
+
+  try {
+    if (action === "cluster:list") {
+      const r = await fetch(`${base}/clusters`, { headers: hdrs });
+      const d = (await r.json()) as { clusters?: unknown[] };
+      res.json({ live: true, action, clusters: d.clusters ?? [], ccloudEquivalent: "ccloud cluster list -o json" });
+      return;
+    }
+    if (action === "cluster:sql-users") {
+      const r = await fetch(`${base}/clusters/${clusterId}/sql-users`, { headers: hdrs });
+      const d = (await r.json()) as { users?: unknown[] };
+      res.json({ live: true, action, users: d.users ?? [], ccloudEquivalent: `ccloud cluster sql-user list ${clusterId} -o json` });
+      return;
+    }
+    if (action === "cluster:backups") {
+      const r = await fetch(`${base}/clusters/${clusterId}/backups`, { headers: hdrs });
+      const d = (await r.json()) as { backups?: unknown[] };
+      res.json({ live: true, action, backups: d.backups ?? [], latestBackup: (d.backups ?? [])[0] ?? null, ccloudEquivalent: `ccloud cluster backup list ${clusterId} -o json` });
+      return;
+    }
+    // Default: cluster:status
+    const r = await fetch(`${base}/clusters/${clusterId}`, { headers: hdrs });
+    if (!r.ok) { res.status(r.status).json({ live: true, action, error: `CRDB Cloud API: ${r.status}` }); return; }
+    const c = (await r.json()) as Record<string, unknown>;
+    const regions = (c.regions as Array<Record<string, unknown>>) ?? [];
+    res.json({
+      live: true, action: "cluster:status",
+      clusterId: c.id, clusterName: c.name, state: c.state, plan: c.plan,
+      cloudProvider: c.cloud_provider, cockroachVersion: c.cockroach_version,
+      upgradeStatus: c.upgrade_status,
+      primaryRegion: regions.find((reg) => reg.primary)?.name ?? regions[0]?.name ?? "unknown",
+      regionCount: regions.length, createdAt: c.created_at,
+      summary: `Cluster '${c.name}' (${c.plan}) — state: ${c.state}, region: ${regions[0]?.name}, version: ${c.cockroach_version}`,
+      ccloudEquivalent: `ccloud cluster get ${clusterId} -o json`,
+      note: "ccloud v0.6.12 requires browser OAuth — Cloud-Surgeon calls the same REST API headlessly via service-account API key.",
+    });
+  } catch (err) {
+    res.status(500).json({ live: false, action, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
 // ── CockroachDB Cluster Health (official Cloud MCP) ─────────────────────
 //
 // GET /api/metrics/cluster

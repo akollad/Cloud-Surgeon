@@ -633,7 +633,11 @@ async function callTool(
   toolInput: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
   if (toolName === "execute_ccloud_command") {
-    const action = JSON.parse(String(toolInput.commandJson)).action ?? "unknown";
+    // Accept either { action } directly or legacy { commandJson: '{"action":"..."}' }
+    const action =
+      (toolInput.action as string | undefined) ??
+      (() => { try { return JSON.parse(String(toolInput.commandJson)).action; } catch { return undefined; } })() ??
+      "cluster:status";
     return callMcpTool(toolName, { action });
   }
   if (toolName === "aws_repair_service") {
@@ -870,7 +874,7 @@ export async function runAgentLoop(
     const diagToolName = useOfficialCrdbMcp ? "crdb_cluster_health" : "execute_ccloud_command";
     const toolInput = useOfficialCrdbMcp
       ? {}
-      : { commandJson: JSON.stringify({ action: "cluster:status", target: alertText.slice(0, 40) }) };
+      : { action: "cluster:status" };
 
     const { thought, source: thoughtSource } = await invokeLLMThought(alertText, 0, null);
     const toolOutput = await callTool(diagToolName, toolInput);
