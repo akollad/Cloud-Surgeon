@@ -34,8 +34,16 @@ async function getClient(): Promise<Client> {
         command: process.execPath,
         args: [resolveServerEntry()],
         env: {
+          // CockroachDB Cloud diagnostic tool
           COCKROACH_CLOUD_API_KEY: process.env.COCKROACH_CLOUD_API_KEY ?? "",
           COCKROACH_CLOUD_CLUSTER_ID: process.env.COCKROACH_CLOUD_CLUSTER_ID ?? "",
+          // AWS repair tools (ECS / RDS / Lambda)
+          // Absent → aws.ts hasCredentials() returns false → explicit simulated fallback
+          AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID ?? "",
+          AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY ?? "",
+          AWS_SESSION_TOKEN: process.env.AWS_SESSION_TOKEN ?? "",
+          AWS_REGION: process.env.AWS_REGION ?? "us-east-1",
+          ECS_DEFAULT_CLUSTER: process.env.ECS_DEFAULT_CLUSTER ?? "prod-cluster",
         },
       });
       const client = new Client({ name: "cloud-surgeon-agent", version: "1.0.0" });

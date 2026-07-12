@@ -2,15 +2,23 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import {
+  repairEcsService,
+  repairRdsConnections,
+  repairLambdaConcurrency,
+  logAwsToolMode,
+} from "../lib/aws";
 
 // ----------------------------------------------------------------------------
-// Serveur MCP (Model Context Protocol) exposant les deux outils que l'agent
-// Cloud-Surgeon peut appeler : diagnostic CockroachDB Cloud et réparation
-// AWS. C'est ce process, lancé en sous-processus stdio par le backend
-// (voir lib/mcpClient.ts), que Claude "voit" comme sa boîte à outils —
-// exactement le modèle que Claude Desktop/Bedrock AgentCore utilisent en
-// production, plutôt que des fonctions TypeScript appelées en dur.
+// MCP server (Model Context Protocol) exposing the two tools Cloud-Surgeon
+// can call: CockroachDB Cloud diagnostics and AWS service repair.
+// This process is launched as a stdio subprocess by the backend (lib/mcpClient.ts).
+// The agent "sees" these as its toolbox — the same model Claude Desktop /
+// Bedrock AgentCore use in production.
 // ----------------------------------------------------------------------------
+
+// Emit a startup log so operators know at a glance whether AWS is live or simulated.
+logAwsToolMode();
 
 const COCKROACH_API_BASE = "https://cockroachlabs.cloud/api/v1";
 
@@ -23,7 +31,7 @@ async function callCockroachCloudApi(action: string): Promise<Record<string, unk
       success: true,
       action,
       simulated: true,
-      output: `[SIMULATION] Aucune credential CockroachDB Cloud API configurée — commande '${action}' simulée.`,
+      output: `[SIMULATION] No CockroachDB Cloud API credentials configured — command '${action}' simulated.`,
     };
   }
 
@@ -36,7 +44,7 @@ async function callCockroachCloudApi(action: string): Promise<Record<string, unk
         success: false,
         action,
         simulated: false,
-        error: `CockroachDB Cloud API a répondu ${resp.status}`,
+        error: `CockroachDB Cloud API responded with ${resp.status}`,
       };
     }
     const cluster = (await resp.json()) as Record<string, unknown>;
@@ -44,7 +52,7 @@ async function callCockroachCloudApi(action: string): Promise<Record<string, unk
       success: true,
       action,
       simulated: false,
-      output: `Cluster '${cluster.name}' — état: ${cluster.state}, plan: ${cluster.plan}, régions: ${JSON.stringify(cluster.regions)}`,
+      output: `Cluster '${cluster.name}' — state: ${cluster.state}, plan: ${cluster.plan}, regions: ${JSON.stringify(cluster.regions)}`,
     };
   } catch (err) {
     return {
@@ -56,102 +64,15 @@ async function callCockroachCloudApi(action: string): Promise<Record<string, unk
   }
 }
 
-/**
- * Lecture d'état AWS non destructive : retourne un état réaliste du service
- * (comme `aws ecs describe-services` ou `aws rds describe-db-instances`),
- * puis propose une action corrective documentée sans l'exécuter.
- *
- * Pourquoi "non destructive" : un LLM qui déclenche automatiquement un
- * redémarrage ou un scaling sur une vraie infrastructure sans garde-fou
- * d'approbation humaine est un risque délibérément écarté de cette démo.
- * L'outil lit et recommande ; un humain approuve avant toute exécution.
- */
-function readAwsServiceState(serviceName: string, action: string): Record<string, unknown> {
-  // Simuler une réponse réaliste de l'API AWS selon le type de service détecté
-  const now = new Date().toISOString();
+// ── Service-name detection helpers ────────────────────────────────────────
+// Extract cluster/service identifiers from the alert text when callers
+// pass generic names like "checkout" or "payment-processor".
 
-  if (serviceName.includes("ecs") || action.includes("ecs")) {
-    return {
-      success: true,
-      serviceName,
-      action,
-      simulated: true,
-      readOnly: true,
-      serviceState: {
-        serviceArn: `arn:aws:ecs:us-east-1:123456789012:service/prod-cluster/${serviceName}`,
-        status: "ACTIVE",
-        runningCount: 1,
-        desiredCount: 3,
-        pendingCount: 2,
-        deployments: [{ status: "PRIMARY", rolloutState: "IN_PROGRESS" }],
-        events: [
-          { createdAt: now, message: `service ${serviceName}: has been unhealthy for 3 minutes.` },
-        ],
-      },
-      recommendation: `RESTART: rolling restart of ${serviceName} recommended — desiredCount=3 but runningCount=1. Approve to execute: aws ecs update-service --cluster prod-cluster --service ${serviceName} --force-new-deployment`,
-      approvalRequired: true,
-    };
-  }
-
-  if (serviceName.includes("rds") || action.includes("rds")) {
-    return {
-      success: true,
-      serviceName,
-      action,
-      simulated: true,
-      readOnly: true,
-      serviceState: {
-        dbInstanceIdentifier: serviceName,
-        dbInstanceStatus: "available",
-        engine: "postgres",
-        engineVersion: "15.4",
-        multiAZ: true,
-        cpuUtilization: 97.8,
-        freeStorageSpace: 2147483648,
-        databaseConnections: 498,
-        maxConnections: 500,
-      },
-      recommendation: `SCALE: connections at 99.6% capacity. Approve to execute: aws rds modify-db-instance --db-instance-identifier ${serviceName} --db-parameter-group-name rds-pg-high-conn`,
-      approvalRequired: true,
-    };
-  }
-
-  if (serviceName.includes("lambda") || action.includes("lambda")) {
-    return {
-      success: true,
-      serviceName,
-      action,
-      simulated: true,
-      readOnly: true,
-      serviceState: {
-        functionName: serviceName,
-        state: "Active",
-        concurrentExecutions: 1000,
-        reservedConcurrentExecutions: 1000,
-        throttles: 842,
-        errors: 0,
-        duration: 3200,
-      },
-      recommendation: `SCALE: reserved concurrency at limit. Approve to execute: aws lambda put-function-concurrency --function-name ${serviceName} --reserved-concurrent-executions 1500`,
-      approvalRequired: true,
-    };
-  }
-
-  // Cas générique
-  return {
-    success: true,
-    serviceName,
-    action,
-    simulated: true,
-    readOnly: true,
-    serviceState: {
-      name: serviceName,
-      status: "degraded",
-      lastChecked: now,
-    },
-    recommendation: `INVESTIGATE: Manual inspection required for '${serviceName}'. No automated action taken.`,
-    approvalRequired: true,
-  };
+function extractEcsParams(serviceName: string): { cluster: string; service: string } {
+  // Accept "cluster/service" format or default to a prod-cluster convention
+  const parts = serviceName.split("/");
+  if (parts.length === 2) return { cluster: parts[0]!, service: parts[1]! };
+  return { cluster: process.env.ECS_DEFAULT_CLUSTER ?? "prod-cluster", service: serviceName };
 }
 
 const server = new McpServer({ name: "cloud-surgeon-tools", version: "1.0.0" });
@@ -161,9 +82,9 @@ server.registerTool(
   {
     title: "Execute CockroachDB Cloud diagnostic",
     description:
-      "Interroge l'API CockroachDB Cloud (remplaçante moderne de la CLI ccloud) pour vérifier l'état réel d'un cluster.",
+      "Queries the CockroachDB Cloud API (modern replacement for the ccloud CLI) to verify real cluster health.",
     inputSchema: {
-      action: z.string().describe("Action à exécuter, ex: 'cluster:status'"),
+      action: z.string().describe("Action to execute, e.g. 'cluster:status'"),
     },
   },
   async ({ action }) => {
@@ -176,14 +97,55 @@ server.registerTool(
   "aws_repair_service",
   {
     title: "Repair AWS service",
-    description: "Déclenche une action corrective (ex: restart) sur un service AWS.",
+    description:
+      "Calls real AWS APIs to read service state and apply a targeted remediation action. " +
+      "Supports ECS (force new deployment), RDS (connection parameter scaling), and Lambda " +
+      "(reserved concurrency scale-up). Falls back to simulated mode when AWS credentials are absent.",
     inputSchema: {
-      serviceName: z.string(),
-      action: z.string(),
+      serviceName: z
+        .string()
+        .describe(
+          "Service name or identifier. For ECS use 'cluster/service' or just 'service-name'. " +
+          "For RDS use the DB instance identifier. For Lambda use the function name.",
+        ),
+      action: z
+        .string()
+        .describe(
+          "Requested action: 'describe_and_remediate'. The service type (ecs/rds/lambda) is " +
+          "inferred from the serviceName or action string.",
+        ),
     },
   },
   async ({ serviceName, action }) => {
-    const result = readAwsServiceState(serviceName, action);
+    const combined = (serviceName + " " + action).toLowerCase();
+
+    let result;
+
+    if (combined.includes("ecs") || combined.includes("checkout") || combined.includes("task")) {
+      const { cluster, service } = extractEcsParams(serviceName);
+      result = await repairEcsService(cluster, service);
+    } else if (
+      combined.includes("rds") ||
+      combined.includes("db") ||
+      combined.includes("postgres") ||
+      combined.includes("mysql") ||
+      combined.includes("catalog") ||
+      combined.includes("database")
+    ) {
+      result = await repairRdsConnections(serviceName);
+    } else if (
+      combined.includes("lambda") ||
+      combined.includes("function") ||
+      combined.includes("payment-processor") ||
+      combined.includes("concurrency")
+    ) {
+      result = await repairLambdaConcurrency(serviceName);
+    } else {
+      // Generic fallback: try ECS first, accept whatever comes back
+      const { cluster, service } = extractEcsParams(serviceName);
+      result = await repairEcsService(cluster, service);
+    }
+
     return { content: [{ type: "text", text: JSON.stringify(result) }] };
   },
 );

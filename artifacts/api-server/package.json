@@ -11,6 +11,10 @@
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.1085.0",
+    "@aws-sdk/client-cloudwatch": "^3.1085.0",
+    "@aws-sdk/client-ecs": "^3.1085.0",
+    "@aws-sdk/client-lambda": "^3.1085.0",
+    "@aws-sdk/client-rds": "^3.1085.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@workspace/api-zod": "workspace:*",
     "@workspace/db": "workspace:*",
