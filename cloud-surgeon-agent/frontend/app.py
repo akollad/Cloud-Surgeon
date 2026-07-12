@@ -283,7 +283,17 @@ AGENT_EMOJIS = {
 
 # ── UI ────────────────────────────────────────────────────────────────────────
 
-st.set_page_config(page_title="Cloud-Surgeon — Dashboard", layout="wide", page_icon="☁️")
+st.set_page_config(page_title="Cloud-Surgeon — Dashboard", layout="wide", page_icon="static/favicon-96x96.png")
+
+# Inject favicon link tags for browser / PWA / Apple support
+st.markdown("""
+    <link rel="icon" type="image/png" href="app/static/favicon-96x96.png" sizes="96x96" />
+    <link rel="icon" type="image/svg+xml" href="app/static/favicon.svg" />
+    <link rel="shortcut icon" href="app/static/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="app/static/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-title" content="Cloud Surgeon" />
+    <link rel="manifest" href="app/static/site.webmanifest" />
+""", unsafe_allow_html=True)
 
 # ── Password gate ──────────────────────────────────────────────────────────────
 # Authenticate before rendering any data. If DASHBOARD_PASSWORD is unset,
