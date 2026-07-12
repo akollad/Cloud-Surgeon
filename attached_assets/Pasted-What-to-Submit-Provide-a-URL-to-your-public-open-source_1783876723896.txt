@@ -1,0 +1,56 @@
+What to Submit
+
+Provide a URL to your public open source code repository for judging and testing.
+The repository must contain all necessary source code, clear README documentation, any required dependencies, example configurations or datasets if applicable, and setup and run instructions required for the project to be functional. 
+The repository must be public and open source by including an open source license file (we recommend MIT or Apache 2.0). This license should be detectable and visible at the top of the repository page (in the About section).  
+Provide a URL to your functional demo app.
+Include a video (less than 3 minutes) that demonstrates your submission and the CockroachDB memory layer at work. Videos must be uploaded to YouTube or Vimeo and made public.
+Identify which CockroachDB tools you used (MCP Server, ccloud CLI, Distributed Vector Indexing, Agent Skills) and how — what did the agent actually do with them?
+Identify which AWS Services tools you used (Amazon Bedrock, AWS Lambda, Amazon S3, etc.) and how.
+Optional: Include an architectural diagram showing how CockroachDB, AWS services, and your agent interact.
+Optional: Provide feedback on the CockroachDB AI tools or features.
+Prizes
+$8,750 in prizes
+1st Place
+$5,000 in cash
+1 winner
+• $5,000 in USD
+• Blog feature,
+• Cockroach Labs Swag
+
+2nd Place
+$2,500 in cash
+1 winner
+• $2,500 in USD
+• Cockroach Labs Swag
+
+3rd Place
+$1,250 in cash
+1 winner
+• $1,250 in USD
+• Cockroach Labs Swag
+
+Devpost Achievements
+Submitting to this hackathon could earn you:
+
+
+X Hackathons
+ level 4
+
+Hackathon Winner
+ level 1
+Judges
+A panel of qualified judges
+A panel of qualified judges
+
+Judging Criteria
+Agentic Memory Design
+Does CockroachDB play a meaningful, production-grade role as the agent's memory layer? Is it used for more than toy queries — state, embeddings, context, or transactional data at real scale?
+Technical Implementation
+Is the integration with CockroachDB tools (distributed vector index, MCP Server, ccloud CLI) quality software engineering? Does the agent use the tools correctly and safely?
+Real-World Impact
+How big of an impact could the project have on real users or workflows? Is the use case meaningful, not just technically impressive?
+Production Readiness
+Is the design secure, observable, and scalable? Has the team thought about resilience, access control, and what happens when things go wrong?
+Creativity & Originality
+Is this a genuinely new idea or a novel application of the technology? Does it demonstrate insight into what makes agentic systems different from traditional apps?
