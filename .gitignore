@@ -47,3 +47,19 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+# Environment files (ignore .env but keep .env.example)
+.env
+! .env.example
+
+# Python files
+*.py
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+env.bak/
+venv.bak/

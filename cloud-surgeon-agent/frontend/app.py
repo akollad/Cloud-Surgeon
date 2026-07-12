@@ -13,8 +13,12 @@ import hmac
 import os
 import time
 
+from dotenv import load_dotenv
 import requests
 import streamlit as st
+
+# Load environment variables from .env file
+load_dotenv()
 
 API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:80/api")
 _API_KEY = os.environ.get("CLOUD_SURGEON_API_KEY", "")
@@ -449,7 +453,7 @@ with st.sidebar:
     # ── Logo ──────────────────────────────────────────────────────────────
     _logo_path = os.path.join(os.path.dirname(__file__), "logo.png")
     if os.path.exists(_logo_path):
-        st.image(_logo_path, use_container_width=True)
+        st.image(_logo_path, width='stretch')
         st.divider()
 
     st.header("🚨 Trigger an Incident")
@@ -489,7 +493,7 @@ with st.sidebar:
         else "none"
     )
 
-    trigger = st.button("⚡ Trigger Agent", type="primary", use_container_width=True)
+    trigger = st.button("⚡ Trigger Agent", type="primary", width='stretch')
 
     st.divider()
     st.subheader("☠️ Real Process Crash")
@@ -498,7 +502,7 @@ with st.sidebar:
         "The workflow manager restarts it automatically. "
         "Then re-trigger the same incident to prove recovery from CockroachDB."
     )
-    if st.button("💀 SIGKILL the API server", use_container_width=True, type="secondary"):
+    if st.button("💀 SIGKILL the API server", width='stretch', type="secondary"):
         kill_result = api_post_chaos_sigkill()
         if kill_result:
             st.warning(
@@ -514,7 +518,7 @@ with st.sidebar:
     st.caption("Simulates a CloudWatch alarm → SNS → `POST /api/webhook/cloudwatch`.")
     wh_alarm_name = st.text_input("AlarmName", value="checkout-5xx-spike")
     wh_reason = st.text_input("NewStateReason", value="Threshold Crossed: 3 datapoints > 10.")
-    if st.button("📡 Simulate CloudWatch webhook", use_container_width=True):
+    if st.button("📡 Simulate CloudWatch webhook", width='stretch'):
         result = api_post(
             "/webhook/cloudwatch",
             {
@@ -542,7 +546,7 @@ with st.sidebar:
         key="predictive_scenario",
     )
     predictive_datapoints = PREDICTIVE_SCENARIOS[predictive_scenario_label]
-    if st.button("📡 Ingest metric (trigger predictive)", use_container_width=True, type="primary"):
+    if st.button("📡 Ingest metric (trigger predictive)", width='stretch', type="primary"):
         result = ingest_metrics(predictive_datapoints)
         if result:
             n = len(result.get("predictiveIncidents", []))
