@@ -70,7 +70,7 @@ const PREDICTIVE_DISTANCE_THRESHOLD = 0.15;
  * Converts a metric datapoint to a natural-language alert description.
  * This text is embedded and matched against historical incident embeddings.
  */
-function metricToAlertText(dp: MetricDatapoint): string {
+export function metricToAlertText(dp: MetricDatapoint): string {
   const svc =
     dp.serviceHint ??
     dp.dimensions?.ServiceName ??
@@ -98,7 +98,7 @@ function metricToAlertText(dp: MetricDatapoint): string {
  *
  * Returns the predicted strategy name or null if no rule matches.
  */
-function keywordPredictiveMatch(
+export function keywordPredictiveMatch(
   metricName: string,
   value: number,
   dims: Record<string, string>,
