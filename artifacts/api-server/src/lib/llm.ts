@@ -69,30 +69,53 @@ async function callAnthropicLLM(
   turnIndex: number,
   priorToolOutput: Record<string, unknown> | null,
 ): Promise<string | null> {
-  if (!process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL) {
-    logger.warn(
-      "AI_PROVIDER=anthropic but AI_INTEGRATIONS_ANTHROPIC_BASE_URL is not set — falling back to simulated",
-    );
-    return null;
+  const prompt = buildPrompt(alertText, turnIndex, priorToolOutput);
+
+  // Prefer the Replit AI Integrations proxy when it is provisioned.
+  if (process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL) {
+    try {
+      const { anthropic } = await import("@workspace/integrations-anthropic-ai");
+      const message = await anthropic.messages.create({
+        model: "claude-haiku-4-5",
+        max_tokens: 300,
+        messages: [{ role: "user", content: prompt }],
+      });
+      const block = message.content[0];
+      return (block?.type === "text" ? block.text.trim() : null) ?? null;
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err), turnIndex },
+        "Anthropic (AI Integrations) invocation failed — falling back to simulated",
+      );
+      return null;
+    }
   }
-  try {
-    // Dynamic import: only executed in the anthropic branch, never at module load.
-    const { anthropic } = await import("@workspace/integrations-anthropic-ai");
-    const prompt = buildPrompt(alertText, turnIndex, priorToolOutput);
-    const message = await anthropic.messages.create({
-      model: "claude-haiku-4-5",
-      max_tokens: 300,
-      messages: [{ role: "user", content: prompt }],
-    });
-    const block = message.content[0];
-    return (block?.type === "text" ? block.text.trim() : null) ?? null;
-  } catch (err) {
-    logger.warn(
-      { err: err instanceof Error ? err.message : String(err), turnIndex },
-      "Anthropic invocation failed — falling back to simulated",
-    );
-    return null;
+
+  // Fall back to the user's own Anthropic API key when the proxy isn't provisioned.
+  if (process.env.ANTHROPIC_API_KEY) {
+    try {
+      const { default: Anthropic } = await import("@anthropic-ai/sdk");
+      const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+      const message = await client.messages.create({
+        model: "claude-3-5-haiku-latest",
+        max_tokens: 300,
+        messages: [{ role: "user", content: prompt }],
+      });
+      const block = message.content[0];
+      return (block?.type === "text" ? block.text.trim() : null) ?? null;
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err), turnIndex },
+        "Anthropic (direct API key) invocation failed — falling back to simulated",
+      );
+      return null;
+    }
   }
+
+  logger.warn(
+    "AI_PROVIDER=anthropic but neither AI_INTEGRATIONS_ANTHROPIC_BASE_URL nor ANTHROPIC_API_KEY is set — falling back to simulated",
+  );
+  return null;
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────
