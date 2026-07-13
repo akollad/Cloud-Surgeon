@@ -1,4 +1,9 @@
-# Cloud-Surgeon — Plan de Déploiement AWS Complet
+# Cloud-Surgeon — Plan de déploiement AWS (réel, pour la démo)
+
+> Ce document décrit l'architecture **actuelle** du projet (Express + React, monorepo pnpm)
+> et l'infrastructure AWS cible pour un déploiement réel utilisable en démo de hackathon.
+> Il remplace l'ancienne version qui décrivait un dashboard Streamlit/Python — abandonné ;
+> le dashboard est maintenant une SPA React 19 + Vite (`artifacts/dashboard`).
 
 ## Vue d'ensemble de l'architecture
 
@@ -6,90 +11,131 @@
 Internet (HTTPS)
        │
        ▼
-┌─────────────────────────────┐
-│  Application Load Balancer  │  (ALB — un seul point d'entrée public)
-│  https://cloud-surgeon.xyz  │
-└──────────┬──────────────────┘
+┌───────────────────────────┐
+│   Amazon CloudFront        │  (CDN + point d'entrée public unique)
+│   https://<distribution>   │
+└──────────┬─────────────────┘
            │
-     ┌─────┴──────────────────────────┐
-     │                                │
-     ▼                                ▼
-/* → Streamlit (8501)         /api/* → Express (8080)
-  ECS Fargate                       ECS Fargate
-  cloud-surgeon-dashboard            cloud-surgeon-api
-     │                                │
-     └──────────────┬─────────────────┘
-                    │ COCKROACHDB_URL
-                    ▼
-          CockroachDB Serverless
-          (cloud.cockroachlabs.com)
+   ┌───────┴────────────────────────────┐
+   │                                    │
+   ▼                                    ▼
+/*  → S3 (dashboard React,      /api/* → ALB → ECS Fargate
+    build statique Vite)              (API Server Express 5)
+                                             │
+                                             │ MCP stdio subprocess
+                                             │ (bundlé dans le même conteneur)
+                                             │
+                                             ▼
+                                   COCKROACHDB_URL (TLS)
+                                             │
+                                             ▼
+                                  CockroachDB Serverless
+                                  (cloud.cockroachlabs.com)
 
-AWS CloudWatch Alarm
-       │
-       ▼
-   SNS Topic
-       │ POST
-       ▼
-https://cloud-surgeon.xyz/api/webhook/cloudwatch
-       │
-       ▼
-  Express (agent loop)
+                                   HTTPS Bearer (COCKROACH_CLOUD_API_KEY)
+                                             │
+                                             ▼
+                                  cockroachlabs.cloud/mcp
+                                  (MCP Cloud managé — cluster health,
+                                   slow queries, SQL diagnostique)
+
+AWS CloudWatch Alarm ──▶ SNS Topic ──▶ POST /api/webhook/cloudwatch (ALB)
 ```
-
----
 
 ## Services à déployer
 
 | Service | Technologie | Port | Hébergement |
 |---|---|---|---|
-| **API Server** (agent + REST) | Node.js 24 / Express 5 | 8080 | ECS Fargate |
-| **Dashboard** | Python 3.11 / Streamlit | 8501 | ECS Fargate |
-| **Base de données** | CockroachDB Serverless | 26257 | Cloud (déjà actif) |
-| **MCP Server** | Node.js (subprocess) | stdio | Inclus dans API Server |
+| **API Server** (agent loop + REST + MCP client) | Node.js 24 / Express 5 / TypeScript | 8080 | ECS Fargate |
+| **MCP Tool Server** (`aws_repair_service`, `execute_ccloud_command`, `crdb_*`) | Node.js (subprocess stdio) | — | Bundlé dans le conteneur API Server, aucun service séparé |
+| **Dashboard** | React 19 / Vite (SPA statique) | — | S3 + CloudFront |
+| **Base de données / mémoire agent** | CockroachDB Serverless | 26257 | Cloud (déjà actif) |
+
+Il n'y a **pas** de composant Python/Streamlit dans le déploiement — le dashboard est un
+build statique (`pnpm --filter @workspace/dashboard run build` → `artifacts/dashboard/dist/public`)
+servi directement depuis S3, sans serveur Node à faire tourner pour lui.
 
 ---
 
-## Étape 1 — Prérequis AWS
+## Étape 0 — CockroachDB Cloud : les deux outils CockroachDB utilisés en réel
+
+Le projet utilise deux des quatre outils CockroachDB requis par le hackathon :
+
+1. **Distributed Vector Indexing** — `incident_vectors.embedding VECTOR(1024)` +
+   `CREATE VECTOR INDEX ... USING C-SPANN` dans `cloud-surgeon-agent/database/schema.sql`.
+   Actif dès que `COCKROACHDB_URL` pointe vers le cluster Serverless.
+2. **CockroachDB Cloud Managed MCP Server** — `crdb_cluster_health`, `crdb_list_slow_queries`,
+   `crdb_query` dans `artifacts/api-server/src/mcp/server.ts` appellent réellement
+   `https://cockroachlabs.cloud/mcp` (StreamableHTTP + Bearer `COCKROACH_CLOUD_API_KEY`).
+   Ces trois outils sont **inactifs sans cette clé** — c'est le premier prérequis à fournir
+   avant toute démo.
+
+**Sur le ccloud CLI (le 3ᵉ outil listé par le règlement) :** le binaire `ccloud` (testé ici,
+absent de ce conteneur, et documenté à la v0.6.12 comme nécessitant un flow OAuth navigateur)
+ne peut pas s'authentifier de façon headless dans un environnement serveur/CI/conteneur —
+il n'y a pas de navigateur pour compléter le login. C'est un constat, pas une esquive :
+Cloud-Surgeon appelle directement l'API REST que `ccloud` encapsule
+(`https://cockroachlabs.cloud/api/v1/clusters/...`), avec la même clé de service-account,
+pour obtenir des résultats identiques (`cluster:status`, `cluster:list`, `cluster:sql-users`,
+`cluster:backups`, `cluster:version`, `cluster:sql-dns`). Chaque réponse inclut un champ
+`ccloudEquivalent` indiquant la commande `ccloud` exacte qui produirait le même résultat.
+Cette implémentation reste la solution retenue pour le déploiement réel décrit ici — le
+critère "au moins 2 outils CockroachDB" est rempli par le vector index + le MCP Cloud managé,
+pas par ce contournement REST, qu'il ne faut donc pas présenter comme "ccloud CLI" au jury.
+
+---
+
+## Étape 1 — Prérequis AWS (compte réel, pour la démo)
 
 ### 1.1 Services AWS à activer
 ```
-- ECS (Elastic Container Service)
-- ECR (Elastic Container Registry)
-- ALB (Application Load Balancer) via EC2
-- ACM (AWS Certificate Manager) — certificat TLS pour ton domaine
-- Secrets Manager — stockage des secrets
-- CloudWatch — monitoring + alarmes
-- SNS — webhook trigger
-- IAM — rôles et permissions
-- VPC — réseau (utiliser le VPC par défaut ou en créer un dédié)
+- ECR (Elastic Container Registry)     — image du conteneur API Server
+- ECS Fargate                           — exécution du conteneur, sans serveur à gérer
+- Application Load Balancer (ALB)       — expose l'API Server derrière /api
+- S3                                    — bucket privé pour le build statique du dashboard
+- CloudFront                            — CDN + routage /* → S3, /api/* → ALB, HTTPS géré
+- ACM (us-east-1 pour CloudFront)       — certificat TLS
+- Secrets Manager                       — tous les secrets (jamais en clair dans les task defs)
+- CloudWatch + SNS                      — source d'alertes réelle pour déclencher l'agent
+- IAM                                   — rôle de tâche ECS scoping ECS/RDS/Lambda en lecture+repair ciblé
+- VPC                                   — VPC par défaut acceptable pour une démo
 ```
 
-### 1.2 IAM Role pour les tâches ECS
-Créer un rôle `cloud-surgeon-task-role` avec les politiques :
+### 1.2 IAM — rôle de tâche ECS (`cloud-surgeon-task-role`)
+
+Le rôle de tâche ne doit couvrir que ce que `artifacts/api-server/src/lib/aws.ts` appelle
+réellement (ECS/RDS/Lambda repair) — **pas** `bedrock:InvokeModel`, puisque l'IA de cette
+démo passe par l'API Anthropic directe (`ANTHROPIC_API_KEY`), Bedrock étant hors quota
+actuellement (voir Étape 8).
+
 ```json
 {
   "Effect": "Allow",
   "Action": [
-    "bedrock:InvokeModel",
     "ecs:UpdateService",
     "ecs:DescribeServices",
     "rds:ModifyDBInstance",
     "rds:DescribeDBInstances",
+    "rds:RebootDBInstance",
     "lambda:PutFunctionConcurrency",
     "lambda:GetFunctionConcurrency",
-    "cloudwatch:GetMetricStatistics"
+    "cloudwatch:GetMetricData",
+    "cloudwatch:DescribeAlarms"
   ],
   "Resource": "*"
 }
 ```
+Restreindre `Resource` aux ARNs des services de démo (pas `*`) avant un vrai passage en
+production — acceptable pour une démo contrôlée, à ne pas présenter comme "production-ready"
+tel quel devant le jury sans le dire.
 
 ---
 
-## Étape 2 — Images Docker
+## Étape 2 — Image Docker (API Server uniquement)
 
-### 2.1 Dockerfile — API Server
-Créer `Dockerfile.api` à la racine :
+Le dashboard n'a plus besoin d'image Docker : c'est un artefact statique poussé sur S3.
 
+`Dockerfile.api` à la racine :
 ```dockerfile
 FROM node:24-alpine AS builder
 WORKDIR /app
@@ -110,55 +156,43 @@ ENV NODE_ENV=production
 EXPOSE 8080
 CMD ["node", "--enable-source-maps", "./dist/index.mjs"]
 ```
+`dist/mcp/server.mjs` est inclus dans le même build (esbuild multi-entry) — le MCP tool
+server tourne comme subprocess stdio du process principal, pas comme service séparé.
 
-### 2.2 Dockerfile — Dashboard
-Créer `Dockerfile.dashboard` à la racine :
-
-```dockerfile
-FROM python:3.11-slim
-WORKDIR /app
-COPY cloud-surgeon-agent/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY cloud-surgeon-agent/frontend/ ./frontend/
-COPY cloud-surgeon-agent/.streamlit/ ./.streamlit/
-ENV PYTHONUNBUFFERED=1
-EXPOSE 8501
-CMD ["python", "-m", "streamlit", "run", "frontend/app.py", \
-     "--server.port=8501", "--server.address=0.0.0.0"]
-```
-
-### 2.3 Build et push vers ECR
 ```bash
-# Configurer AWS CLI
-aws configure  # ou utiliser les variables d'env
-
-# Créer les repositories ECR
 aws ecr create-repository --repository-name cloud-surgeon-api --region us-east-1
-aws ecr create-repository --repository-name cloud-surgeon-dashboard --region us-east-1
 
-# Authentification ECR
 aws ecr get-login-password --region us-east-1 | \
   docker login --username AWS --password-stdin \
   <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com
 
-# Build et push — API Server
 docker build -f Dockerfile.api -t cloud-surgeon-api .
 docker tag cloud-surgeon-api:latest \
   <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/cloud-surgeon-api:latest
 docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/cloud-surgeon-api:latest
-
-# Build et push — Dashboard
-docker build -f Dockerfile.dashboard -t cloud-surgeon-dashboard .
-docker tag cloud-surgeon-dashboard:latest \
-  <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/cloud-surgeon-dashboard:latest
-docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/cloud-surgeon-dashboard:latest
 ```
 
 ---
 
-## Étape 3 — Secrets (AWS Secrets Manager)
+## Étape 3 — Dashboard : build statique + S3
 
-Créer un secret `cloud-surgeon/prod` avec toutes les valeurs :
+```bash
+# Depuis la racine du monorepo — BASE_URL vide car il sera servi à la racine du domaine CloudFront
+cd artifacts/dashboard
+VITE_API_BASE_URL=https://<distribution>.cloudfront.net/api \
+VITE_API_KEY=<CLOUD_SURGEON_API_KEY> \
+VITE_DASHBOARD_PASSWORD=<mot_de_passe_démo> \
+PORT=23183 BASE_PATH=/ pnpm run build
+
+aws s3 mb s3://cloud-surgeon-dashboard-<suffixe-unique>
+aws s3 sync dist/public/ s3://cloud-surgeon-dashboard-<suffixe-unique>/ --delete
+```
+Le bucket reste **privé** ; CloudFront y accède via Origin Access Control (OAC), pas d'accès
+public direct au bucket.
+
+---
+
+## Étape 4 — Secrets (AWS Secrets Manager)
 
 ```bash
 aws secretsmanager create-secret \
@@ -167,44 +201,39 @@ aws secretsmanager create-secret \
     "COCKROACHDB_URL": "postgresql://user:pass@host:26257/cloud_surgeon?sslmode=verify-full",
     "CLOUD_SURGEON_API_KEY": "<openssl rand -hex 32>",
     "SESSION_SECRET": "<openssl rand -base64 32>",
-    "BEDROCK_API_KEY": "bdak-...",
+    "ANTHROPIC_API_KEY": "sk-ant-...",
     "COCKROACH_CLOUD_API_KEY": "...",
-    "COCKROACH_CLOUD_CLUSTER_ID": "...",
-    "VOYAGE_API_KEY": "..."
+    "COCKROACH_CLOUD_CLUSTER_ID": "..."
   }'
 ```
-
-Les secrets sont injectés en variables d'environnement dans les task definitions ECS — **jamais en clair dans le code ou les Dockerfiles**.
+Secrets injectés en variables d'environnement dans la task definition ECS — jamais en clair
+dans le code, les Dockerfiles, ou les logs.
 
 ---
 
-## Étape 4 — Base de données
+## Étape 5 — Base de données (déjà provisionnée)
 
-### 4.1 Appliquer le schéma (one-time)
 ```bash
-# Depuis ta machine locale avec psql installé
 psql "$COCKROACHDB_URL&sslrootcert=system" \
   -f cloud-surgeon-agent/database/schema.sql
 ```
+> `drizzle-kit push` ne fonctionne pas contre CockroachDB Serverless (divergences `VECTOR` /
+> `sslrootcert`) — toujours appliquer `schema.sql` en SQL brut, idempotent, sûr à ré-exécuter.
 
-### 4.2 Configurer le CDC Changefeed
-Le changefeed est créé automatiquement au démarrage de l'API Server.
-Il faut que l'URL `https://<alb-url>/api/internal/cdc` soit **publiquement accessible**
-(pas derrière auth) pour que CockroachDB puisse y poster.
-
-Le webhook `/api/internal/cdc` n'a intentionnellement **pas** de `X-API-Key` requis
-(CockroachDB ne peut pas envoyer de headers custom en mode webhook-https basique).
+Le CDC changefeed est créé automatiquement au démarrage de l'API Server et poste vers
+`/api/internal/cdc`, qui doit rester accessible publiquement (pas de `X-API-Key`, CockroachDB
+ne peut pas envoyer de header custom en webhook-https basique) — exposé via l'ALB, jamais via
+CloudFront `/*` pour éviter toute confusion de routage avec le dashboard statique.
 
 ---
 
-## Étape 5 — ECS Fargate
+## Étape 6 — ECS Fargate (API Server uniquement)
 
-### 5.1 Créer le cluster ECS
 ```bash
 aws ecs create-cluster --cluster-name cloud-surgeon --region us-east-1
 ```
 
-### 5.2 Task Definition — API Server
+Task definition :
 ```json
 {
   "family": "cloud-surgeon-api",
@@ -221,25 +250,22 @@ aws ecs create-cluster --cluster-name cloud-surgeon --region us-east-1
     "environment": [
       { "name": "PORT", "value": "8080" },
       { "name": "NODE_ENV", "value": "production" },
-      { "name": "AI_PROVIDER", "value": "bedrock" },
-      { "name": "BEDROCK_REGION", "value": "eu-west-1" },
+      { "name": "AI_PROVIDER", "value": "anthropic" },
       { "name": "AWS_REGION", "value": "us-east-1" },
-      { "name": "DASHBOARD_ORIGIN", "value": "https://cloud-surgeon.xyz" }
+      { "name": "ECS_DEFAULT_CLUSTER", "value": "prod-cluster" },
+      { "name": "CALIBRATION_THRESHOLD", "value": "0.15" }
     ],
     "secrets": [
       { "name": "COCKROACHDB_URL", "valueFrom": "arn:aws:secretsmanager:...:cloud-surgeon/prod:COCKROACHDB_URL::" },
       { "name": "CLOUD_SURGEON_API_KEY", "valueFrom": "arn:aws:secretsmanager:...:cloud-surgeon/prod:CLOUD_SURGEON_API_KEY::" },
-      { "name": "BEDROCK_API_KEY", "valueFrom": "arn:aws:secretsmanager:...:cloud-surgeon/prod:BEDROCK_API_KEY::" },
+      { "name": "ANTHROPIC_API_KEY", "valueFrom": "arn:aws:secretsmanager:...:cloud-surgeon/prod:ANTHROPIC_API_KEY::" },
       { "name": "COCKROACH_CLOUD_API_KEY", "valueFrom": "arn:aws:secretsmanager:...:cloud-surgeon/prod:COCKROACH_CLOUD_API_KEY::" },
       { "name": "COCKROACH_CLOUD_CLUSTER_ID", "valueFrom": "arn:aws:secretsmanager:...:cloud-surgeon/prod:COCKROACH_CLOUD_CLUSTER_ID::" },
       { "name": "SESSION_SECRET", "valueFrom": "arn:aws:secretsmanager:...:cloud-surgeon/prod:SESSION_SECRET::" }
     ],
     "healthCheck": {
       "command": ["CMD-SHELL", "curl -f http://localhost:8080/api/healthz || exit 1"],
-      "interval": 30,
-      "timeout": 5,
-      "retries": 3,
-      "startPeriod": 30
+      "interval": 30, "timeout": 5, "retries": 3, "startPeriod": 30
     },
     "logConfiguration": {
       "logDriver": "awslogs",
@@ -253,48 +279,14 @@ aws ecs create-cluster --cluster-name cloud-surgeon --region us-east-1
 }
 ```
 
-### 5.3 Task Definition — Dashboard
-```json
-{
-  "family": "cloud-surgeon-dashboard",
-  "networkMode": "awsvpc",
-  "requiresCompatibilities": ["FARGATE"],
-  "cpu": "512",
-  "memory": "1024",
-  "executionRoleArn": "arn:aws:iam::<ACCOUNT>:role/ecsTaskExecutionRole",
-  "containerDefinitions": [{
-    "name": "dashboard",
-    "image": "<ACCOUNT>.dkr.ecr.us-east-1.amazonaws.com/cloud-surgeon-dashboard:latest",
-    "portMappings": [{ "containerPort": 8501, "protocol": "tcp" }],
-    "environment": [
-      { "name": "API_BASE_URL", "value": "https://cloud-surgeon.xyz/api" },
-      { "name": "DASHBOARD_PASSWORD", "value": "hackathon2026" }
-    ],
-    "secrets": [
-      { "name": "CLOUD_SURGEON_API_KEY", "valueFrom": "arn:aws:secretsmanager:...:cloud-surgeon/prod:CLOUD_SURGEON_API_KEY::" }
-    ],
-    "healthCheck": {
-      "command": ["CMD-SHELL", "curl -f http://localhost:8501/_stcore/health || exit 1"],
-      "interval": 30,
-      "timeout": 5,
-      "retries": 3,
-      "startPeriod": 60
-    },
-    "logConfiguration": {
-      "logDriver": "awslogs",
-      "options": {
-        "awslogs-group": "/ecs/cloud-surgeon-dashboard",
-        "awslogs-region": "us-east-1",
-        "awslogs-stream-prefix": "dashboard"
-      }
-    }
-  }]
-}
-```
+**AI_PROVIDER=anthropic, pas bedrock** : les quotas Bedrock sont actuellement désactivés
+sur le compte de démo. `artifacts/api-server/src/lib/llm.ts` bascule automatiquement sur
+l'API Anthropic directe (`ANTHROPIC_API_KEY`) quand `AI_PROVIDER=anthropic` — le code gère
+déjà les deux chemins, il suffit de ne pas mettre de credentials Bedrock/`BEDROCK_API_KEY`
+pour cette démo. Repasser à `AI_PROVIDER=bedrock` le jour où le quota est réactivé ne demande
+aucun changement de code.
 
-### 5.4 Créer les services ECS
 ```bash
-# API Server — 1 instance minimum (stateless, peut scaler)
 aws ecs create-service \
   --cluster cloud-surgeon \
   --service-name api \
@@ -303,157 +295,121 @@ aws ecs create-service \
   --launch-type FARGATE \
   --network-configuration "awsvpcConfiguration={subnets=[subnet-xxx],securityGroups=[sg-xxx],assignPublicIp=ENABLED}" \
   --load-balancers "targetGroupArn=arn:aws:...:api-tg,containerName=api,containerPort=8080"
-
-# Dashboard — 1 instance (Streamlit est stateful via session_state)
-aws ecs create-service \
-  --cluster cloud-surgeon \
-  --service-name dashboard \
-  --task-definition cloud-surgeon-dashboard \
-  --desired-count 1 \
-  --launch-type FARGATE \
-  --network-configuration "awsvpcConfiguration={subnets=[subnet-xxx],securityGroups=[sg-xxx],assignPublicIp=ENABLED}" \
-  --load-balancers "targetGroupArn=arn:aws:...:dashboard-tg,containerName=dashboard,containerPort=8501"
 ```
 
 ---
 
-## Étape 6 — Application Load Balancer
+## Étape 7 — CloudFront (point d'entrée public unique)
 
-### 6.1 Règles de routage
 ```
-HTTPS :443
-  ├── /api/*          → Target Group: cloud-surgeon-api    (port 8080)
-  ├── /api/internal/* → Target Group: cloud-surgeon-api    (port 8080)  ← CDC webhook
-  └── /*              → Target Group: cloud-surgeon-dashboard (port 8501)
-```
-
-### 6.2 Certificat TLS
-Via ACM (gratuit pour les domaines AWS) :
-```bash
-aws acm request-certificate \
-  --domain-name cloud-surgeon.xyz \
-  --validation-method DNS
+Distribution CloudFront
+  Origin 1: S3 (dashboard-<suffixe>)     — Origin Access Control, comportement par défaut /*
+  Origin 2: ALB (cloud-surgeon-api)      — comportement /api/* (cache désactivé, forward tous headers)
+  Certificat ACM (us-east-1)             — nom de domaine de la démo, ou domaine CloudFront par défaut
 ```
 
-### 6.3 Security Groups
+Security groups :
 ```
 ALB Security Group:
-  - Inbound: 443 from 0.0.0.0/0
-  - Inbound: 80 from 0.0.0.0/0 (redirect → 443)
-
+  - Inbound: 443 depuis CloudFront (préfixe géré `com.amazonaws.global.cloudfront.origin-facing`)
 API Task Security Group:
-  - Inbound: 8080 from ALB Security Group only
-  - Outbound: 443 (CockroachDB, Bedrock, CRDB Cloud API)
-  - Outbound: 26257 (CockroachDB Serverless)
-
-Dashboard Task Security Group:
-  - Inbound: 8501 from ALB Security Group only
-  - Outbound: 443 (API via ALB)
+  - Inbound: 8080 depuis ALB Security Group uniquement
+  - Outbound: 443 (CockroachDB Cloud API, cockroachlabs.cloud/mcp, api.anthropic.com)
+  - Outbound: 26257 (CockroachDB Serverless SQL)
 ```
 
 ---
 
-## Étape 7 — CloudWatch → SNS → Agent
+## Étape 8 — CloudWatch → SNS → Agent (ingestion réelle)
 
 ```bash
-# 1. Créer le SNS Topic
 aws sns create-topic --name cloud-surgeon-alerts --region us-east-1
-# → retourne TopicArn: arn:aws:sns:us-east-1:<ACCOUNT>:cloud-surgeon-alerts
 
-# 2. Abonner le webhook de l'API Server
 aws sns subscribe \
   --topic-arn arn:aws:sns:us-east-1:<ACCOUNT>:cloud-surgeon-alerts \
   --protocol https \
-  --notification-endpoint https://cloud-surgeon.xyz/api/webhook/cloudwatch
-# L'API répond automatiquement au SubscriptionConfirmation → abonnement activé
+  --notification-endpoint https://<distribution>.cloudfront.net/api/webhook/cloudwatch
 
-# 3. Lier une alarme CloudWatch existante au topic
 aws cloudwatch put-metric-alarm \
   --alarm-name checkout-5xx-spike \
   --alarm-actions arn:aws:sns:us-east-1:<ACCOUNT>:cloud-surgeon-alerts \
-  --metric-name 5XXError \
-  --namespace AWS/ApplicationELB \
-  --statistic Sum \
-  --period 60 \
-  --threshold 10 \
-  --comparison-operator GreaterThanThreshold \
-  --evaluation-periods 3
+  --metric-name 5XXError --namespace AWS/ApplicationELB \
+  --statistic Sum --period 60 --threshold 10 \
+  --comparison-operator GreaterThanThreshold --evaluation-periods 3
 ```
 
 ---
 
-## Étape 8 — Variables d'environnement de référence
+## Étape 9 — Variables d'environnement de référence (ECS task, API Server)
 
-### API Server (ECS task)
-| Variable | Valeur prod |
-|---|---|
-| `PORT` | `8080` |
-| `NODE_ENV` | `production` |
-| `COCKROACHDB_URL` | depuis Secrets Manager |
-| `CLOUD_SURGEON_API_KEY` | depuis Secrets Manager |
-| `SESSION_SECRET` | depuis Secrets Manager |
-| `AI_PROVIDER` | `bedrock` |
-| `BEDROCK_API_KEY` | depuis Secrets Manager |
-| `BEDROCK_REGION` | `eu-west-1` |
-| `AWS_REGION` | `us-east-1` |
-| `COCKROACH_CLOUD_API_KEY` | depuis Secrets Manager |
-| `COCKROACH_CLOUD_CLUSTER_ID` | depuis Secrets Manager |
-| `DASHBOARD_ORIGIN` | `https://cloud-surgeon.xyz` |
-| `VOYAGE_API_KEY` | depuis Secrets Manager (optionnel) |
-| `ECS_DEFAULT_CLUSTER` | `prod-cluster` |
-| `CALIBRATION_THRESHOLD` | `0.15` |
+| Variable | Valeur démo | Source |
+|---|---|---|
+| `PORT` | `8080` | fixe |
+| `NODE_ENV` | `production` | fixe |
+| `AI_PROVIDER` | `anthropic` | fixe (Bedrock hors quota) |
+| `ANTHROPIC_API_KEY` | — | Secrets Manager |
+| `AWS_REGION` | `us-east-1` | fixe |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | — | rôle de tâche IAM (préféré aux clés statiques) |
+| `COCKROACHDB_URL` | — | Secrets Manager |
+| `CLOUD_SURGEON_API_KEY` | — | Secrets Manager |
+| `SESSION_SECRET` | — | Secrets Manager |
+| `COCKROACH_CLOUD_API_KEY` | — | Secrets Manager |
+| `COCKROACH_CLOUD_CLUSTER_ID` | — | Secrets Manager |
+| `ECS_DEFAULT_CLUSTER` | `prod-cluster` | fixe |
+| `CALIBRATION_THRESHOLD` | `0.15` | fixe |
 
-### Dashboard (ECS task)
-| Variable | Valeur prod |
+> Préférer le rôle de tâche IAM aux clés `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` statiques
+> quand c'est possible — le SDK AWS les résout automatiquement depuis les credentials du rôle
+> de tâche ECS sans qu'on ait besoin de les injecter en variable d'environnement du tout.
+
+Dashboard (build-time uniquement — variables `VITE_*` inlinées, pas de runtime env) :
+| Variable | Valeur démo |
 |---|---|
-| `API_BASE_URL` | `https://cloud-surgeon.xyz/api` |
-| `CLOUD_SURGEON_API_KEY` | depuis Secrets Manager |
-| `DASHBOARD_PASSWORD` | à définir |
+| `VITE_API_BASE_URL` | `https://<distribution>.cloudfront.net/api` |
+| `VITE_API_KEY` | valeur de `CLOUD_SURGEON_API_KEY` |
+| `VITE_DASHBOARD_PASSWORD` | mot de passe de démo (Phase 1, voir `MIGRATION_REACT.md`) |
 
 ---
 
-## Étape 9 — Checklist de mise en service
+## Étape 10 — Checklist de mise en service
 
 ```
+□ COCKROACH_CLOUD_API_KEY + COCKROACH_CLOUD_CLUSTER_ID renseignés → MCP Cloud managé LIVE
 □ Schema CockroachDB appliqué (psql schema.sql)
-□ Images Docker buildées et pushées dans ECR
-□ Secrets créés dans Secrets Manager
-□ Cluster ECS créé
-□ Task definitions enregistrées (API + Dashboard)
-□ ALB créé avec les deux target groups
-□ Règles de routage /api/* → api, /* → dashboard
-□ Certificat TLS ACM validé et attaché à l'ALB
-□ Security groups configurés
-□ Services ECS démarrés (1 tâche chacun)
-□ Health checks verts (ALB console → Target Groups)
-□ GET https://cloud-surgeon.xyz/api/healthz → 200
-□ Dashboard accessible https://cloud-surgeon.xyz
-□ SNS Topic créé et abonné au webhook
-□ Test webhook: bouton "📡 Simulate CloudWatch webhook" dans le dashboard
-□ Test agent: "⚡ Trigger Agent" → incident RESOLVED visible
-□ CDC Changefeed actif (badge 🟢 LIVE dans le dashboard)
+□ Image Docker API Server buildée et poussée dans ECR
+□ Secrets créés dans Secrets Manager (Anthropic, pas Bedrock)
+□ Cluster ECS créé, service api démarré (1 tâche), health check vert
+□ Build dashboard poussé sur S3, distribution CloudFront créée (OAC, pas d'accès public direct au bucket)
+□ Comportement CloudFront /api/* → ALB validé
+□ GET https://<distribution>.cloudfront.net/api/healthz → 200
+□ Dashboard accessible à la racine du domaine CloudFront
+□ SNS Topic créé et abonné au webhook CloudWatch
+□ Test: déclenchement d'une alarme réelle → incident visible dans le dashboard
+□ Test: crash chaos (`/api/chaos/sigkill`) → reprise sans perte d'état
 ```
 
 ---
 
-## Coût estimé (hackathon — usage modéré)
+## Coût estimé (démo, usage modéré)
 
 | Service | Coût estimé |
 |---|---|
-| ECS Fargate 2 tâches (0.5 vCPU / 1 GB chacune) | ~$20-30 / mois |
+| ECS Fargate 1 tâche (0.5 vCPU / 1 GB) | ~$10-15 / mois |
 | ALB | ~$20 / mois |
+| CloudFront + S3 | < $2 / mois (trafic de démo) |
 | ECR stockage | < $1 / mois |
 | CloudWatch logs | < $5 / mois |
 | CockroachDB Serverless | Gratuit (free tier) |
-| Bedrock (Claude / Nova Pro) | Pay-per-token |
-| **Total** | **~$45-60 / mois** |
+| Anthropic API (Claude) | Pay-per-token |
+| **Total** | **~$40-45 / mois** |
 
 ---
 
 ## Ce qui n'est PAS nécessaire
 
-- ❌ Lambda — l'Express server fait tout
-- ❌ API Gateway — l'ALB suffit pour router HTTP
+- ❌ Lambda — l'Express server fait tout, y compris le MCP tool server en subprocess
+- ❌ API Gateway — CloudFront + ALB suffisent pour router HTTP
 - ❌ RDS — CockroachDB Serverless est déjà dans le cloud
 - ❌ ElastiCache — aucun état Redis requis
-- ❌ S3 — aucun fichier statique à servir (Streamlit les embarque)
+- ❌ ECS/Fargate pour le dashboard — c'est un artefact statique, S3 + CloudFront suffit et coûte moins cher
+- ❌ Bedrock pour cette démo — quota désactivé ; `AI_PROVIDER=anthropic` couvre la même fonctionnalité sans changement de code
