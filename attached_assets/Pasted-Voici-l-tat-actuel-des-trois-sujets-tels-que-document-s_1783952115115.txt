@@ -1,0 +1,27 @@
+Voici l'état actuel des trois sujets, tels que documentés (mais pas encore implémentés) dans MIGRATION_REACT.md :
+1. Gate d'auth — plan en 2 phases
+
+Phase 1 (hackathon, pas encore codée) : un composant LoginGate.tsx isolé dans App.tsx — écran de mot de passe simple (VITE_DASHBOARD_PASSWORD), token en sessionStorage, aucune dépendance externe. Rapide à faire maintenant si tu veux.
+
+Phase 2 (post-hackathon) : remplacer LoginGate par AmplifyAuth (Cognito) sans toucher au reste de l'app, puisque le gate est isolé. Alternative "zero-code" mentionnée : faire gérer l'auth par l'ALB avant même que React ne charge.
+
+Aujourd'hui, aucun gate n'existe encore dans artifacts/dashboard/src — le dashboard est actuellement ouvert (protégé seulement côté API par le header x-api-key).
+2. AWS Marketplace
+
+Il n'y a pas de plan écrit au-delà de cette mention "Phase 2, post-hackathon, sans réécriture" dans le fichier de migration. Rien sur le type de produit (SaaS Contract vs AMI vs conteneur ECS), la metering API, les private offers, etc. Si tu veux, je peux rédiger un vrai plan (nouveau doc) — mais j'ai besoin de savoir quel modèle de commercialisation tu vises.
+3. Cognito + Amplify
+
+Pas d'intégration Replit dédiée à Cognito (j'ai vérifié) — ce serait donc une intégration AWS "manuelle" : un User Pool + App Client Cognito, puis aws-amplify côté React pour le flow de login. Ça nécessite des credentials AWS que je n'ai pas dans l'environnement actuel (seul AWS_REGION est présent, pas de clés).
+Par quoi veux-tu commencer ?
+Actions à lancer maintenant
+Implémenter le gate Phase 1 (mot de passe simple, sessionStorage), Rédiger un plan détaillé AWS Marketplace
+Si tu choisis le plan Marketplace : quel modèle de vente vises-tu ?
+le modele de vente est que l'utilisateur clic sur deploy dans aws market, cloud surgeon s'integre et s'install sur son infrastructure et 
+Implementing password gate
+Validating credentials client-side
+Making password optional
+Restarted workflow artifacts/dashboard: web
+Verifying dashboard functionality
+Documenting deployment plan
+
+You've reached your daily free quota limit. It will rese
