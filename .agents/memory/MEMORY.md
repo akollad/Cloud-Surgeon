@@ -2,3 +2,5 @@
 - [ccloud CLI headless auth](ccloud-headless-auth.md) — v0.6.12 needs browser OAuth; call the REST API directly with COCKROACH_CLOUD_API_KEY instead.
 - [CockroachDB Serverless connection quirks](cockroachdb-serverless-connection.md) — psql needs `&sslrootcert=system`; use hand-written SQL instead of `drizzle-kit push` for CockroachDB DDL.
 - [Bedrock geo-block & CockroachDB Cloud API perms](bedrock-cockroach-cloud-api-blockers.md) — Anthropic-on-Bedrock geo-restricted from this container; CockroachDB Cloud API key needs a role assigned per-cluster in console.
+- [Orphaned artifact.toml still drives routing](orphaned-artifact-toml-routing.md) — imported projects can have artifact.toml the proxy honors even when listArtifacts() shows nothing; match its previewPath/port exactly.
+- [AI Integrations Anthropic upgrade fallback](ai-integrations-anthropic-upgrade-fallback.md) — proxy setup may need an account upgrade users decline; keep a direct-API-key SDK fallback, always labeled honestly.
