@@ -37,12 +37,8 @@ router.use(apiKeyAuth);
 
 router.get("/metrics/win-rates", async (_req, res): Promise<void> => {
   const rates = await getAllStrategyWinRates();
-  res.json({
-    winRates: rates,
-    note:
-      "Contextual bandit powered by CockroachDB — no external ML service. " +
-      "win_rate = COUNT(*) FILTER (WHERE outcome_success) / COUNT(*) per strategy.",
-  });
+  // Return bare array — matches OpenAPI spec / generated Zod schema
+  res.json(rates);
 });
 
 // ── Impact (MTTR + cost) ──────────────────────────────────────────────────
@@ -226,14 +222,8 @@ router.get("/metrics/impact", async (_req, res): Promise<void> => {
  */
 router.get("/metrics/calibration", async (_req, res): Promise<void> => {
   const calibration = await getAllCalibrationData();
-  res.json({
-    calibration,
-    threshold: Number(process.env.CALIBRATION_THRESHOLD ?? 0.15),
-    note:
-      "Self-correcting bandit: if |observed_win-rate − predicted_win-rate| > threshold (15%), " +
-      "a correction factor is applied to subsequent decisions. " +
-      "Pure SQL computation on CockroachDB — no external ML service.",
-  });
+  // Return bare array — matches OpenAPI spec / generated Zod schema
+  res.json(calibration);
 });
 
 /**

@@ -1,32 +1,38 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
-  version: 0.1.0
-  description: API specification
+  version: 0.2.0
+  description: Cloud-Surgeon Agent API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
-    description: Health operations
   - name: incidents
-    description: Cloud-Surgeon incident agent operations
+  - name: metrics
+  - name: logs
+  - name: chaos
+  - name: webhooks
 paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  # ── Incidents ─────────────────────────────────────────────────────────────
   /incidents/trigger:
     post:
       operationId: triggerIncident
       tags: [incidents]
-      summary: Trigger (or resume) the Cloud-Surgeon agent for an alert
-      description: >
-        Plays the role of the AWS API Gateway + Lambda entry point. Looks up
-        (or creates) the incident by a fingerprint derived from the alert
-        text, runs the simulated Claude 3.5 Sonnet tool-calling loop from
-        wherever it last left off, persisting state to CockroachDB/Postgres
-        after every turn, and returns the resulting incident. If
-        `simulateCrash` is true, the loop stops after the first turn without
-        finishing, to demonstrate that the next call resumes instead of
-        restarting.
+      summary: Trigger or resume the Cloud-Surgeon agent
       requestBody:
         required: true
         content:
@@ -35,13 +41,14 @@ paths:
               $ref: "#/components/schemas/AlertInput"
       responses:
         "200":
-          description: Incident created or resumed and processed
+          description: Incident created or resumed
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Incident"
         "400":
           description: Invalid request body
+
   /incidents:
     get:
       operationId: listIncidents
@@ -49,18 +56,19 @@ paths:
       summary: List recent incidents
       responses:
         "200":
-          description: Recent incidents, most recently updated first
+          description: Recent incidents
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: "#/components/schemas/Incident"
+
   /incidents/{incidentId}:
     get:
       operationId: getIncident
       tags: [incidents]
-      summary: Get a single incident by id
+      summary: Get a single incident
       parameters:
         - name: incidentId
           in: path
@@ -75,12 +83,132 @@ paths:
               schema:
                 $ref: "#/components/schemas/Incident"
         "404":
-          description: Incident not found
+          description: Not found
+
+  /incidents/{incidentId}/approve:
+    post:
+      operationId: approveIncident
+      tags: [incidents]
+      summary: Approve a PENDING_APPROVAL incident
+      parameters:
+        - name: incidentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Approved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Incident"
+
+  /incidents/{incidentId}/reject:
+    post:
+      operationId: rejectIncident
+      tags: [incidents]
+      summary: Reject a PENDING_APPROVAL incident
+      parameters:
+        - name: incidentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Rejected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Incident"
+
+  /incidents/{incidentId}/correct:
+    post:
+      operationId: correctIncident
+      tags: [incidents]
+      summary: Apply a human strategy correction
+      parameters:
+        - name: incidentId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CorrectionInput"
+      responses:
+        "200":
+          description: Corrected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Incident"
+
+  /incidents/{incidentId}/causal-chain:
+    get:
+      operationId: getIncidentCausalChain
+      tags: [incidents]
+      summary: Get causal chain via recursive CTE
+      parameters:
+        - name: incidentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Causal chain
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CausalChainResult"
+
+  /incidents/{incidentId}/handoffs:
+    get:
+      operationId: getIncidentHandoffs
+      tags: [incidents]
+      summary: Get agent handoffs for an incident
+      parameters:
+        - name: incidentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Handoffs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Handoff"
+
+  /handoffs:
+    get:
+      operationId: listHandoffs
+      tags: [incidents]
+      summary: List all agent handoffs
+      responses:
+        "200":
+          description: All handoffs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Handoff"
+
+  # ── Logs ──────────────────────────────────────────────────────────────────
   /logs:
     get:
       operationId: listExecutionLogs
-      tags: [incidents]
-      summary: List recent execution log entries
+      tags: [logs]
+      summary: List execution log entries
       parameters:
         - name: incidentId
           in: query
@@ -89,35 +217,197 @@ paths:
             type: string
       responses:
         "200":
-          description: Recent execution log entries, most recent first
+          description: Log entries
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: "#/components/schemas/ExecutionLog"
-  /healthz:
+
+  /logs/count:
     get:
-      operationId: healthCheck
-      tags: [health]
-      summary: Health check
-      description: Returns server health status
+      operationId: countExecutionLogs
+      tags: [logs]
+      summary: Count execution log entries
+      parameters:
+        - name: incidentId
+          in: query
+          required: false
+          schema:
+            type: string
       responses:
         "200":
-          description: Healthy
+          description: Count
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/HealthStatus"
+                $ref: "#/components/schemas/LogCount"
+
+  # ── Metrics ───────────────────────────────────────────────────────────────
+  /metrics/win-rates:
+    get:
+      operationId: getWinRates
+      tags: [metrics]
+      summary: Per-strategy win rates from CockroachDB
+      responses:
+        "200":
+          description: Win rates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WinRate"
+
+  /metrics/impact:
+    get:
+      operationId: getImpactMetrics
+      tags: [metrics]
+      summary: MTTR and cost savings vs human baseline
+      responses:
+        "200":
+          description: Impact metrics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImpactMetrics"
+
+  /metrics/calibration:
+    get:
+      operationId: getCalibration
+      tags: [metrics]
+      summary: Bandit calibration correction factors
+      responses:
+        "200":
+          description: Calibration data
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CalibrationEntry"
+
+  /metrics/calibration/recalibrate:
+    post:
+      operationId: recalibrate
+      tags: [metrics]
+      summary: Force bandit recomputation
+      responses:
+        "200":
+          description: Recalibrated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecalibrateResult"
+
+  /metrics/ccloud:
+    get:
+      operationId: getCcloudMetrics
+      tags: [metrics]
+      summary: CockroachDB Cloud REST API proxy
+      parameters:
+        - name: action
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ccloud data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CcloudResult"
+
+  /metrics/cluster:
+    get:
+      operationId: getClusterHealth
+      tags: [metrics]
+      summary: Live cluster health via CockroachDB Cloud MCP
+      responses:
+        "200":
+          description: Cluster health
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClusterHealth"
+
+  /metrics/ingest:
+    post:
+      operationId: ingestMetrics
+      tags: [metrics]
+      summary: Ingest metric datapoints for predictive anomaly detection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MetricIngestInput"
+      responses:
+        "200":
+          description: Ingest result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetricIngestResult"
+
+  /metrics/seed:
+    post:
+      operationId: seedVectorMemory
+      tags: [metrics]
+      summary: Seed vector memory with synthetic incidents
+      responses:
+        "200":
+          description: Seed result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SeedResult"
+
+  # ── Chaos ─────────────────────────────────────────────────────────────────
+  /chaos/sigkill:
+    post:
+      operationId: sigkillProcess
+      tags: [chaos]
+      summary: SIGKILL the API server process (chaos demo)
+      responses:
+        "202":
+          description: Kill signal sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SigkillResult"
+
+  # ── Webhooks ──────────────────────────────────────────────────────────────
+  /webhook/cloudwatch:
+    post:
+      operationId: simulateCloudwatchWebhook
+      tags: [webhooks]
+      summary: Simulate or receive a CloudWatch/SNS alarm
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CloudwatchAlarmInput"
+      responses:
+        "202":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookResult"
+
 components:
   schemas:
     HealthStatus:
       type: object
+      required: [status]
       properties:
         status:
           type: string
-      required:
-        - status
+
     AlertInput:
       type: object
       required: [alertText]
@@ -127,10 +417,54 @@ components:
           minLength: 1
         simulateCrash:
           type: boolean
-          description: >
-            If true, stop the agent loop right after the first turn without
-            finishing, to demonstrate resumable state.
           default: false
+        chaosMode:
+          type: string
+
+    CorrectionInput:
+      type: object
+      required: [suggestedStrategy]
+      properties:
+        suggestedStrategy:
+          type: string
+
+    CloudwatchAlarmInput:
+      type: object
+      required: [AlarmName]
+      properties:
+        AlarmName:
+          type: string
+        NewStateValue:
+          type: string
+        NewStateReason:
+          type: string
+        Region:
+          type: string
+
+    MetricIngestInput:
+      type: object
+      required: [datapoints]
+      properties:
+        datapoints:
+          type: array
+          items:
+            $ref: "#/components/schemas/MetricDatapoint"
+
+    MetricDatapoint:
+      type: object
+      required: [metricName, value]
+      properties:
+        metricName:
+          type: string
+        value:
+          type: number
+        dimensions:
+          type: object
+          additionalProperties:
+            type: string
+        serviceHint:
+          type: string
+
     AgentTurn:
       type: object
       required: [turn, thought, toolName, toolInput, toolOutput]
@@ -139,7 +473,6 @@ components:
           type: integer
         agent:
           type: string
-          description: Name of the agent that executed this turn (diagnostician/remediator/auditor)
         thought:
           type: string
         thoughtSource:
@@ -153,6 +486,7 @@ components:
         toolOutput:
           type: object
           additionalProperties: true
+
     IncidentContext:
       type: object
       properties:
@@ -160,50 +494,32 @@ components:
           type: string
         strategyName:
           type: string
-          description: Repair strategy detected/chosen for this incident
-        # Layer 2 — routing decision
         routingMode:
           type: string
           enum: [AUTONOMOUS, PENDING_APPROVAL, EXPLORATORY, REJECTED]
-          description: Routing mode decided by Layer 2 (memory -> confidence -> action)
         routingDecisionComputed:
           type: boolean
         ragScore:
-          type: number
-          nullable: true
-          description: RAG cosine distance (0 = identical, 1 = opposite)
+          type: ["number", "null"]
         ragStrategyHint:
-          type: string
-          nullable: true
-          description: Strategy from the most similar incident in the vector memory
+          type: ["string", "null"]
         winRate:
-          type: number
-          nullable: true
-          description: Historical success rate for the strategy (0-1)
+          type: ["number", "null"]
         winRateSampleSize:
           type: integer
-          description: Number of samples used to compute the win-rate
         turns:
           type: array
           items:
             $ref: "#/components/schemas/AgentTurn"
         finalResponse:
-          type: string
-          nullable: true
+          type: ["string", "null"]
         crashed:
           type: boolean
       additionalProperties: true
+
     Incident:
       type: object
-      required:
-        [
-          incidentId,
-          alertFingerprint,
-          status,
-          currentStep,
-          contextJson,
-          updatedAt,
-        ]
+      required: [incidentId, alertFingerprint, status, currentStep, contextJson, updatedAt]
       properties:
         incidentId:
           type: string
@@ -211,22 +527,18 @@ components:
           type: string
         status:
           type: string
-          enum: [TRIGGERED, DIAGNOSING, REPAIRING, RESOLVED, FAILED, PENDING_APPROVAL]
+          enum: [TRIGGERED, DIAGNOSING, REPAIRING, RESOLVED, FAILED, PENDING_APPROVAL, PREDICTIVE]
         currentStep:
           type: ["string", "null"]
         contextJson:
           $ref: "#/components/schemas/IncidentContext"
         claimedByAgent:
-          type: string
-          nullable: true
-          description: Agent that claimed this incident via serializable transaction
+          type: ["string", "null"]
         causedByIncidentId:
-          type: string
-          nullable: true
-          description: Parent incident in the causal chain (recursive CTE)
+          type: ["string", "null"]
         updatedAt:
           type: string
-          format: date-time
+
     ExecutionLog:
       type: object
       required: [logId, incidentId, actionTaken, result, createdAt]
@@ -241,5 +553,148 @@ components:
           type: ["string", "null"]
         createdAt:
           type: string
-          format: date-time
 
+    LogCount:
+      type: object
+      required: [count]
+      properties:
+        count:
+          type: integer
+
+    WinRate:
+      type: object
+      required: [strategyName, winRate, totalCount, successCount]
+      properties:
+        strategyName:
+          type: string
+        winRate:
+          type: number
+        totalCount:
+          type: integer
+        successCount:
+          type: integer
+
+    ImpactMetrics:
+      type: object
+      properties:
+        totalIncidents:
+          type: integer
+        resolvedCount:
+          type: integer
+        avgAgentMttrMinutes:
+          type: ["number", "null"]
+        humanBaselineMttrMinutes:
+          type: number
+        mttrSavingsPercent:
+          type: ["number", "null"]
+        estimatedCostSavingsUsd:
+          type: ["number", "null"]
+        autonomousCount:
+          type: integer
+        pendingApprovalCount:
+          type: integer
+        exploratoryCount:
+          type: integer
+      additionalProperties: true
+
+    CalibrationEntry:
+      type: object
+      properties:
+        strategyName:
+          type: string
+        predictedWinRate:
+          type: ["number", "null"]
+        observedWinRate:
+          type: ["number", "null"]
+        correctionFactor:
+          type: ["number", "null"]
+        calibratedAt:
+          type: ["string", "null"]
+        sampleSize:
+          type: integer
+      additionalProperties: true
+
+    RecalibrateResult:
+      type: object
+      properties:
+        recalibrated:
+          type: integer
+        message:
+          type: string
+
+    CcloudResult:
+      type: object
+      additionalProperties: true
+
+    ClusterHealth:
+      type: object
+      additionalProperties: true
+
+    MetricIngestResult:
+      type: object
+      properties:
+        message:
+          type: string
+        predictiveIncidents:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+      additionalProperties: true
+
+    SeedResult:
+      type: object
+      required: [seeded, count]
+      properties:
+        seeded:
+          type: boolean
+        count:
+          type: integer
+
+    SigkillResult:
+      type: object
+      properties:
+        message:
+          type: string
+        pid:
+          type: integer
+        note:
+          type: string
+
+    WebhookResult:
+      type: object
+      properties:
+        incidentId:
+          type: string
+        status:
+          type: string
+        message:
+          type: string
+
+    CausalChainResult:
+      type: object
+      properties:
+        incidentId:
+          type: string
+        chain:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        note:
+          type: string
+
+    Handoff:
+      type: object
+      properties:
+        fromAgent:
+          type: string
+        toAgent:
+          type: string
+        incidentId:
+          type: string
+        handoffAt:
+          type: string
+        summary:
+          type: string
+      additionalProperties: true

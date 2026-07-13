@@ -26,6 +26,18 @@ import { apiKeyAuth } from "../middleware/apiKeyAuth";
 
 const router: IRouter = Router();
 
+/** Serialize Date fields to ISO strings so Zod z.string() schemas don't throw. */
+function serializeDates<T>(obj: T): T {
+  if (Array.isArray(obj)) return obj.map(serializeDates) as unknown as T;
+  if (obj instanceof Date) return obj.toISOString() as unknown as T;
+  if (obj && typeof obj === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(obj)) out[k] = serializeDates(v);
+    return out as unknown as T;
+  }
+  return obj;
+}
+
 // All incident/log routes require the shared API key with the
 // dashboard — see middleware/apiKeyAuth.ts.
 router.use(apiKeyAuth);
@@ -104,7 +116,7 @@ router.post("/incidents/trigger", async (req, res): Promise<void> => {
   }
 
   const result = await runAgentLoop(incident, alertText, simulateCrash, chaosConfig);
-  res.json(TriggerIncidentResponse.parse(result));
+  res.json(TriggerIncidentResponse.parse(serializeDates(result)));
 });
 
 // ── Human approval / rejection (Layer 2) ─────────────────────────────────
@@ -220,7 +232,7 @@ router.post("/incidents/:incidentId/reject", async (req, res): Promise<void> => 
     );
   }
 
-  res.json(GetIncidentResponse.parse(updated));
+  res.json(GetIncidentResponse.parse(serializeDates(updated)));
 });
 
 /**
@@ -302,7 +314,7 @@ router.post("/incidents/:incidentId/correct", async (req, res): Promise<void> =>
     );
   }
 
-  res.json(GetIncidentResponse.parse(updated));
+  res.json(GetIncidentResponse.parse(serializeDates(updated)));
 });
 
 // ── Causal chain (recursive CTE) ─────────────────────────────────────────
@@ -395,7 +407,7 @@ router.get("/incidents", async (_req, res): Promise<void> => {
     .orderBy(desc(incidentStateTable.updatedAt))
     .limit(50);
 
-  res.json(ListIncidentsResponse.parse(incidents));
+  res.json(ListIncidentsResponse.parse(serializeDates(incidents)));
 });
 
 router.get("/incidents/:incidentId", async (req, res): Promise<void> => {
@@ -411,7 +423,7 @@ router.get("/incidents/:incidentId", async (req, res): Promise<void> => {
     return;
   }
 
-  res.json(GetIncidentResponse.parse(incident));
+  res.json(GetIncidentResponse.parse(serializeDates(incident)));
 });
 
 // ── Execution logs ────────────────────────────────────────────────────────
@@ -460,7 +472,7 @@ router.get("/logs", async (req, res): Promise<void> => {
         .orderBy(desc(executionLogsTable.createdAt))
         .limit(100);
 
-  res.json(ListExecutionLogsResponse.parse(rows));
+  res.json(ListExecutionLogsResponse.parse(serializeDates(rows)));
 });
 
 // ── Global handoffs ───────────────────────────────────────────────────────

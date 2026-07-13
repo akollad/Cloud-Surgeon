@@ -29,7 +29,8 @@ const router: IRouter = Router();
 // browser EventSource cannot, so the UI uses the requests library.
 
 router.get("/stream/audit", (req, res): void => {
-  const key = req.headers["x-api-key"];
+  // Accept key via header (server-side clients) or query param (browser EventSource).
+  const key = req.headers["x-api-key"] ?? req.query["apiKey"];
   const expected = process.env.CLOUD_SURGEON_API_KEY;
   if (expected && key !== expected) {
     res.status(401).json({ error: "Unauthorized" });

@@ -1,0 +1,11 @@
+# Global dependencies for local development (backend + dashboard).
+# To package only the Lambda, see backend/requirements.txt.
+#
+# The dashboard (frontend/app.py) no longer talks directly to the database:
+# it calls the backend over HTTP (requests), which handles Bedrock/CockroachDB.
+# boto3 and psycopg2-binary remain necessary to run/test
+# backend/lambda_function.py locally.
+boto3>=1.34.0
+psycopg2-binary>=2.9.9
+streamlit>=1.38.0
+requests>=2.31.0

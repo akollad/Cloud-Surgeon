@@ -17,6 +17,15 @@ const DEFAULT_JSON_ACCEPT = "application/json, application/problem+json";
 
 let _baseUrl: string | null = null;
 let _authTokenGetter: AuthTokenGetter | null = null;
+let _apiKey: string | null = null;
+
+/**
+ * Set a static API key that is sent as `x-api-key` on every request.
+ * Pass `null` to clear it.
+ */
+export function setApiKey(key: string | null): void {
+  _apiKey = key || null;
+}
 
 /**
  * Set a base URL that is prepended to every relative request URL
@@ -356,6 +365,11 @@ export async function customFetch<T = unknown>(
     if (token) {
       headers.set("authorization", `Bearer ${token}`);
     }
+  }
+
+  // Attach static API key when configured and not already provided.
+  if (_apiKey && !headers.has("x-api-key")) {
+    headers.set("x-api-key", _apiKey);
   }
 
   const requestInfo = { method, url: resolveUrl(input) };
