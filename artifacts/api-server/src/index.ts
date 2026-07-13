@@ -36,13 +36,18 @@ app.listen(port, async (err) => {
   const bedrockStatus = bedrockIsConfigured()
     ? `credentials set (${bedrockAuth}) — geo-blocked from container; use LIVE Anthropic fallback`
     : "no credentials";
-  const anthropicLive = !!(
+  const anthropicViaProxy = !!(
     process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY ||
     process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL
   );
+  const anthropicViaDirectKey = !!process.env.ANTHROPIC_API_KEY;
   const aiProviderLabel =
     provider === "anthropic"
-      ? `anthropic ${anthropicLive ? "🟢 LIVE (Replit integration)" : "⚠️ no API key"}`
+      ? anthropicViaProxy
+        ? "anthropic 🟢 LIVE (Replit AI Integrations proxy)"
+        : anthropicViaDirectKey
+          ? "anthropic 🟢 LIVE (direct API key)"
+          : "anthropic ⚠️ no API key"
       : `bedrock — ${bedrockStatus}`;
 
   const awsRegion = process.env.AWS_REGION ?? "(not set)";
