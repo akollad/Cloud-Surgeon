@@ -52,8 +52,8 @@ export default function LiveDiagnostic() {
   ) || [];
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6 animate-in fade-in duration-500 h-full flex flex-col">
-      <div className="flex items-center justify-between border-b border-border pb-4 shrink-0">
+    <div className="max-w-6xl mx-auto space-y-6 animate-in fade-in duration-500 pb-6">
+      <div className="flex items-center justify-between border-b border-border pb-4">
         <h1 className="text-2xl font-mono font-bold tracking-tighter uppercase text-foreground flex items-center">
           <Activity className="mr-2 h-5 w-5 text-primary" />
           Live Diagnostic
@@ -66,7 +66,7 @@ export default function LiveDiagnostic() {
       </div>
 
       {activeIncidents.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 shrink-0">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {activeIncidents.map(inc => (
             <Card key={inc.incidentId} className="border-primary/50 shadow-[0_0_15px_rgba(0,255,255,0.1)]">
               <CardHeader className="py-3 px-4 flex flex-row items-center justify-between space-y-0 border-b border-border/50">
@@ -91,7 +91,7 @@ export default function LiveDiagnostic() {
         </div>
       )}
 
-      <div className="flex-1 flex flex-col min-h-0 border border-border bg-[#0a0a0a] rounded-sm overflow-hidden">
+      <div className="min-h-[320px] flex flex-col border border-border bg-[#0a0a0a] rounded-sm overflow-hidden">
         <div className="bg-muted px-4 py-2 border-b border-border flex items-center space-x-2 text-xs font-mono text-muted-foreground uppercase tracking-wider shrink-0">
           <Terminal className="h-4 w-4" />
           <span>CDC Audit Stream (Latest {maxEvents})</span>
