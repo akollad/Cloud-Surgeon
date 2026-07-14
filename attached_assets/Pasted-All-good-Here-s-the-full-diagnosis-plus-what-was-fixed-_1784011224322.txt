@@ -1,0 +1,43 @@
+All good. Here's the full diagnosis plus what was fixed:
+1 — No CloudWatch→SNS alerting yet
+
+The code is fully ready — artifacts/api-server/src/routes/webhook.ts implements the full SNS handshake + CloudWatch alarm parsing + prompt-guard → agent trigger pipeline at POST /api/webhook/cloudwatch. What's missing is purely infrastructure: the three AWS CLI commands in DEPLOYMENT.md Step 8 haven't been run yet:
+aws sns create-topic --name cloud-surgeon-alerts
+aws sns subscribe --protocol https \
+  --notification-endpoint https://d3ddnpg3hz3st4.cloudfront.net/api/webhook/cloudwatch ...
+aws cloudwatch put-metric-alarm --alarm-name checkout-5xx-spike \
+  --alarm-actions arn:aws:sns:...:cloud-surgeon-alerts ...
+
+No code change needed — just those three commands against the live account.
+2 — Fallback polling vs. CDC
+
+CDC is live right now (cdcActive: true, changefeed job 1192117396184006657 reused). The fallback polling is a safety net for environments without a public HTTPS URL (local dev, CI). However there was a real bug: cdc.ts was constructing the webhook URL as:
+webhook-https://${devDomain}/api-server/api/internal/cdc   ← wrong
+
+The artifact's preview path is /api (from artifact.toml), not /api-server. So if the changefeed were ever dropped and recreated it would point at a 404. Fixed — URL is now /api/internal/cdc. The reused changefeed from the previous session was created with the correct URL, which is why CDC has been working; the bug was latent.
+3 — anomaly.test.ts failures (fixed, 67/67 pass)
+
+Root cause: IncidentContext in openapi.yaml already has additionalProperties: true, but orval's Zod generator silently ignores it — it emits zod.object({...}) without .passthrough(). Predictive incidents write extra fields into contextJson (source, predictiveMetric, detectionMethod, similarityScore) that Zod was stripping on parse.
+
+Added .passthrough() to the contextJson object in the three affected generated schemas (TriggerIncidentResponse, ListIncidentsResponseItem, GetIncidentResponse), with a comment marking the manual override so the next orval regeneration doesn't silently drop it without notice.
+4 — README was stale (fixed)
+
+It still described the abandoned Streamlit dashboard throughout:
+
+    Prerequisites listed Python 3.11 + pip install -r requirements.txt
+    Quick Start step 4 showed streamlit run frontend/app.py
+    Architecture diagram said "Streamlit UI (Python)"
+    Project structure listed cloud-surgeon-agent/frontend/app.py ← Streamlit dashboard (1 300+ lines)
+
+All updated to reflect the actual React 19 + Vite SPA (artifacts/dashboard/).
+Pages under load/edge — all healthy
+Page	Status
+Live Diagnostic	✅ STREAM: LIVE, 7 incidents visible, real statuses
+All Incidents	✅ 3 PENDING_APPROVALs surfaced, full table with routing/strategy columns
+Decision Trace	✅ RAG score, win-rate, routing mode, causal chain rendered
+Strategy Memory	✅ Win-rates populated (10 strategies), CockroachDB cluster live (polite-genie, v25.4.10)
+Calibration	✅ Correction factors computed (0.67×–1.00× range)
+Impact & Cost	✅ 68 incidents processed; MTTR metrics pending more RESOLVED data
+Agent Logs	✅ Full execution log with tool calls (verify_resolution, aws_repair_service, execute_ccloud_command)
+
+The one consistent 404 in the browser console is for /favicon.ico — cosmetic, not a functional issue. No edge-case crashes observed across all 7 pages.
