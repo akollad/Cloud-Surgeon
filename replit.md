@@ -71,5 +71,6 @@ curl -X POST https://$REPLIT_DEV_DOMAIN/api/incidents/trigger \
 
 ## User preferences
 
+- Communiquer en français.
 - Keep existing project structure — do not restructure or migrate the monorepo layout.
 - AWS tools run in SIMULATED mode by default (no `AWS_ACCESS_KEY_ID` set); this is intentional for demo safety.
