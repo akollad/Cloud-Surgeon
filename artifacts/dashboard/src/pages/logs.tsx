@@ -1,14 +1,21 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useListExecutionLogs } from "@workspace/api-client-react";
 import { Terminal, RefreshCw } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Paginator } from "@/components/ui/paginator";
 import { formatDate } from "@/lib/utils";
+
+const PAGE_SIZE = 15;
 
 export default function Logs() {
   const [filterId, setFilterId] = useState("");
   const [debouncedFilter, setDebouncedFilter] = useState("");
+  const [page, setPage] = useState(1);
+
+  // Reset to page 1 when filter changes
+  useEffect(() => { setPage(1); }, [debouncedFilter]);
 
   const { data: logs, isLoading, refetch, isRefetching } = useListExecutionLogs(
     { incidentId: debouncedFilter || undefined },
@@ -16,14 +23,16 @@ export default function Logs() {
   );
 
   const handleFilter = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
-      setDebouncedFilter(filterId);
-    }
+    if (e.key === "Enter") setDebouncedFilter(filterId);
   };
+
+  const allLogs = logs || [];
+  const totalPages = Math.ceil(allLogs.length / PAGE_SIZE);
+  const paginated = allLogs.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <div className="w-full max-w-6xl mx-auto space-y-6 animate-in fade-in duration-500 pb-6">
-      {/* Header — stack on mobile */}
+      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-border pb-4 gap-3">
         <h1 className="text-xl sm:text-2xl font-mono font-bold tracking-tighter uppercase text-foreground flex items-center">
           <Terminal className="mr-2 h-5 w-5 text-primary shrink-0" />
@@ -43,9 +52,9 @@ export default function Logs() {
         </div>
       </div>
 
-      {/* Table — horizontal scroll on narrow viewports, vertical scroll with max-height */}
+      {/* Table */}
       <div className="border border-border bg-[#0a0a0a] rounded-sm overflow-x-auto">
-        <div className="max-h-[calc(100vh-220px)] overflow-y-auto">
+        <div className="max-h-[calc(100vh-260px)] overflow-y-auto">
           <Table className="min-w-[700px] w-full">
             <TableHeader className="sticky top-0 bg-[#0a0a0a] z-10 border-b border-border">
               <TableRow className="hover:bg-transparent">
@@ -58,10 +67,10 @@ export default function Logs() {
             <TableBody>
               {isLoading ? (
                 <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground font-mono">Querying logs...</TableCell></TableRow>
-              ) : !logs || logs.length === 0 ? (
+              ) : paginated.length === 0 ? (
                 <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground font-mono">No logs found</TableCell></TableRow>
               ) : (
-                logs.map((log) => (
+                paginated.map((log) => (
                   <TableRow key={log.logId} className="border-b border-border/30 hover:bg-white/5">
                     <TableCell className="text-xs text-muted-foreground whitespace-nowrap align-top pt-3">
                       {formatDate(log.createdAt)}
@@ -82,6 +91,15 @@ export default function Logs() {
               )}
             </TableBody>
           </Table>
+        </div>
+        <div className="px-4 pb-3">
+          <Paginator
+            page={page}
+            totalPages={totalPages}
+            totalItems={allLogs.length}
+            pageSize={PAGE_SIZE}
+            onPage={setPage}
+          />
         </div>
       </div>
     </div>

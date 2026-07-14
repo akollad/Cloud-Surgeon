@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Select } from "@/components/ui/input";
+import { Paginator } from "@/components/ui/paginator";
 import { useQueryClient } from "@tanstack/react-query";
 import { List, Check, X } from "lucide-react";
 import { formatDate } from "@/lib/utils";
@@ -19,6 +20,8 @@ const STRATEGIES = [
   "Failover Region"
 ];
 
+const PAGE_SIZE = 10;
+
 export default function Incidents() {
   const queryClient = useQueryClient();
   const { data: incidents, isLoading } = useListIncidents({ query: { refetchInterval: 5000 } });
@@ -28,6 +31,7 @@ export default function Incidents() {
   const correct = useCorrectIncident();
 
   const [correctionStrategy, setCorrectionStrategy] = useState<Record<string, string>>({});
+  const [page, setPage] = useState(1);
 
   const handleApprove = (id: string) => {
     approve.mutate({ incidentId: id }, {
@@ -53,6 +57,9 @@ export default function Incidents() {
   };
 
   const pendingIncidents = incidents?.filter(i => i.status === "PENDING_APPROVAL") || [];
+  const allIncidents = incidents || [];
+  const totalPages = Math.ceil(allIncidents.length / PAGE_SIZE);
+  const paginated = allIncidents.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <div className="w-full max-w-[1400px] mx-auto space-y-6 animate-in fade-in duration-500 pb-12">
@@ -61,8 +68,14 @@ export default function Incidents() {
           <List className="mr-2 h-5 w-5 text-primary shrink-0" />
           All Incidents
         </h1>
+        {allIncidents.length > 0 && (
+          <span className="text-[11px] font-mono text-muted-foreground hidden sm:block">
+            {allIncidents.length} incident{allIncidents.length !== 1 ? "s" : ""}
+          </span>
+        )}
       </div>
 
+      {/* Pending approvals — always shown in full, never paginated */}
       {pendingIncidents.length > 0 && (
         <Card className="border-yellow-500/50 shadow-[0_0_20px_rgba(234,179,8,0.15)] bg-yellow-500/5">
           <CardHeader className="pb-3">
@@ -77,7 +90,6 @@ export default function Incidents() {
                 key={inc.incidentId}
                 className="border border-yellow-500/30 bg-background p-4 flex flex-col gap-4 font-mono text-sm"
               >
-                {/* Info */}
                 <div className="space-y-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-muted-foreground shrink-0">{inc.incidentId.split("-")[0]}</span>
@@ -88,8 +100,6 @@ export default function Incidents() {
                     &nbsp;(WR: {inc.contextJson?.winRate ? (inc.contextJson.winRate * 100).toFixed(1) + "%" : "N/A"})
                   </div>
                 </div>
-
-                {/* Actions — stack on mobile, row on sm+ */}
                 <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                   <Select
                     className="w-full sm:w-48 text-xs h-8 border-yellow-500/30"
@@ -120,8 +130,8 @@ export default function Incidents() {
         </Card>
       )}
 
-      {/* Table — horizontal scroll on overflow */}
-      <div className="border border-border bg-card overflow-x-auto rounded-sm">
+      {/* Paginated incidents table */}
+      <div className="border border-border bg-card rounded-sm overflow-x-auto">
         <Table className="min-w-[640px]">
           <TableHeader>
             <TableRow className="hover:bg-transparent">
@@ -136,10 +146,10 @@ export default function Incidents() {
           <TableBody>
             {isLoading ? (
               <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">Loading...</TableCell></TableRow>
-            ) : !incidents || incidents.length === 0 ? (
+            ) : paginated.length === 0 ? (
               <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">No incidents found</TableCell></TableRow>
             ) : (
-              incidents.map((inc) => (
+              paginated.map((inc) => (
                 <TableRow key={inc.incidentId}>
                   <TableCell className="text-muted-foreground font-mono text-xs">{inc.incidentId.split("-")[0]}</TableCell>
                   <TableCell>
@@ -168,6 +178,15 @@ export default function Incidents() {
             )}
           </TableBody>
         </Table>
+        <div className="px-4 pb-3">
+          <Paginator
+            page={page}
+            totalPages={totalPages}
+            totalItems={allIncidents.length}
+            pageSize={PAGE_SIZE}
+            onPage={setPage}
+          />
+        </div>
       </div>
     </div>
   );
