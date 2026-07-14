@@ -5,6 +5,29 @@
 > Il remplace l'ancienne version qui décrivait un dashboard Streamlit/Python — abandonné ;
 > le dashboard est maintenant une SPA React 19 + Vite (`artifacts/dashboard`).
 
+## ✅ Déploiement actuellement LIVE (compte AWS 153983052396, us-east-1)
+
+| Composant | URL / ID |
+|---|---|
+| **Dashboard** | https://d3ddnpg3hz3st4.cloudfront.net/ |
+| **API (via CloudFront)** | https://d3ddnpg3hz3st4.cloudfront.net/api/healthz |
+| **ALB (origine API)** | cloud-surgeon-alb-1044163999.us-east-1.elb.amazonaws.com |
+| **ECS cluster / service** | `cloud-surgeon` / `api` (Fargate, 1 tâche) |
+| **ECR** | `153983052396.dkr.ecr.us-east-1.amazonaws.com/cloud-surgeon-api` |
+| **S3 dashboard** | `cloud-surgeon-dashboard-153983052396` |
+| **CloudFront distribution** | `E2PQU895O3WVQ2` |
+| **Secrets Manager** | `cloud-surgeon/prod` |
+
+Vérifié en direct (14 juillet 2026) : `[BOOT] AI: anthropic 🟢 LIVE (direct API key) | AWS tools: 🟢 LIVE (region: us-east-1) | DB: connected`,
+et `GET /api/metrics/cluster` (MCP Cloud managé CockroachDB) répond avec les vraies données du
+cluster `polite-genie`. Mot de passe du dashboard de démo : `cloudsurgeon-demo`.
+
+**Note IAM du repair AWS réel** : `src/lib/aws.ts` exige explicitement `AWS_ACCESS_KEY_ID` +
+`AWS_SECRET_ACCESS_KEY` en variables d'environnement pour passer en mode "LIVE" — le rôle de
+tâche ECS seul ne suffit pas (le code ne s'appuie pas sur la chaîne de credentials par défaut
+du SDK). Ces deux clés sont donc injectées comme secrets supplémentaires dans la task
+definition, en plus du rôle de tâche IAM.
+
 ## Vue d'ensemble de l'architecture
 
 ```
@@ -148,9 +171,12 @@ RUN pnpm --filter @workspace/api-server run build
 
 FROM node:24-alpine
 WORKDIR /app
-COPY --from=builder /app/artifacts/api-server/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/artifacts/api-server/node_modules ./artifacts/api-server/node_modules
+COPY --from=builder /app/artifacts/api-server/dist ./artifacts/api-server/dist
+COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/artifacts/api-server/package.json ./artifacts/api-server/package.json
+WORKDIR /app/artifacts/api-server
 ENV PORT=8080
 ENV NODE_ENV=production
 EXPOSE 8080
@@ -158,6 +184,13 @@ CMD ["node", "--enable-source-maps", "./dist/index.mjs"]
 ```
 `dist/mcp/server.mjs` est inclus dans le même build (esbuild multi-entry) — le MCP tool
 server tourne comme subprocess stdio du process principal, pas comme service séparé.
+
+**Important** : `build.mjs` externalise `@aws-sdk/*` (et d'autres paquets natifs) du bundle
+esbuild — `src/lib/aws.ts` et `src/lib/embeddings.ts` les importent statiquement pour parler à
+ECS/RDS/Lambda/CloudWatch et Bedrock. Sans `node_modules` dans l'image finale, le conteneur
+crashe immédiatement au démarrage (`ERR_MODULE_NOT_FOUND`). Le Dockerfile ci-dessus copie donc
+`node_modules` du stage builder — ne pas revenir à une image `dist/`-only sans réintroduire ces
+paquets.
 
 ```bash
 aws ecr create-repository --repository-name cloud-surgeon-api --region us-east-1
