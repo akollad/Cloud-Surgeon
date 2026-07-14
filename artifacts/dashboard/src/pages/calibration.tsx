@@ -78,21 +78,21 @@ export default function Calibration() {
                     <TableRow key={i}>
                       <TableCell className="font-mono text-xs text-cyan-400">{cal.strategyName}</TableCell>
                       <TableCell className="text-right font-mono text-xs">
-                        {cal.predictedWinRate ? (cal.predictedWinRate * 100).toFixed(1) + "%" : "—"}
+                        {cal.avgPredictedWinRate != null ? (cal.avgPredictedWinRate * 100).toFixed(1) + "%" : "—"}
                       </TableCell>
                       <TableCell className="text-right font-mono text-xs font-bold text-foreground">
-                        {cal.observedWinRate ? (cal.observedWinRate * 100).toFixed(1) + "%" : "—"}
+                        {cal.observedWinRate != null ? (cal.observedWinRate * 100).toFixed(1) + "%" : "—"}
                       </TableCell>
                       <TableCell className="text-right font-mono text-xs">
-                        {cal.correctionFactor ? (
+                        {cal.correctionFactor != null ? (
                           <span className={cal.correctionFactor > 1 ? "text-green-400" : cal.correctionFactor < 1 ? "text-red-400" : "text-muted-foreground"}>
                             {cal.correctionFactor.toFixed(2)}x
                           </span>
                         ) : "—"}
                       </TableCell>
-                      <TableCell className="text-right font-mono text-xs text-muted-foreground">{cal.sampleSize}</TableCell>
+                      <TableCell className="text-right font-mono text-xs text-muted-foreground">{cal.predictionCount ?? "—"}</TableCell>
                       <TableCell className="text-right font-mono text-xs text-muted-foreground whitespace-nowrap">
-                        {formatDate(cal.calibratedAt)}
+                        {formatDate(cal.lastRecalculatedAt)}
                       </TableCell>
                     </TableRow>
                   ))

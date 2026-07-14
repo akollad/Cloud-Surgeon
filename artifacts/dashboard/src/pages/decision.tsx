@@ -145,18 +145,40 @@ export default function DecisionTrace() {
               </CardHeader>
               <CardContent className="p-4">
                 {chain?.chain && chain.chain.length > 0 ? (
-                  <div className="relative pl-4 space-y-6 before:absolute before:inset-y-0 before:left-[7px] before:w-[2px] before:bg-border">
-                    {chain.chain.map((c: any, i: number) => (
-                      <div key={i} className="relative">
-                        <div className="absolute -left-6 top-1.5 w-3 h-3 rounded-full bg-primary ring-4 ring-background" />
-                        <div className="border border-border p-4 bg-background shadow-sm font-mono text-sm space-y-2">
-                          <div className="text-xs text-muted-foreground">{c.status}</div>
-                          <div className="text-foreground">{c.fingerprint}</div>
-                          {c.strategy && <div className="text-cyan-400 text-xs">Strategy: {c.strategy}</div>}
-                          {c.depth && <div className="absolute top-4 right-4 text-xs text-muted-foreground bg-muted px-2 py-0.5">Depth {c.depth}</div>}
+                  <div className="space-y-2">
+                    {chain.note && (
+                      <p className="text-xs font-mono text-muted-foreground border-l-2 border-primary/40 pl-3 mb-4">
+                        {chain.note}
+                      </p>
+                    )}
+                    <div className="relative pl-5 space-y-5 before:absolute before:inset-y-0 before:left-[7px] before:w-[2px] before:bg-border">
+                      {chain.chain.map((c: any, i: number) => (
+                        <div key={i} className="relative">
+                          <div className="absolute -left-[1.375rem] top-2 w-3 h-3 rounded-full bg-primary ring-4 ring-background" />
+                          <div className="border border-border p-4 bg-background font-mono text-sm space-y-1.5">
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <span className="text-[11px] uppercase tracking-wider font-bold text-primary/80">
+                                {c.status}
+                              </span>
+                              {c.depth != null && (
+                                <span className="text-[11px] text-muted-foreground bg-muted px-2 py-0.5 rounded-sm">
+                                  Depth {c.depth}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-white/90 text-sm leading-snug break-all">
+                              {c.alertFingerprint || c.incidentId}
+                            </div>
+                            {c.currentStep && (
+                              <div className="text-cyan-400 text-xs">Step: {c.currentStep}</div>
+                            )}
+                            {c.updatedAt && (
+                              <div className="text-muted-foreground text-[11px]">{formatDate(c.updatedAt)}</div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
                 ) : (
                   <div className="text-muted-foreground text-sm font-mono opacity-50">Causal chain not computed or unavailable.</div>
