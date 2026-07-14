@@ -24,7 +24,7 @@ export default function LiveDiagnostic() {
   const maxEvents = 50;
 
   useEffect(() => {
-    const baseUrl = import.meta.env.VITE_API_BASE_URL ?? "/api";
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || "/api";
     const apiKey = import.meta.env.VITE_API_KEY ?? "";
     const eventSource = new EventSource(`${baseUrl}/stream/audit?apiKey=${apiKey}`);
 
