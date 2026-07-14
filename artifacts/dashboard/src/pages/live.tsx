@@ -6,7 +6,7 @@ import { Activity, Terminal, AlertTriangle, ShieldCheck, Database } from "lucide
 import { formatDate } from "@/lib/utils";
 
 interface SSEEvent {
-  type: "connected" | "heartbeat" | "execution_log" | "agent_handoff" | string;
+  type: "connected" | "heartbeat" | "execution_log" | "agent_handoff" | "incident_status" | string;
   incidentId?: string;
   // connected
   cdcActive?: boolean;
@@ -19,6 +19,9 @@ interface SSEEvent {
   agentName?: string;
   decisionMode?: string;
   note?: string;
+  // incident_status
+  status?: string;
+  alertFingerprint?: string;
   // all
   createdAt: string;
   source?: string;
@@ -112,23 +115,35 @@ export default function LiveDiagnostic() {
           ) : (
             events.map((ev, i) => {
               const borderColor =
-                ev.type === "execution_log"  ? "hsl(var(--primary))" :
-                ev.type === "agent_handoff"  ? "#22d3ee" :
-                ev.type === "connected"      ? "#4ade80" :
+                ev.type === "execution_log"   ? "hsl(var(--primary))" :
+                ev.type === "agent_handoff"   ? "#22d3ee" :
+                ev.type === "incident_status" ? "#facc15" :
+                ev.type === "connected"       ? "#4ade80" :
+                ev.type === "heartbeat"       ? "hsl(var(--muted-foreground))" :
                 "hsl(var(--muted-foreground))";
 
-              if (ev.type === "heartbeat") return null;
+              /* heartbeat — ligne pulse discrète */
+              if (ev.type === "heartbeat") {
+                return (
+                  <div key={i} className="flex items-center gap-2 py-0.5 opacity-30 animate-in fade-in duration-500">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
+                    <span className="text-[10px] font-mono text-muted-foreground">
+                      {formatDate(ev.createdAt)} — heartbeat
+                    </span>
+                  </div>
+                );
+              }
 
               return (
                 <div key={i} className="text-xs font-mono border-l-2 pl-3 py-1.5 space-y-1 animate-in fade-in slide-in-from-left-2" style={{ borderColor }}>
                   {/* Meta row */}
-                  <div className="flex items-center gap-2 text-muted-foreground">
+                  <div className="flex items-center gap-2 text-muted-foreground flex-wrap">
                     <span>[{formatDate(ev.createdAt)}]</span>
                     {ev.incidentId && (
                       <span className="text-primary/70">{ev.incidentId.split("-")[0]}</span>
                     )}
                     <span className="uppercase tracking-wider text-[10px] font-bold" style={{ color: borderColor }}>
-                      {ev.type.replace("_", " ")}
+                      {ev.type.replace(/_/g, " ")}
                     </span>
                     {ev.source && (
                       <span className="text-muted-foreground/50 text-[10px]">[{ev.source}]</span>
@@ -168,6 +183,20 @@ export default function LiveDiagnostic() {
                   )}
                   {ev.type === "agent_handoff" && ev.note && (
                     <div className="text-white/90">{ev.note}</div>
+                  )}
+
+                  {/* incident_status */}
+                  {ev.type === "incident_status" && (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Badge variant={ev.status?.toLowerCase() as any || "outline"}>
+                        {ev.status}
+                      </Badge>
+                      {ev.alertFingerprint && (
+                        <span className="text-white/80 truncate max-w-[400px]" title={ev.alertFingerprint}>
+                          {ev.alertFingerprint}
+                        </span>
+                      )}
+                    </div>
                   )}
                 </div>
               );

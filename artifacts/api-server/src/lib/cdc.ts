@@ -42,13 +42,16 @@ export function removeSseSubscriber(res: Response): void {
 // ── Audit event type ───────────────────────────────────────────────────────
 
 export interface AuditEvent {
-  type: "execution_log" | "agent_handoff" | "connected" | "heartbeat";
+  type: "execution_log" | "agent_handoff" | "connected" | "heartbeat" | "incident_status";
   incidentId?: string;
   actionTaken?: string;
   result?: string;
   agentName?: string;
   decisionMode?: string;
   note?: string;
+  /** incident_status fields */
+  status?: string;
+  alertFingerprint?: string;
   createdAt: string;
   /** "cdc" = pushed by CockroachDB changefeed, "poll" = 2s polling fallback. */
   source: "cdc" | "poll" | "heartbeat";
@@ -82,6 +85,7 @@ let _pollTimer: NodeJS.Timeout | null = null;
 // Polling cursors — ISO timestamp strings
 let _lastLogTs = "";
 let _lastHandoffTs = "";
+let _lastIncidentTs = "";
 
 export function isCdcActive(): boolean {
   return _cdcActive;
@@ -182,6 +186,7 @@ async function startPollingFallback(): Promise<void> {
   const now = new Date().toISOString();
   _lastLogTs = now;
   _lastHandoffTs = now;
+  _lastIncidentTs = now;
 
   _pollTimer = setInterval(async () => {
     try {
@@ -241,6 +246,33 @@ async function startPollingFallback(): Promise<void> {
           source: "poll",
         });
         _lastHandoffTs = row.created_at;
+      }
+
+      // ── incident_status ───────────────────────────────────────────────
+      const incidentRes = await pool.query<{
+        incident_id: string;
+        alert_fingerprint: string;
+        status: string;
+        updated_at: string;
+      }>(
+        `SELECT incident_id, alert_fingerprint, status, updated_at
+         FROM incident_state
+         WHERE updated_at > $1
+         ORDER BY updated_at ASC
+         LIMIT 20`,
+        [_lastIncidentTs],
+      );
+
+      for (const row of incidentRes.rows) {
+        broadcast({
+          type: "incident_status",
+          incidentId: row.incident_id,
+          status: row.status,
+          alertFingerprint: row.alert_fingerprint,
+          createdAt: row.updated_at,
+          source: "poll",
+        });
+        _lastIncidentTs = row.updated_at;
       }
     } catch (err) {
       logger.warn(
