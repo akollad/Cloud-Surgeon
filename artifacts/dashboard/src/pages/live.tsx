@@ -6,14 +6,22 @@ import { Activity, Terminal, AlertTriangle, ShieldCheck, Database } from "lucide
 import { formatDate } from "@/lib/utils";
 
 interface SSEEvent {
-  type: string;
-  incidentId: string;
-  status: string;
-  timestamp: string;
-  agent?: string;
-  action?: string;
-  result?: string;
+  type: "connected" | "heartbeat" | "execution_log" | "agent_handoff" | string;
+  incidentId?: string;
+  // connected
+  cdcActive?: boolean;
+  streamMode?: string;
   message?: string;
+  // execution_log
+  actionTaken?: string;
+  result?: string;
+  // agent_handoff
+  agentName?: string;
+  decisionMode?: string;
+  note?: string;
+  // all
+  createdAt: string;
+  source?: string;
 }
 
 export default function LiveDiagnostic() {
@@ -102,24 +110,68 @@ export default function LiveDiagnostic() {
               WAITING FOR EVENTS...
             </div>
           ) : (
-            events.map((ev, i) => (
-              <div key={i} className="text-xs font-mono border-l-2 pl-3 py-1 space-y-1 animate-in fade-in slide-in-from-left-2" style={{
-                borderColor: 
-                  ev.type === "agent_turn" ? "hsl(var(--primary))" :
-                  ev.type === "incident_status" ? "hsl(var(--green-500))" :
-                  "hsl(var(--muted-foreground))"
-              }}>
-                <div className="flex items-center gap-2 opacity-60">
-                  <span>[{formatDate(ev.timestamp)}]</span>
-                  {ev.incidentId && <span>{ev.incidentId.split("-")[0]}</span>}
-                  {ev.type === "incident_status" && <Badge variant="outline" className="text-[10px] py-0 h-4">{ev.status}</Badge>}
-                  {ev.agent && <span className="text-primary font-bold">{ev.agent}</span>}
+            events.map((ev, i) => {
+              const borderColor =
+                ev.type === "execution_log"  ? "hsl(var(--primary))" :
+                ev.type === "agent_handoff"  ? "#22d3ee" :
+                ev.type === "connected"      ? "#4ade80" :
+                "hsl(var(--muted-foreground))";
+
+              if (ev.type === "heartbeat") return null;
+
+              return (
+                <div key={i} className="text-xs font-mono border-l-2 pl-3 py-1.5 space-y-1 animate-in fade-in slide-in-from-left-2" style={{ borderColor }}>
+                  {/* Meta row */}
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <span>[{formatDate(ev.createdAt)}]</span>
+                    {ev.incidentId && (
+                      <span className="text-primary/70">{ev.incidentId.split("-")[0]}</span>
+                    )}
+                    <span className="uppercase tracking-wider text-[10px] font-bold" style={{ color: borderColor }}>
+                      {ev.type.replace("_", " ")}
+                    </span>
+                    {ev.source && (
+                      <span className="text-muted-foreground/50 text-[10px]">[{ev.source}]</span>
+                    )}
+                  </div>
+
+                  {/* connected */}
+                  {ev.type === "connected" && ev.message && (
+                    <div className="text-green-400">{ev.message}</div>
+                  )}
+                  {ev.type === "connected" && ev.streamMode && (
+                    <div className="text-muted-foreground text-[10px]">mode: {ev.streamMode}</div>
+                  )}
+
+                  {/* execution_log */}
+                  {ev.type === "execution_log" && ev.actionTaken && (
+                    <div className="text-white/90">&gt; {ev.actionTaken}</div>
+                  )}
+                  {ev.type === "execution_log" && ev.result && (
+                    <div className="text-muted-foreground ml-2 whitespace-pre-wrap break-all">
+                      {ev.result.length > 300 ? ev.result.substring(0, 300) + "…" : ev.result}
+                    </div>
+                  )}
+
+                  {/* agent_handoff */}
+                  {ev.type === "agent_handoff" && (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {ev.agentName && (
+                        <span className="text-cyan-300 font-bold">{ev.agentName}</span>
+                      )}
+                      {ev.decisionMode && (
+                        <span className="text-primary text-[10px] px-1.5 py-0.5 border border-primary/30 bg-primary/5">
+                          {ev.decisionMode}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  {ev.type === "agent_handoff" && ev.note && (
+                    <div className="text-white/90">{ev.note}</div>
+                  )}
                 </div>
-                {ev.message && <div className="text-foreground">{ev.message}</div>}
-                {ev.action && <div className="text-cyan-400">&gt; {ev.action}</div>}
-                {ev.result && <div className="text-muted-foreground ml-2 opacity-80 whitespace-pre-wrap">{ev.result.substring(0, 200)}{ev.result.length > 200 ? "..." : ""}</div>}
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </div>
