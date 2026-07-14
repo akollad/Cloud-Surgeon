@@ -45,6 +45,9 @@ app.use(
 );
 
 app.use(express.json());
+// SNS envoie les SubscriptionConfirmation et Notification en Content-Type: text/plain
+// On parse ce contenu comme du JSON pour que req.body soit accessible normalement.
+app.use(express.json({ type: "text/plain" }));
 app.use(express.urlencoded({ extended: true }));
 
 // ── Rate limiting on mutating / expensive endpoints ────────────────────────

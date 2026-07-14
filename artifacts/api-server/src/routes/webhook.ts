@@ -61,16 +61,23 @@ router.post("/webhook/cloudwatch", async (req, res): Promise<void> => {
   const body = req.body as Record<string, unknown>;
 
   // SNS subscription confirmation (first call during setup)
+  // Auto-confirm by fetching the SubscribeURL — required for SNS to activate the subscription.
   const subConfirm = SnsSubscriptionConfirmation.safeParse(body);
   if (subConfirm.success) {
     req.log.info(
-      { subscribeURL: subConfirm.data.SubscribeURL },
-      "SNS subscription confirmation received — visit SubscribeURL to confirm",
+      { subscribeURL: subConfirm.data.SubscribeURL, topicArn: subConfirm.data.TopicArn },
+      "SNS subscription confirmation received — auto-confirming",
     );
-    res.status(200).json({
-      status: "subscription_confirmation_received",
-      subscribeURL: subConfirm.data.SubscribeURL,
-    });
+    try {
+      const confirmRes = await fetch(subConfirm.data.SubscribeURL);
+      req.log.info(
+        { status: confirmRes.status, topicArn: subConfirm.data.TopicArn },
+        "SNS subscription confirmed ✅",
+      );
+    } catch (err) {
+      req.log.error({ err }, "SNS auto-confirm fetch failed");
+    }
+    res.status(200).json({ status: "subscription_confirmed" });
     return;
   }
 

@@ -96,16 +96,22 @@ export function isCdcActive(): boolean {
  * Falls back to polling if the changefeed cannot be created.
  */
 export async function initChangefeed(): Promise<void> {
+  // Priority:
+  //  1. CDC_WEBHOOK_URL — explicit override (set in ECS task def for production)
+  //  2. REPLIT_DEV_DOMAIN — Replit dev environment
+  //  3. Neither set → polling fallback
+  const explicitUrl = process.env.CDC_WEBHOOK_URL;
   const devDomain = process.env.REPLIT_DEV_DOMAIN;
 
-  if (!devDomain) {
-    logger.warn("[CDC] REPLIT_DEV_DOMAIN not set — using polling fallback");
+  if (!explicitUrl && !devDomain) {
+    logger.warn("[CDC] Neither CDC_WEBHOOK_URL nor REPLIT_DEV_DOMAIN set — using polling fallback");
     await startPollingFallback();
     return;
   }
 
-  // The Replit proxy mounts the API server at /api (previewPath in artifact.toml).
-  const webhookUrl = `webhook-https://${devDomain}/api/internal/cdc`;
+  const webhookUrl = explicitUrl
+    ? `webhook-https://${explicitUrl.replace(/^https?:\/\//, "")}`
+    : `webhook-https://${devDomain}/api/internal/cdc`;
 
   try {
     // Check if an existing changefeed is already running for our tables,
