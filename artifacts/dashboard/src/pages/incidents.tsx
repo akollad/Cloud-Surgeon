@@ -22,7 +22,7 @@ const STRATEGIES = [
 export default function Incidents() {
   const queryClient = useQueryClient();
   const { data: incidents, isLoading } = useListIncidents({ query: { refetchInterval: 5000 } });
-  
+
   const approve = useApproveIncident();
   const reject = useRejectIncident();
   const correct = useCorrectIncident();
@@ -55,10 +55,10 @@ export default function Incidents() {
   const pendingIncidents = incidents?.filter(i => i.status === "PENDING_APPROVAL") || [];
 
   return (
-    <div className="max-w-[1400px] mx-auto space-y-6 animate-in fade-in duration-500 pb-12">
+    <div className="w-full max-w-[1400px] mx-auto space-y-6 animate-in fade-in duration-500 pb-12">
       <div className="flex items-center justify-between border-b border-border pb-4">
-        <h1 className="text-2xl font-mono font-bold tracking-tighter uppercase text-foreground flex items-center">
-          <List className="mr-2 h-5 w-5 text-primary" />
+        <h1 className="text-xl sm:text-2xl font-mono font-bold tracking-tighter uppercase text-foreground flex items-center">
+          <List className="mr-2 h-5 w-5 text-primary shrink-0" />
           All Incidents
         </h1>
       </div>
@@ -66,28 +66,33 @@ export default function Incidents() {
       {pendingIncidents.length > 0 && (
         <Card className="border-yellow-500/50 shadow-[0_0_20px_rgba(234,179,8,0.15)] bg-yellow-500/5">
           <CardHeader className="pb-3">
-            <CardTitle className="text-yellow-500 flex items-center">
-              <Badge variant="pending_approval" className="mr-3">ACTION REQUIRED</Badge> 
+            <CardTitle className="text-yellow-500 flex items-center flex-wrap gap-2">
+              <Badge variant="pending_approval">ACTION REQUIRED</Badge>
               Pending Approvals ({pendingIncidents.length})
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             {pendingIncidents.map(inc => (
-              <div key={inc.incidentId} className="border border-yellow-500/30 bg-background p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 font-mono text-sm">
-                <div className="space-y-2 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-muted-foreground">{inc.incidentId.split("-")[0]}</span>
-                    <span className="text-foreground font-bold">{inc.alertFingerprint}</span>
+              <div
+                key={inc.incidentId}
+                className="border border-yellow-500/30 bg-background p-4 flex flex-col gap-4 font-mono text-sm"
+              >
+                {/* Info */}
+                <div className="space-y-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-muted-foreground shrink-0">{inc.incidentId.split("-")[0]}</span>
+                    <span className="text-foreground font-bold break-all">{inc.alertFingerprint}</span>
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    Proposed: <span className="text-cyan-400">{inc.contextJson?.strategyName || "None"}</span> 
+                    Proposed: <span className="text-cyan-400">{inc.contextJson?.strategyName || "None"}</span>
                     &nbsp;(WR: {inc.contextJson?.winRate ? (inc.contextJson.winRate * 100).toFixed(1) + "%" : "N/A"})
                   </div>
                 </div>
-                
-                <div className="flex items-center gap-2 shrink-0">
-                  <Select 
-                    className="w-48 text-xs h-8 border-yellow-500/30"
+
+                {/* Actions — stack on mobile, row on sm+ */}
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                  <Select
+                    className="w-full sm:w-48 text-xs h-8 border-yellow-500/30"
                     value={correctionStrategy[inc.incidentId] || ""}
                     onChange={(e) => setCorrectionStrategy(prev => ({ ...prev, [inc.incidentId]: e.target.value }))}
                   >
@@ -95,18 +100,18 @@ export default function Incidents() {
                     {STRATEGIES.map(s => <option key={s} value={s}>{s}</option>)}
                   </Select>
                   {correctionStrategy[inc.incidentId] ? (
-                    <Button size="sm" variant="default" className="h-8" onClick={() => handleCorrect(inc.incidentId)}>
+                    <Button size="sm" variant="default" className="h-8 w-full sm:w-auto" onClick={() => handleCorrect(inc.incidentId)}>
                       Apply
                     </Button>
                   ) : (
-                    <>
-                      <Button size="sm" variant="outline" className="h-8 border-green-500/50 text-green-500 hover:bg-green-500/10" onClick={() => handleApprove(inc.incidentId)}>
-                        <Check className="w-4 h-4 mr-1"/> Approve
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="outline" className="h-8 flex-1 sm:flex-none border-green-500/50 text-green-500 hover:bg-green-500/10" onClick={() => handleApprove(inc.incidentId)}>
+                        <Check className="w-4 h-4 mr-1" /> Approve
                       </Button>
-                      <Button size="sm" variant="outline" className="h-8 border-red-500/50 text-red-500 hover:bg-red-500/10" onClick={() => handleReject(inc.incidentId)}>
-                        <X className="w-4 h-4 mr-1"/> Reject
+                      <Button size="sm" variant="outline" className="h-8 flex-1 sm:flex-none border-red-500/50 text-red-500 hover:bg-red-500/10" onClick={() => handleReject(inc.incidentId)}>
+                        <X className="w-4 h-4 mr-1" /> Reject
                       </Button>
-                    </>
+                    </div>
                   )}
                 </div>
               </div>
@@ -115,16 +120,17 @@ export default function Incidents() {
         </Card>
       )}
 
-      <div className="border border-border bg-card">
-        <Table>
+      {/* Table — horizontal scroll on overflow */}
+      <div className="border border-border bg-card overflow-x-auto rounded-sm">
+        <Table className="min-w-[640px]">
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              <TableHead className="w-[100px]">ID</TableHead>
-              <TableHead>Status</TableHead>
+              <TableHead className="w-[90px]">ID</TableHead>
+              <TableHead className="w-[130px]">Status</TableHead>
               <TableHead>Fingerprint</TableHead>
-              <TableHead>Routing</TableHead>
-              <TableHead>Strategy</TableHead>
-              <TableHead className="text-right">Updated</TableHead>
+              <TableHead className="w-[110px]">Routing</TableHead>
+              <TableHead className="w-[160px]">Strategy</TableHead>
+              <TableHead className="text-right w-[150px]">Updated</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -139,16 +145,20 @@ export default function Incidents() {
                   <TableCell>
                     <Badge variant={inc.status.toLowerCase() as any}>{inc.status}</Badge>
                   </TableCell>
-                  <TableCell className="font-medium truncate max-w-[200px]" title={inc.alertFingerprint}>
-                    {inc.alertFingerprint}
+                  <TableCell className="font-medium min-w-0">
+                    <span className="block truncate max-w-[260px]" title={inc.alertFingerprint}>
+                      {inc.alertFingerprint}
+                    </span>
                   </TableCell>
                   <TableCell>
                     <Badge variant={inc.contextJson?.routingMode?.toLowerCase() as any || "outline"}>
                       {inc.contextJson?.routingMode || "—"}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-cyan-400 text-xs max-w-[150px] truncate" title={inc.contextJson?.strategyName}>
-                    {inc.contextJson?.strategyName || "—"}
+                  <TableCell className="text-cyan-400 text-xs">
+                    <span className="block truncate max-w-[160px]" title={inc.contextJson?.strategyName}>
+                      {inc.contextJson?.strategyName || "—"}
+                    </span>
                   </TableCell>
                   <TableCell className="text-right text-xs text-muted-foreground whitespace-nowrap">
                     {formatDate(inc.updatedAt)}

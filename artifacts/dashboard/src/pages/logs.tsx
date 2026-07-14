@@ -22,34 +22,36 @@ export default function Logs() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6 animate-in fade-in duration-500 h-full flex flex-col pb-6">
-      <div className="flex items-center justify-between border-b border-border pb-4 shrink-0">
-        <h1 className="text-2xl font-mono font-bold tracking-tighter uppercase text-foreground flex items-center">
-          <Terminal className="mr-2 h-5 w-5 text-primary" />
+    <div className="w-full max-w-6xl mx-auto space-y-6 animate-in fade-in duration-500 pb-6">
+      {/* Header — stack on mobile */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-border pb-4 gap-3">
+        <h1 className="text-xl sm:text-2xl font-mono font-bold tracking-tighter uppercase text-foreground flex items-center">
+          <Terminal className="mr-2 h-5 w-5 text-primary shrink-0" />
           Execution Logs
         </h1>
-        <div className="flex items-center gap-2">
-          <Input 
-            placeholder="Filter by Incident ID... (Enter)" 
-            className="w-64"
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <Input
+            placeholder="Filter by Incident ID… (Enter)"
+            className="flex-1 sm:w-64 sm:flex-none min-w-0"
             value={filterId}
             onChange={(e) => setFilterId(e.target.value)}
             onKeyDown={handleFilter}
           />
-          <Button variant="outline" size="icon" onClick={() => refetch()} disabled={isRefetching}>
+          <Button variant="outline" size="icon" onClick={() => refetch()} disabled={isRefetching} className="shrink-0">
             <RefreshCw className={`w-4 h-4 ${isRefetching ? "animate-spin" : ""}`} />
           </Button>
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 border border-border bg-[#0a0a0a] rounded-sm overflow-hidden flex flex-col">
-        <div className="overflow-auto flex-1 p-0">
-          <Table>
-            <TableHeader className="sticky top-0 bg-[#0a0a0a] z-10 shadow-sm border-b border-border">
+      {/* Table — horizontal scroll on narrow viewports, vertical scroll with max-height */}
+      <div className="border border-border bg-[#0a0a0a] rounded-sm overflow-x-auto">
+        <div className="max-h-[calc(100vh-220px)] overflow-y-auto">
+          <Table className="min-w-[700px] w-full">
+            <TableHeader className="sticky top-0 bg-[#0a0a0a] z-10 border-b border-border">
               <TableRow className="hover:bg-transparent">
-                <TableHead className="w-[180px]">Timestamp</TableHead>
-                <TableHead className="w-[120px]">Incident ID</TableHead>
-                <TableHead className="w-[200px]">Action</TableHead>
+                <TableHead className="w-[150px] whitespace-nowrap">Timestamp</TableHead>
+                <TableHead className="w-[100px] whitespace-nowrap">Incident ID</TableHead>
+                <TableHead className="w-[200px] whitespace-nowrap">Action</TableHead>
                 <TableHead>Result / Output</TableHead>
               </TableRow>
             </TableHeader>
@@ -64,14 +66,14 @@ export default function Logs() {
                     <TableCell className="text-xs text-muted-foreground whitespace-nowrap align-top pt-3">
                       {formatDate(log.createdAt)}
                     </TableCell>
-                    <TableCell className="text-xs text-primary font-bold align-top pt-3">
+                    <TableCell className="text-xs text-primary font-bold align-top pt-3 font-mono">
                       {log.incidentId.split("-")[0]}
                     </TableCell>
-                    <TableCell className="text-xs text-cyan-400 font-bold align-top pt-3">
+                    <TableCell className="text-xs text-cyan-400 font-bold align-top pt-3 break-words max-w-[200px]">
                       {log.actionTaken}
                     </TableCell>
-                    <TableCell className="text-[11px] text-muted-foreground font-mono break-all pb-3">
-                      <div className="bg-black/30 p-2 border border-white/5 rounded-sm max-h-[150px] overflow-y-auto whitespace-pre-wrap">
+                    <TableCell className="text-[11px] text-muted-foreground font-mono pb-3">
+                      <div className="bg-black/30 p-2 border border-white/5 rounded-sm max-h-[150px] overflow-y-auto whitespace-pre-wrap break-all">
                         {log.result || "—"}
                       </div>
                     </TableCell>
