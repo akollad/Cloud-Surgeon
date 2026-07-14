@@ -53,7 +53,8 @@ export const TriggerIncidentResponse = zod.object({
 })).optional(),
   "finalResponse": zod.string().nullish(),
   "crashed": zod.boolean().optional()
-}),
+// additionalProperties: true — orval omits .passthrough(); added manually to match openapi spec
+}).passthrough(),
   "claimedByAgent": zod.string().nullish(),
   "causedByIncidentId": zod.string().nullish(),
   "updatedAt": zod.string()
@@ -88,7 +89,8 @@ export const ListIncidentsResponseItem = zod.object({
 })).optional(),
   "finalResponse": zod.string().nullish(),
   "crashed": zod.boolean().optional()
-}),
+// additionalProperties: true — orval omits .passthrough(); added manually to match openapi spec
+}).passthrough(),
   "claimedByAgent": zod.string().nullish(),
   "causedByIncidentId": zod.string().nullish(),
   "updatedAt": zod.string()
@@ -128,7 +130,8 @@ export const GetIncidentResponse = zod.object({
 })).optional(),
   "finalResponse": zod.string().nullish(),
   "crashed": zod.boolean().optional()
-}),
+// additionalProperties: true — orval omits .passthrough(); added manually to match openapi spec
+}).passthrough(),
   "claimedByAgent": zod.string().nullish(),
   "causedByIncidentId": zod.string().nullish(),
   "updatedAt": zod.string()

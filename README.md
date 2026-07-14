@@ -27,8 +27,8 @@ Cloud-Surgeon receives infrastructure alerts (CloudWatch, webhooks, or manual in
 │                         CLOUD-SURGEON SYSTEM                                │
 │                                                                             │
 │  ┌───────────────────┐   HTTP/SSE    ┌──────────────────────────────────┐  │
-│  │  Streamlit UI     │◄─────────────►│     Express 5 API Server         │  │
-│  │  (Python)         │              │     (Node.js / TypeScript)        │  │
+│  │  React Dashboard  │◄─────────────►│     Express 5 API Server         │  │
+│  │  (Vite SPA)       │              │     (Node.js / TypeScript)        │  │
 │  │                   │              │                                    │  │
 │  │  • Incident feed  │              │  ┌─────────────────────────────┐  │  │
 │  │  • Live CDC stream│              │  │  Agent Loop (3 phases)      │  │  │
@@ -158,7 +158,6 @@ graph TB
 ### Prerequisites
 
 - Node.js 20+ and pnpm 9+
-- Python 3.11+
 - A [CockroachDB Serverless](https://cockroachlabs.cloud) cluster (free tier works)
 - An [Anthropic API key](https://console.anthropic.com) **or** AWS credentials with Bedrock access
 
@@ -170,9 +169,6 @@ cd cloud-surgeon
 
 # Node dependencies (all workspaces)
 pnpm install
-
-# Python dependencies (Streamlit dashboard)
-pip install -r cloud-surgeon-agent/requirements.txt
 ```
 
 ### 2. Configure environment
@@ -197,9 +193,9 @@ psql "$COCKROACHDB_URL&sslrootcert=system" \
 | Service | Command | Default port |
 |---|---|---|
 | API server | `pnpm --filter @workspace/api-server run dev` | `8080` |
-| Dashboard | `cd cloud-surgeon-agent && streamlit run frontend/app.py --server.port 5000` | `5000` |
+| Dashboard (React SPA) | `pnpm --filter @workspace/dashboard run dev` | `23183` |
 
-Or, if running on Replit, both workflows are pre-configured in `.replit`.
+Or, if running on Replit, both workflows are pre-configured automatically.
 
 ### 5. Seed vector memory (optional but recommended)
 
@@ -393,12 +389,17 @@ cloud-surgeon/
 │               ├── stream.ts          ← SSE audit stream + CDC webhook
 │               └── chaos.ts           ← chaos engineering endpoints
 │
+├── artifacts/
+│   └── dashboard/                     ← React 19 + Vite SPA (replaces old Streamlit)
+│       └── src/
+│           ├── pages/                 ← guide, live, decision, incidents, memory,
+│           │                            calibration, impact, logs
+│           └── components/            ← shared UI (shadcn/ui + Tailwind)
+│
 ├── cloud-surgeon-agent/
-│   ├── frontend/
-│   │   └── app.py                     ← Streamlit dashboard (1 300+ lines)
 │   ├── database/
 │   │   └── schema.sql                 ← canonical CockroachDB DDL (source of truth)
-│   └── requirements.txt               ← Python dependencies
+│   └── requirements.txt               ← legacy Python deps (Streamlit removed)
 │
 ├── lib/
 │   ├── db/src/schema/                 ← Drizzle schema definitions (query builder)

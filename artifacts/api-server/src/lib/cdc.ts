@@ -104,8 +104,8 @@ export async function initChangefeed(): Promise<void> {
     return;
   }
 
-  // The Replit proxy mounts the API server at /api-server/ (slug from dir name).
-  const webhookUrl = `webhook-https://${devDomain}/api-server/api/internal/cdc`;
+  // The Replit proxy mounts the API server at /api (previewPath in artifact.toml).
+  const webhookUrl = `webhook-https://${devDomain}/api/internal/cdc`;
 
   try {
     // Check if an existing changefeed is already running for our tables,
