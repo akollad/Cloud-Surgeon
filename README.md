@@ -104,8 +104,8 @@ Cloud-Surgeon receives infrastructure alerts (CloudWatch, webhooks, or manual in
 
 ```mermaid
 graph TB
-    subgraph UI["Streamlit Dashboard (Python)"]
-        A[Incident Feed] 
+    subgraph UI["React Dashboard (Vite SPA)"]
+        A[Incident Feed]
         B[Live CDC Stream]
         C[Win-Rate / Calibration]
         D[Predictive Anomaly Ingest]
@@ -237,6 +237,7 @@ Copy `.env.example` to `.env` and fill in these values:
 | `SESSION_SECRET` | Optional | Cookie signing secret for express-session |
 | `CALIBRATION_THRESHOLD` | Optional | Win-rate deviation that triggers calibration (default: `0.15` = 15%) |
 | `ECS_DEFAULT_CLUSTER` | Optional | Default ECS cluster name for repair calls (default: `prod-cluster`) |
+| `CDC_WEBHOOK_URL` | Optional | Full public HTTPS URL for the CockroachDB changefeed webhook sink (e.g. `https://<distribution>.cloudfront.net/api/internal/cdc`). Required in ECS/production — without it, the server falls back to 2-second polling because `REPLIT_DEV_DOMAIN` is not set in containers. In the Replit dev environment this is set automatically. |
 
 ---
 
@@ -277,8 +278,14 @@ All endpoints require `X-API-Key: <CLOUD_SURGEON_API_KEY>` header.
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/stream/audit` | SSE stream of live incident events (powered by CockroachDB changefeed) |
-| `POST` | `/api/internal/cdc` | Webhook receiver for CockroachDB changefeed events |
+| `POST` | `/api/internal/cdc` | Webhook receiver for CockroachDB changefeed events (no API key — changefeed sinks cannot send custom headers) |
 | `POST` | `/api/chaos/sigkill` | Crash the agent mid-repair (chaos resilience demo) |
+
+### CloudWatch / SNS
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/webhook/cloudwatch` | Receives CloudWatch alarms via SNS. Accepts `Type=Notification` (alarm payload) and `Type=SubscriptionConfirmation` (auto-confirmed by fetching `SubscribeURL`). Parses both `application/json` and `text/plain` content types (SNS uses `text/plain`). Protected by prompt-injection guard before reaching the agent. |
 
 ---
 
@@ -366,47 +373,48 @@ cloud-surgeon/
 ├── pnpm-workspace.yaml                ← pnpm monorepo config
 │
 ├── artifacts/
-│   └── api-server/                    ← Express 5 + TypeScript API server
+│   ├── api-server/                    ← Express 5 + TypeScript API server
+│   │   └── src/
+│   │       ├── index.ts               ← entry point; startup DDL init
+│   │       ├── app.ts                 ← Express app; middleware; rate limiting
+│   │       ├── lib/
+│   │       │   ├── cloud-surgeon.ts   ← 3-phase agent loop (1 000+ lines)
+│   │       │   ├── aws.ts             ← ECS / RDS / Lambda repair
+│   │       │   ├── llm.ts             ← LLM client (Anthropic / Bedrock)
+│   │       │   ├── anomaly.ts         ← predictive anomaly detection
+│   │       │   ├── cdc.ts             ← CockroachDB changefeed + SSE (CDC_WEBHOOK_URL in prod)
+│   │       │   ├── crdbMcp.ts         ← official CockroachDB Cloud MCP client
+│   │       │   ├── embeddings.ts      ← Voyage AI / hash fallback embeddings
+│   │       │   ├── prompt-guard.ts    ← injection sanitizer (length / patterns)
+│   │       │   └── seed.ts            ← vector memory seeder
+│   │       ├── mcp/
+│   │       │   ├── server.ts          ← MCP tool server (stdio)
+│   │       │   └── client.ts          ← MCP client (spawns server subprocess)
+│   │       └── routes/
+│   │           ├── incidents.ts       ← incident CRUD + approve/reject/correct
+│   │           ├── metrics.ts         ← win-rates, MTTR, calibration, ccloud REST
+│   │           ├── stream.ts          ← SSE audit stream + CDC webhook receiver
+│   │           ├── webhook.ts         ← CloudWatch/SNS alert ingestion (auto-confirms SNS)
+│   │           └── chaos.ts           ← chaos engineering endpoints
+│   │
+│   └── dashboard/                     ← React 19 + Vite SPA
 │       └── src/
-│           ├── index.ts               ← entry point; startup DDL init
-│           ├── lib/
-│           │   ├── cloud-surgeon.ts   ← 3-phase agent loop (1 000+ lines)
-│           │   ├── aws.ts             ← ECS / RDS / Lambda repair
-│           │   ├── bedrock.ts         ← Bedrock / Anthropic LLM client
-│           │   ├── llm.ts             ← LLM thought generation
-│           │   ├── anomaly.ts         ← predictive anomaly detection
-│           │   ├── cdc.ts             ← CockroachDB changefeed + SSE
-│           │   ├── crdbMcp.ts         ← official CockroachDB Cloud MCP client
-│           │   ├── embeddings.ts      ← Voyage AI / hash fallback embeddings
-│           │   ├── prompt-guard.ts    ← injection sanitizer (length / patterns)
-│           │   └── seed.ts            ← vector memory seeder
-│           ├── mcp/
-│           │   ├── server.ts          ← MCP tool server (stdio)
-│           │   └── client.ts          ← MCP client (spawns server subprocess)
-│           └── routes/
-│               ├── incidents.ts       ← incident CRUD + approve/reject/correct
-│               ├── metrics.ts         ← win-rates, MTTR, calibration, ccloud
-│               ├── stream.ts          ← SSE audit stream + CDC webhook
-│               └── chaos.ts           ← chaos engineering endpoints
-│
-├── artifacts/
-│   └── dashboard/                     ← React 19 + Vite SPA (replaces old Streamlit)
-│       └── src/
-│           ├── pages/                 ← guide, live, decision, incidents, memory,
-│           │                            calibration, impact, logs
+│           ├── pages/                 ← live, decisions, incidents, memory,
+│           │                            calibration, impact, logs, guide
 │           └── components/            ← shared UI (shadcn/ui + Tailwind)
 │
 ├── cloud-surgeon-agent/
-│   ├── database/
-│   │   └── schema.sql                 ← canonical CockroachDB DDL (source of truth)
-│   └── requirements.txt               ← legacy Python deps (Streamlit removed)
+│   └── database/
+│       └── schema.sql                 ← canonical CockroachDB DDL (source of truth)
 │
 ├── lib/
 │   ├── db/src/schema/                 ← Drizzle schema definitions (query builder)
 │   └── api-zod/src/generated/api.ts   ← Zod types for API contract
 │
+├── Dockerfile.api                     ← multi-stage Docker build for the API Server
+├── DEPLOYMENT.md                      ← full AWS deployment guide (ECR/ECS/CloudFront/SNS)
 └── scripts/
-    └── post-merge.sh                  ← post-merge setup (pnpm install + build + ccloud)
+    └── post-merge.sh                  ← post-merge setup (pnpm install + build)
 ```
 
 ---
