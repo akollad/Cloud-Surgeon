@@ -2,8 +2,7 @@ import { useState } from "react";
 import { useTriggerIncident, useSigkillProcess, useSimulateCloudwatchWebhook, useIngestMetrics, useSeedVectorMemory } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea, Select } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { Server, Activity, AlertTriangle, Zap, Terminal, X } from "lucide-react";
+import { Server, Activity, AlertTriangle, Zap, Terminal, X, ChevronLeft, ChevronRight, SlidersHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const PRESET_SCENARIOS = [
@@ -30,9 +29,11 @@ const PREDICTIVE_SCENARIOS = [
 interface SidebarProps {
   open: boolean;
   onClose: () => void;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
 }
 
-export function Sidebar({ open, onClose }: SidebarProps) {
+export function Sidebar({ open, onClose, collapsed, onToggleCollapse }: SidebarProps) {
   const triggerIncident = useTriggerIncident();
   const sigkill = useSigkillProcess();
   const simulateWebhook = useSimulateCloudwatchWebhook();
@@ -71,139 +72,177 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   return (
     <aside
       className={cn(
-        "w-72 flex-shrink-0 border-l border-border bg-sidebar flex flex-col h-full overflow-y-auto overflow-x-hidden z-50",
-        // Mobile: fixed overlay from the right
+        "flex-shrink-0 border-l border-border bg-sidebar flex flex-col h-full z-50 overflow-hidden",
+        // Width transition — desktop only
+        "md:transition-[width] md:duration-200 md:ease-in-out",
+        collapsed ? "md:w-10" : "md:w-72",
+        // Mobile: always full width as overlay
+        "w-72",
+        // Mobile slide from right
         "fixed top-0 right-0 transition-transform duration-300 ease-in-out",
         open ? "translate-x-0" : "translate-x-full",
-        // Desktop: always in flow
-        "md:static md:translate-x-0 md:transition-none"
+        "md:static md:translate-x-0 md:transition-[width]"
       )}
     >
-      {/* Header */}
-      <div className="h-14 px-4 flex items-center justify-between border-b border-border shrink-0">
-        <div className="flex items-center gap-2">
-          <Terminal className="w-4 h-4 text-primary" />
-          <span className="font-mono font-bold text-sm uppercase tracking-tight text-foreground">Controls</span>
+      {/* Collapsed strip — desktop only */}
+      {collapsed && (
+        <div className="hidden md:flex flex-col items-center pt-4 gap-3 flex-1">
+          <button
+            onClick={onToggleCollapse}
+            className="w-7 h-7 flex items-center justify-center rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            aria-label="Expand controls"
+          >
+            <ChevronLeft className="w-3.5 h-3.5" />
+          </button>
+          {/* Rotated label */}
+          <span
+            className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground/40 select-none"
+            style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
+          >
+            Controls
+          </span>
         </div>
-        <button
-          onClick={onClose}
-          className="md:hidden w-6 h-6 flex items-center justify-center rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-          aria-label="Close controls"
-        >
-          <X className="w-3.5 h-3.5" />
-        </button>
-      </div>
+      )}
 
-      <div className="p-4 space-y-5 flex-1">
-
-        {/* Trigger Incident */}
-        <section className="space-y-3">
-          <div className="flex items-center gap-2 text-primary">
-            <AlertTriangle className="w-3.5 h-3.5" />
-            <h2 className="font-mono text-[11px] uppercase font-bold tracking-wider">Trigger Incident</h2>
+      {/* Full panel — hidden when desktop-collapsed */}
+      <div className={cn(
+        "flex flex-col flex-1 overflow-hidden",
+        collapsed ? "md:hidden" : ""
+      )}>
+        {/* Header */}
+        <div className="h-14 px-4 flex items-center justify-between border-b border-border shrink-0">
+          <div className="flex items-center gap-2">
+            <Terminal className="w-4 h-4 text-primary" />
+            <span className="font-mono font-bold text-sm uppercase tracking-tight text-foreground">Controls</span>
           </div>
+          <div className="flex items-center gap-1">
+            {/* Desktop collapse button */}
+            <button
+              onClick={onToggleCollapse}
+              className="hidden md:flex items-center justify-center w-6 h-6 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              aria-label="Collapse controls"
+            >
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+            {/* Mobile close */}
+            <button
+              onClick={onClose}
+              className="md:hidden flex items-center justify-center w-6 h-6 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              aria-label="Close controls"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
 
-          <div className="space-y-1.5">
-            <label className="text-[10px] uppercase font-mono text-muted-foreground">Scenario</label>
-            <Select value={scenario} onChange={(e) => setScenario(e.target.value)}>
-              {PRESET_SCENARIOS.map((s) => <option key={s} value={s}>{s}</option>)}
+        {/* Scrollable content */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-5">
+
+          {/* Trigger Incident */}
+          <section className="space-y-3">
+            <div className="flex items-center gap-2 text-primary">
+              <AlertTriangle className="w-3.5 h-3.5" />
+              <h2 className="font-mono text-[11px] uppercase font-bold tracking-wider">Trigger Incident</h2>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[10px] uppercase font-mono text-muted-foreground">Scenario</label>
+              <Select value={scenario} onChange={(e) => setScenario(e.target.value)}>
+                {PRESET_SCENARIOS.map((s) => <option key={s} value={s}>{s}</option>)}
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[10px] uppercase font-mono text-muted-foreground">Custom Alert Text</label>
+              <Textarea
+                value={customText}
+                onChange={(e) => setCustomText(e.target.value)}
+                placeholder="Paste PagerDuty payload or text here..."
+                className="font-mono text-xs h-16"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[10px] uppercase font-mono text-muted-foreground">Chaos Engineering</label>
+              <Select value={chaosMode} onChange={(e) => setChaosMode(e.target.value)}>
+                <option>None</option>
+                <option>Network latency (500ms)</option>
+                <option>DB partition (2 timeouts)</option>
+                <option>SIGKILL crash after diagnostic</option>
+              </Select>
+            </div>
+            <Button className="w-full" onClick={handleTrigger} disabled={triggerIncident.isPending}>
+              {triggerIncident.isPending ? "Triggering..." : "Trigger Agent"}
+            </Button>
+          </section>
+
+          <div className="h-px bg-border" />
+
+          {/* Predictive Anomaly */}
+          <section className="space-y-3">
+            <div className="flex items-center gap-2 text-purple-400">
+              <Activity className="w-3.5 h-3.5" />
+              <h2 className="font-mono text-[11px] uppercase font-bold tracking-wider">Predictive Injection</h2>
+            </div>
+            <Select value={predictiveScenario} onChange={(e) => setPredictiveScenario(e.target.value)}>
+              {PREDICTIVE_SCENARIOS.map((s) => <option key={s} value={s}>{s}</option>)}
             </Select>
-          </div>
+            <Button
+              variant="outline"
+              className="w-full text-purple-400 border-purple-500/30 hover:bg-purple-500/10 hover:text-purple-300"
+              onClick={handlePredictive}
+              disabled={ingestMetrics.isPending}
+            >
+              Ingest Anomaly Metric
+            </Button>
+          </section>
 
-          <div className="space-y-1.5">
-            <label className="text-[10px] uppercase font-mono text-muted-foreground">Custom Alert Text</label>
-            <Textarea
-              value={customText}
-              onChange={(e) => setCustomText(e.target.value)}
-              placeholder="Paste PagerDuty payload or text here..."
-              className="font-mono text-xs h-16"
-            />
-          </div>
+          <div className="h-px bg-border" />
 
-          <div className="space-y-1.5">
-            <label className="text-[10px] uppercase font-mono text-muted-foreground">Chaos Engineering</label>
-            <Select value={chaosMode} onChange={(e) => setChaosMode(e.target.value)}>
-              <option>None</option>
-              <option>Network latency (500ms)</option>
-              <option>DB partition (2 timeouts)</option>
-              <option>SIGKILL crash after diagnostic</option>
-            </Select>
-          </div>
+          {/* CloudWatch Webhook */}
+          <section className="space-y-3">
+            <div className="flex items-center gap-2 text-cyan-400">
+              <Zap className="w-3.5 h-3.5" />
+              <h2 className="font-mono text-[11px] uppercase font-bold tracking-wider">CloudWatch Webhook</h2>
+            </div>
+            <div className="space-y-1.5">
+              <Input value={cwAlarm} onChange={(e) => setCwAlarm(e.target.value)} placeholder="Alarm Name" className="text-xs" />
+              <Input value={cwReason} onChange={(e) => setCwReason(e.target.value)} placeholder="NewStateReason" className="text-xs" />
+            </div>
+            <Button
+              variant="outline"
+              className="w-full text-cyan-400 border-cyan-500/30 hover:bg-cyan-500/10 hover:text-cyan-300"
+              onClick={() => simulateWebhook.mutate({ data: { AlarmName: cwAlarm, NewStateReason: cwReason } })}
+              disabled={simulateWebhook.isPending}
+            >
+              Simulate Webhook
+            </Button>
+          </section>
 
-          <Button className="w-full" onClick={handleTrigger} disabled={triggerIncident.isPending}>
-            {triggerIncident.isPending ? "Triggering..." : "Trigger Agent"}
-          </Button>
-        </section>
+          <div className="h-px bg-border" />
 
-        <div className="h-px bg-border" />
+          {/* System Ops */}
+          <section className="space-y-2">
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Server className="w-3.5 h-3.5" />
+              <h2 className="font-mono text-[11px] uppercase font-bold tracking-wider">System Ops</h2>
+            </div>
+            <Button
+              variant="destructive"
+              className="w-full text-xs h-8"
+              onClick={() => sigkill.mutate(undefined)}
+              disabled={sigkill.isPending}
+            >
+              SIGKILL API Server
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full text-xs h-8"
+              onClick={() => seedMemory.mutate(undefined)}
+              disabled={seedMemory.isPending}
+            >
+              Reset Vector Memory
+            </Button>
+          </section>
 
-        {/* Predictive Anomaly */}
-        <section className="space-y-3">
-          <div className="flex items-center gap-2 text-purple-400">
-            <Activity className="w-3.5 h-3.5" />
-            <h2 className="font-mono text-[11px] uppercase font-bold tracking-wider">Predictive Injection</h2>
-          </div>
-          <Select value={predictiveScenario} onChange={(e) => setPredictiveScenario(e.target.value)}>
-            {PREDICTIVE_SCENARIOS.map((s) => <option key={s} value={s}>{s}</option>)}
-          </Select>
-          <Button
-            variant="outline"
-            className="w-full text-purple-400 border-purple-500/30 hover:bg-purple-500/10 hover:text-purple-300"
-            onClick={handlePredictive}
-            disabled={ingestMetrics.isPending}
-          >
-            Ingest Anomaly Metric
-          </Button>
-        </section>
-
-        <div className="h-px bg-border" />
-
-        {/* CloudWatch Webhook */}
-        <section className="space-y-3">
-          <div className="flex items-center gap-2 text-cyan-400">
-            <Zap className="w-3.5 h-3.5" />
-            <h2 className="font-mono text-[11px] uppercase font-bold tracking-wider">CloudWatch Webhook</h2>
-          </div>
-          <div className="space-y-1.5">
-            <Input value={cwAlarm} onChange={(e) => setCwAlarm(e.target.value)} placeholder="Alarm Name" className="text-xs" />
-            <Input value={cwReason} onChange={(e) => setCwReason(e.target.value)} placeholder="NewStateReason" className="text-xs" />
-          </div>
-          <Button
-            variant="outline"
-            className="w-full text-cyan-400 border-cyan-500/30 hover:bg-cyan-500/10 hover:text-cyan-300"
-            onClick={() => simulateWebhook.mutate({ data: { AlarmName: cwAlarm, NewStateReason: cwReason } })}
-            disabled={simulateWebhook.isPending}
-          >
-            Simulate Webhook
-          </Button>
-        </section>
-
-        <div className="h-px bg-border" />
-
-        {/* System Ops */}
-        <section className="space-y-2">
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <Server className="w-3.5 h-3.5" />
-            <h2 className="font-mono text-[11px] uppercase font-bold tracking-wider">System Ops</h2>
-          </div>
-          <Button
-            variant="destructive"
-            className="w-full text-xs h-8"
-            onClick={() => sigkill.mutate(undefined)}
-            disabled={sigkill.isPending}
-          >
-            SIGKILL API Server
-          </Button>
-          <Button
-            variant="outline"
-            className="w-full text-xs h-8"
-            onClick={() => seedMemory.mutate(undefined)}
-            disabled={seedMemory.isPending}
-          >
-            Reset Vector Memory
-          </Button>
-        </section>
-
+        </div>
       </div>
     </aside>
   );
