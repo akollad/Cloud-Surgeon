@@ -1,10 +1,11 @@
-import { useState, useRef } from "react";
+import { useState } from "react";
 import { useTriggerIncident, useSigkillProcess, useSimulateCloudwatchWebhook, useIngestMetrics, useSeedVectorMemory, useHealthCheck } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea, Select } from "@/components/ui/input";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Server, Activity, AlertTriangle, Database, Zap, Clock, Terminal } from "lucide-react";
+import { Server, Activity, AlertTriangle, Database, Zap, Clock, Terminal, X } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 const PRESET_SCENARIOS = [
   "Payment service 5xx spike (ECS)",
@@ -27,7 +28,12 @@ const PREDICTIVE_SCENARIOS = [
   "Disk usage critical"
 ];
 
-export function Sidebar() {
+interface SidebarProps {
+  open: boolean;
+  onClose: () => void;
+}
+
+export function Sidebar({ open, onClose }: SidebarProps) {
   const triggerIncident = useTriggerIncident();
   const sigkill = useSigkillProcess();
   const simulateWebhook = useSimulateCloudwatchWebhook();
@@ -75,26 +81,47 @@ export function Sidebar() {
   };
 
   return (
-    <div className="w-80 flex-shrink-0 border-r border-border bg-sidebar flex flex-col h-full overflow-y-auto overflow-x-hidden">
+    <aside
+      className={cn(
+        // Shared
+        "w-80 flex-shrink-0 border-r border-border bg-sidebar flex flex-col h-full overflow-y-auto overflow-x-hidden z-50",
+        // Mobile: fixed overlay, slides in/out
+        "fixed top-0 left-0 transition-transform duration-300 ease-in-out",
+        open ? "translate-x-0" : "-translate-x-full",
+        // Desktop: always visible, static in flow
+        "md:static md:translate-x-0 md:transition-none"
+      )}
+    >
+      {/* Header */}
       <div className="p-4 border-b border-border flex items-center justify-between sticky top-0 bg-sidebar z-10">
         <div className="flex items-center space-x-2">
           <Terminal className="w-5 h-5 text-primary" />
           <h1 className="font-mono font-bold tracking-tighter uppercase text-lg text-foreground">Cloud-Surgeon</h1>
         </div>
-        <Badge variant="outline" className={health ? "text-green-500 border-green-500/30" : "text-red-500 border-red-500/30"}>
-          {health ? "API ONLINE" : "OFFLINE"}
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className={health ? "text-green-500 border-green-500/30" : "text-red-500 border-red-500/30"}>
+            {health ? "API ONLINE" : "OFFLINE"}
+          </Badge>
+          {/* Close button — mobile only */}
+          <button
+            onClick={onClose}
+            className="md:hidden flex items-center justify-center w-7 h-7 rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            aria-label="Close sidebar"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       <div className="p-4 space-y-6">
-        
+
         {/* Trigger Incident */}
         <section className="space-y-3">
           <div className="flex items-center space-x-2 text-primary">
             <AlertTriangle className="w-4 h-4" />
             <h2 className="font-mono text-xs uppercase font-bold tracking-wider">Trigger Incident</h2>
           </div>
-          
+
           <div className="space-y-2">
             <label className="text-[10px] uppercase font-mono text-muted-foreground">Scenario</label>
             <Select value={scenario} onChange={(e) => setScenario(e.target.value)}>
@@ -104,9 +131,9 @@ export function Sidebar() {
 
           <div className="space-y-2">
             <label className="text-[10px] uppercase font-mono text-muted-foreground">Custom Alert Text (Overrides Scenario)</label>
-            <Textarea 
-              value={customText} 
-              onChange={(e) => setCustomText(e.target.value)} 
+            <Textarea
+              value={customText}
+              onChange={(e) => setCustomText(e.target.value)}
               placeholder="Paste PagerDuty payload or text here..."
               className="font-mono text-xs h-20"
             />
@@ -122,8 +149,8 @@ export function Sidebar() {
             </Select>
           </div>
 
-          <Button 
-            className="w-full mt-2" 
+          <Button
+            className="w-full mt-2"
             onClick={handleTrigger}
             disabled={triggerIncident.isPending}
           >
@@ -144,8 +171,8 @@ export function Sidebar() {
               {PREDICTIVE_SCENARIOS.map(s => <option key={s} value={s}>{s}</option>)}
             </Select>
           </div>
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             className="w-full text-purple-400 border-purple-500/30 hover:bg-purple-500/10 hover:text-purple-300"
             onClick={handlePredictive}
             disabled={ingestMetrics.isPending}
@@ -163,21 +190,21 @@ export function Sidebar() {
             <h2 className="font-mono text-xs uppercase font-bold tracking-wider">CloudWatch Webhook</h2>
           </div>
           <div className="space-y-2">
-            <Input 
-              value={cwAlarm} 
-              onChange={e => setCwAlarm(e.target.value)} 
+            <Input
+              value={cwAlarm}
+              onChange={e => setCwAlarm(e.target.value)}
               placeholder="Alarm Name"
               className="text-xs"
             />
-            <Input 
-              value={cwReason} 
-              onChange={e => setCwReason(e.target.value)} 
+            <Input
+              value={cwReason}
+              onChange={e => setCwReason(e.target.value)}
               placeholder="NewStateReason"
               className="text-xs"
             />
           </div>
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             className="w-full text-cyan-400 border-cyan-500/30 hover:bg-cyan-500/10 hover:text-cyan-300"
             onClick={() => simulateWebhook.mutate({ data: { AlarmName: cwAlarm, NewStateReason: cwReason } })}
             disabled={simulateWebhook.isPending}
@@ -194,16 +221,16 @@ export function Sidebar() {
             <Server className="w-4 h-4" />
             <h2 className="font-mono text-xs uppercase font-bold tracking-wider">System Ops</h2>
           </div>
-          <Button 
-            variant="destructive" 
+          <Button
+            variant="destructive"
             className="w-full text-xs h-8"
             onClick={() => sigkill.mutate(undefined)}
             disabled={sigkill.isPending}
           >
             SIGKILL API Server
           </Button>
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             className="w-full text-xs h-8"
             onClick={() => seedMemory.mutate(undefined)}
             disabled={seedMemory.isPending}
@@ -213,6 +240,6 @@ export function Sidebar() {
         </section>
 
       </div>
-    </div>
+    </aside>
   );
 }
