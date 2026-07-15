@@ -9,10 +9,50 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import fs from "node:fs";
+import os from "node:os";
 
 const execFileAsync = promisify(execFile);
 const __dirnameIndex = path.dirname(fileURLToPath(import.meta.url));
-const CCLOUD_BINARY = path.resolve(__dirnameIndex, "..", "..", "..", ".tools", "ccloud");
+
+// In ECS the binary is at /usr/local/bin/ccloud (Dockerfile COPY --from=ccloud).
+// In Replit dev it lives in .tools/ccloud at workspace root (4 dirs up from dist/).
+const CCLOUD_BINARY =
+  process.env.NODE_ENV === "production"
+    ? "/usr/local/bin/ccloud"
+    : path.resolve(__dirnameIndex, "..", "..", "..", ".tools", "ccloud");
+
+/**
+ * Bootstrap ccloud credentials from COCKROACH_CLOUD_API_KEY.
+ *
+ * ccloud v0.6.12 does not support headless API-key auth via env var — it reads
+ * its session from ~/.config/.cockroachdb/credentials.json (or
+ * $XDG_CONFIG_HOME/.cockroachdb/credentials.json). The file format is simply:
+ *   { "default": { "apiKey": "<COCKROACH_CLOUD_API_KEY>" } }
+ *
+ * Writing this file at startup lets ccloud run without any browser OAuth in
+ * ECS, CI, or any headless environment. The API key is already present as a
+ * secret — this just tells ccloud where to find it.
+ */
+function bootstrapCcloudCredentials(): void {
+  const apiKey = process.env.COCKROACH_CLOUD_API_KEY;
+  if (!apiKey) return;
+
+  const configHome = process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config");
+  const dir = path.join(configHome, ".cockroachdb");
+  const file = path.join(dir, "credentials.json");
+
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ default: { apiKey } }, null, 2), { mode: 0o600 });
+    logger.info(`[CCLOUD] Credentials written to ${file} — Layer 1 (binary) will be active`);
+  } catch (err) {
+    logger.warn({ err }, "[CCLOUD] Could not write credentials.json — falling back to REST API");
+  }
+}
+
+// Bootstrap ccloud before the server starts listening
+bootstrapCcloudCredentials();
 
 const rawPort = process.env["PORT"];
 

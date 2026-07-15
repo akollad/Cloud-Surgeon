@@ -10,9 +10,12 @@ RUN pnpm --filter @workspace/api-server run build
 
 # ── ccloud CLI binary ──────────────────────────────────────────────────────
 # Downloads the official CockroachDB Cloud CLI for headless production use.
-# Authenticates via COCKROACH_API_KEY env var (mapped from COCKROACH_CLOUD_API_KEY
-# in the ECS task definition) — no browser OAuth required.
-# A Debian base image is used for this stage because ccloud is a glibc binary.
+# Authentication: ccloud v0.6.12 does NOT support API-key env var auth.
+# Instead, index.ts calls bootstrapCcloudCredentials() at startup, which writes
+#   ~/.config/.cockroachdb/credentials.json  ← { "default": { "apiKey": "..." } }
+# from COCKROACH_CLOUD_API_KEY before the server accepts any requests.
+# This gives ccloud full Layer-1 access without any browser OAuth in ECS or CI.
+# A Debian base image is used here because ccloud is a glibc binary.
 FROM debian:bookworm-slim AS ccloud
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
