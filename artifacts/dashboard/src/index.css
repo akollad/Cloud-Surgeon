@@ -6,87 +6,144 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-  --color-background: hsl(var(--background));
-  --color-foreground: hsl(var(--foreground));
-  --color-border: hsl(var(--border));
-  --color-input: hsl(var(--input));
-  --color-ring: hsl(var(--ring));
+  --color-background:          hsl(var(--background));
+  --color-foreground:          hsl(var(--foreground));
+  --color-border:              hsl(var(--border));
+  --color-input:               hsl(var(--input));
+  --color-ring:                hsl(var(--ring));
 
-  --color-card: hsl(var(--card));
-  --color-card-foreground: hsl(var(--card-foreground));
-  --color-card-border: hsl(var(--card-border));
+  --color-card:                hsl(var(--card));
+  --color-card-foreground:     hsl(var(--card-foreground));
+  --color-card-border:         hsl(var(--card-border));
 
-  --color-popover: hsl(var(--popover));
-  --color-popover-foreground: hsl(var(--popover-foreground));
-  --color-popover-border: hsl(var(--popover-border));
+  --color-popover:             hsl(var(--popover));
+  --color-popover-foreground:  hsl(var(--popover-foreground));
+  --color-popover-border:      hsl(var(--popover-border));
 
-  --color-primary: hsl(var(--primary));
-  --color-primary-foreground: hsl(var(--primary-foreground));
-  
-  --color-secondary: hsl(var(--secondary));
-  --color-secondary-foreground: hsl(var(--secondary-foreground));
-  
-  --color-muted: hsl(var(--muted));
-  --color-muted-foreground: hsl(var(--muted-foreground));
-  
-  --color-accent: hsl(var(--accent));
-  --color-accent-foreground: hsl(var(--accent-foreground));
-  
-  --color-destructive: hsl(var(--destructive));
+  --color-primary:             hsl(var(--primary));
+  --color-primary-foreground:  hsl(var(--primary-foreground));
+
+  --color-secondary:           hsl(var(--secondary));
+  --color-secondary-foreground:hsl(var(--secondary-foreground));
+
+  --color-muted:               hsl(var(--muted));
+  --color-muted-foreground:    hsl(var(--muted-foreground));
+
+  --color-accent:              hsl(var(--accent));
+  --color-accent-foreground:   hsl(var(--accent-foreground));
+
+  --color-destructive:         hsl(var(--destructive));
   --color-destructive-foreground: hsl(var(--destructive-foreground));
 
-  --color-sidebar: hsl(var(--sidebar));
-  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
-  --color-sidebar-border: hsl(var(--sidebar-border));
+  /* Sidebar always renders in its own dark-navy palette */
+  --color-sidebar:             hsl(var(--sidebar));
+  --color-sidebar-foreground:  hsl(var(--sidebar-foreground));
+  --color-sidebar-border:      hsl(var(--sidebar-border));
+
+  /* Brand token aliases */
+  --color-cs-blue:  #124896;
+  --color-cs-navy:  #0d1f3c;
+  --color-cs-ice:   #e8f1fc;
+  --color-cs-mist:  #f1f5fb;
 
   --font-sans: 'Geist', sans-serif;
   --font-mono: 'Space Mono', monospace;
 
-  --radius-sm: 0;
-  --radius-md: 0;
-  --radius-lg: 0;
-  --radius-xl: 0;
+  /* Subtle 3px radius — clinical precision, not a terminal */
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 4px;
+  --radius-xl: 6px;
 }
 
+/* ─── LIGHT MODE (default) — "Clinical Precision" ─────────────────────────── */
 :root {
-  /* Bloomberg / Ops Center Dark Theme - dense, dark, fast */
-  --background: 224 71% 4%;
-  --foreground: 210 40% 98%;
-  
-  --card: 222 47% 6%;
-  --card-foreground: 210 40% 98%;
-  --card-border: 222 47% 15%;
-  
-  --popover: 222 47% 6%;
-  --popover-foreground: 210 40% 98%;
-  --popover-border: 222 47% 15%;
-  
-  --primary: 190 90% 50%; /* Cyan */
-  --primary-foreground: 224 71% 4%;
-  
-  --secondary: 222 47% 15%;
-  --secondary-foreground: 210 40% 98%;
-  
-  --muted: 222 47% 11%;
-  --muted-foreground: 215 20% 65%;
-  
-  --accent: 190 90% 50%;
-  --accent-foreground: 224 71% 4%;
-  
-  --destructive: 0 80% 55%;
-  --destructive-foreground: 210 40% 98%;
+  /* Page canvas — cool off-white, hint of brand blue */
+  --background:          214 30% 97%;
+  --foreground:          214 55% 10%;
 
-  --border: 222 47% 15%;
-  --input: 222 47% 15%;
-  --ring: 190 90% 50%;
+  /* Cards — pure white with blue-tinted shadow */
+  --card:                0 0% 100%;
+  --card-foreground:     214 55% 10%;
+  --card-border:         214 28% 88%;
 
-  --sidebar: 224 71% 4%;
-  --sidebar-foreground: 210 40% 98%;
-  --sidebar-border: 222 47% 15%;
-  
-  --radius: 0px;
+  /* Popovers */
+  --popover:             0 0% 100%;
+  --popover-foreground:  214 55% 10%;
+  --popover-border:      214 28% 88%;
+
+  /* Primary — the exact logo blue #124896 */
+  --primary:             214 79% 33%;
+  --primary-foreground:  0 0% 100%;
+
+  /* Secondary — pale blue tint for chips / tags */
+  --secondary:           214 35% 93%;
+  --secondary-foreground:214 55% 22%;
+
+  /* Muted */
+  --muted:               214 22% 95%;
+  --muted-foreground:    214 18% 50%;
+
+  /* Accent — slightly lighter interactive blue */
+  --accent:              214 70% 42%;
+  --accent-foreground:   0 0% 100%;
+
+  /* Destructive */
+  --destructive:         3 75% 50%;
+  --destructive-foreground: 0 0% 100%;
+
+  /* Borders & inputs */
+  --border:              214 25% 87%;
+  --input:               214 25% 87%;
+  --ring:                214 79% 33%;
+
+  /* Sidebar — ALWAYS dark navy regardless of color-scheme */
+  --sidebar:             214 68% 14%;
+  --sidebar-foreground:  210 35% 88%;
+  --sidebar-border:      214 55% 20%;
+
+  --radius: 3px;
 }
 
+/* ─── DARK MODE (.dark) ──────────────────────────────────────────────────────── */
+.dark {
+  --background:          214 45% 6%;
+  --foreground:          210 35% 95%;
+
+  --card:                214 42% 9%;
+  --card-foreground:     210 35% 95%;
+  --card-border:         214 38% 16%;
+
+  --popover:             214 42% 9%;
+  --popover-foreground:  210 35% 95%;
+  --popover-border:      214 38% 16%;
+
+  --primary:             214 68% 58%;
+  --primary-foreground:  214 45% 6%;
+
+  --secondary:           214 38% 16%;
+  --secondary-foreground:210 35% 90%;
+
+  --muted:               214 35% 12%;
+  --muted-foreground:    214 18% 58%;
+
+  --accent:              214 68% 58%;
+  --accent-foreground:   0 0% 100%;
+
+  --destructive:         0 72% 52%;
+  --destructive-foreground: 0 0% 100%;
+
+  --border:              214 38% 18%;
+  --input:               214 38% 18%;
+  --ring:                214 68% 58%;
+
+  /* Sidebar stays dark — just slightly lighter surface in dark mode */
+  --sidebar:             214 55% 8%;
+  --sidebar-foreground:  210 30% 84%;
+  --sidebar-border:      214 50% 13%;
+}
+
+/* ─── Base layer ──────────────────────────────────────────────────────────── */
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -94,9 +151,24 @@
   body {
     @apply font-sans antialiased bg-background text-foreground;
   }
+  /* Consistent card shadow using brand-blue-tinted drop shadow */
+  .card, [data-card] {
+    box-shadow: 0 1px 3px rgba(18,72,150,.06), 0 1px 2px rgba(18,72,150,.04);
+  }
 }
 
+/* ─── Utilities ────────────────────────────────────────────────────────────── */
 @layer utilities {
+  /* Card hover elevation */
+  .card-hover {
+    transition: box-shadow 150ms ease, transform 150ms ease;
+  }
+  .card-hover:hover {
+    box-shadow: 0 4px 14px rgba(18,72,150,.10), 0 2px 4px rgba(18,72,150,.06);
+    transform: translateY(-1px);
+  }
+
+  /* Incident pulse animations */
   .pulse-blue {
     animation: pulse-blue 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   }
@@ -109,36 +181,42 @@
   .blink-yellow {
     animation: blink-yellow 1s steps(2, start) infinite;
   }
+
+  /* Sidebar-scoped utilities (always dark) */
+  .sidebar-item-active {
+    background: rgba(255,255,255,0.08);
+    border-left-color: #ffffff;
+    color: #ffffff;
+  }
+  .sidebar-item {
+    color: rgba(255,255,255,0.55);
+    border-left-color: transparent;
+  }
+  .sidebar-item:hover {
+    background: rgba(255,255,255,0.06);
+    color: rgba(255,255,255,0.85);
+  }
 }
 
 @keyframes pulse-blue {
-  0%, 100% { opacity: 1; box-shadow: 0 0 8px 2px rgba(59, 130, 246, 0.5); }
-  50% { opacity: 0.8; box-shadow: 0 0 2px 0px rgba(59, 130, 246, 0.2); }
+  0%, 100% { opacity: 1; box-shadow: 0 0 8px 2px rgba(18, 72, 150, 0.5); }
+  50%       { opacity: 0.8; box-shadow: 0 0 2px 0 rgba(18, 72, 150, 0.15); }
 }
 @keyframes pulse-yellow {
   0%, 100% { opacity: 1; box-shadow: 0 0 8px 2px rgba(234, 179, 8, 0.5); }
-  50% { opacity: 0.8; box-shadow: 0 0 2px 0px rgba(234, 179, 8, 0.2); }
+  50%       { opacity: 0.8; box-shadow: 0 0 2px 0 rgba(234, 179, 8, 0.2); }
 }
 @keyframes pulse-orange {
   0%, 100% { opacity: 1; box-shadow: 0 0 8px 2px rgba(249, 115, 22, 0.5); }
-  50% { opacity: 0.8; box-shadow: 0 0 2px 0px rgba(249, 115, 22, 0.2); }
+  50%       { opacity: 0.8; box-shadow: 0 0 2px 0 rgba(249, 115, 22, 0.2); }
 }
 @keyframes blink-yellow {
-  0%, 100% { background-color: rgba(234, 179, 8, 1); color: #000; box-shadow: 0 0 8px 2px rgba(234, 179, 8, 0.8); }
-  50% { background-color: rgba(234, 179, 8, 0.2); color: rgba(234, 179, 8, 1); box-shadow: none; }
+  0%, 100% { background-color: rgba(234,179,8,1); color:#000; box-shadow: 0 0 8px 2px rgba(234,179,8,0.8); }
+  50%       { background-color: rgba(234,179,8,0.18); color: rgba(234,179,8,1); box-shadow: none; }
 }
 
-/* Custom scrollbar for ops density */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: hsl(var(--background));
-}
-::-webkit-scrollbar-thumb {
-  background: hsl(var(--muted-foreground) / 0.3);
-}
-::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--muted-foreground) / 0.5);
-}
+/* ─── Scrollbar ────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar        { width: 5px; height: 5px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  { background: rgba(18,72,150,0.18); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(18,72,150,0.32); }

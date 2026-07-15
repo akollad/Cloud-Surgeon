@@ -2,6 +2,8 @@
 
 > **Autonomous AI DevOps agent** — detects, diagnoses, and repairs cloud infrastructure incidents using a three-layer CockroachDB memory system that learns from every repair.
 
+<img src="artifacts/dashboard/public/logo.svg" alt="Cloud-Surgeon" width="180" />
+
 Built for the **CockroachDB × AWS Hackathon 2026**.
 
 **🔗 Live demo:** https://d3ddnpg3hz3st4.cloudfront.net/ · password `cloudsurgeon-demo`
