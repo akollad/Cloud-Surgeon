@@ -21,7 +21,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
     && rm -rf /var/lib/apt/lists/*
 RUN curl -fsSL https://binaries.cockroachdb.com/ccloud/ccloud_linux-amd64_0.6.12.tar.gz \
     | tar -xz -C /tmp/ \
-    && install -m 755 /tmp/ccloud /usr/local/bin/ccloud
+    && ls /tmp/ \
+    && install -m 755 /tmp/ccloud /usr/local/bin/ccloud \
+    && /usr/local/bin/ccloud version
 
 # ── Runtime ────────────────────────────────────────────────────────────────
 # node:24-slim is Debian-based (glibc) — required to run the ccloud binary.

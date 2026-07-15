@@ -267,7 +267,6 @@ docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/cloud-surgeon-api:l
 
 ```bash
 cd artifacts/dashboard
-VITE_API_BASE_URL=https://<distribution>.cloudfront.net/api \
 VITE_API_KEY=<CLOUD_SURGEON_API_KEY> \
 VITE_DASHBOARD_PASSWORD=<demo-password> \
 PORT=23183 BASE_PATH=/ pnpm run build
@@ -600,7 +599,7 @@ Dashboard (build-time only — `VITE_*` variables are inlined by Vite, not read 
 
 | Variable | Demo value |
 |---|---|
-| `VITE_API_BASE_URL` | `https://<distribution>.cloudfront.net/api` |
+| `VITE_API_BASE_URL` | *(vide)* — chemin relatif `/api/...` résolu par le navigateur ; CloudFront route `/api/*` → ALB |
 | `VITE_API_KEY` | value of `CLOUD_SURGEON_API_KEY` |
 | `VITE_DASHBOARD_PASSWORD` | demo password (see `MIGRATION_REACT.md`) |
 

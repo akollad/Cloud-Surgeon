@@ -29,14 +29,21 @@ const execFileAsync = promisify(execFile);
  * Fetches org info asynchronously so we don't block the process start.
  */
 async function bootstrapCcloudCredentials(): Promise<void> {
+  process.stdout.write("[CCLOUD-BOOT] bootstrapCcloudCredentials called\n");
   const apiKey = process.env.COCKROACH_CLOUD_API_KEY;
-  if (!apiKey) return;
+  process.stdout.write(`[CCLOUD-BOOT] apiKey present=${!!apiKey} len=${apiKey?.length ?? 0}\n`);
+  if (!apiKey) {
+    logger.warn("[CCLOUD] COCKROACH_CLOUD_API_KEY is not set — skipping credential bootstrap");
+    return;
+  }
 
   const configHome = process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config");
   const dir = path.join(configHome, ".cockroachdb");
 
   try {
+    process.stdout.write(`[CCLOUD-BOOT] dir=${dir}\n`);
     fs.mkdirSync(dir, { recursive: true });
+    process.stdout.write(`[CCLOUD-BOOT] mkdir OK\n`);
 
     // 1. credentials.json — always written from env var
     fs.writeFileSync(
@@ -44,16 +51,23 @@ async function bootstrapCcloudCredentials(): Promise<void> {
       JSON.stringify({ default: { apiKey } }, null, 2),
       { mode: 0o600 },
     );
+    process.stdout.write(`[CCLOUD-BOOT] credentials.json written\n`);
 
-    // 2. profiles.json — fetch org info from the REST API (same key, same call path as the MCP layer)
-    let orgId = "b1641606-7293-4689-8f8a-ebe0efe912de"; // known from initial auth — overwritten below if fetchable
+    // 2. profiles.json — fetch org info with a 5 s timeout so we never hang
+    let orgId = "b1641606-7293-4689-8f8a-ebe0efe912de";
     let orgLabel = "org-3bf3g";
     let orgName = "Akollad Groupe";
     let userFullName = "Ryan Sabowa";
+    process.stdout.write(`[CCLOUD-BOOT] fetching org info...\n`);
     try {
+      const ctrl = new AbortController();
+      const tid = setTimeout(() => ctrl.abort(), 5_000);
       const resp = await fetch("https://cockroachlabs.cloud/api/v1/jwt-issuer/service-accounts/self", {
         headers: { Authorization: `Bearer ${apiKey}` },
+        signal: ctrl.signal,
       });
+      clearTimeout(tid);
+      process.stdout.write(`[CCLOUD-BOOT] fetch status=${resp.status}\n`);
       if (resp.ok) {
         const data = await resp.json() as { organization_id?: string; organization_label?: string; organization_name?: string; name?: string };
         if (data.organization_id) orgId = data.organization_id;
@@ -61,7 +75,7 @@ async function bootstrapCcloudCredentials(): Promise<void> {
         if (data.organization_name) orgName = data.organization_name;
         if (data.name) userFullName = data.name;
       }
-    } catch { /* keep defaults */ }
+    } catch (fe) { process.stdout.write(`[CCLOUD-BOOT] fetch error: ${String(fe)}\n`); }
 
     fs.writeFileSync(
       path.join(dir, "profiles.json"),
@@ -76,22 +90,22 @@ async function bootstrapCcloudCredentials(): Promise<void> {
       }, null, 2),
       { mode: 0o600 },
     );
+    process.stdout.write(`[CCLOUD-BOOT] profiles.json written\n`);
 
-    // 3. configuration.json — non-sensitive SDK config ccloud expects to exist
+    // 3. configuration.json
     fs.writeFileSync(
       path.join(dir, "configuration.json"),
       JSON.stringify({ publishableKeys: { segmentCCloudAPIKey: "T1T8EQjYCBgeWPsoG0Zs8wFZSDB6xLXF" }, flags: {} }, null, 2),
       { mode: 0o600 },
     );
-
-    logger.info(`[CCLOUD] Config written to ${dir} (credentials + profiles + configuration) — Layer 1 active`);
+    process.stdout.write(`[CCLOUD-BOOT] configuration.json written — bootstrap complete\n`);
   } catch (err) {
-    logger.warn({ err }, "[CCLOUD] Could not write ccloud config — falling back to REST API");
+    process.stdout.write(`[CCLOUD-BOOT] WRITE ERROR: ${String(err)}\n`);
   }
 }
 
-// Bootstrap ccloud before the server starts listening (fire-and-forget — non-blocking)
-bootstrapCcloudCredentials().catch(() => {});
+// bootstrapCcloudCredentials() is awaited inside the app.listen callback
+// so that the ccloud whoami check always runs AFTER the credential files are written.
 
 const rawPort = process.env["PORT"];
 
@@ -155,6 +169,11 @@ app.listen(port, async (err) => {
   logger.info(
     `[BOOT] AI: ${aiProviderLabel} | AWS tools: ${awsStatus} | DB: ${dbStatus} | Rate limiting: on`,
   );
+
+  // Bootstrap ccloud credentials before the whoami check so the files are
+  // guaranteed to exist when ccloud reads them. Running this fire-and-forget
+  // at module level caused a race where whoami ran before writes completed.
+  await bootstrapCcloudCredentials().catch(() => {});
 
   // ccloud binary status
   try {
