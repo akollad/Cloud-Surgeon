@@ -113,15 +113,22 @@ export async function initChangefeed(): Promise<void> {
     return;
   }
 
+  // Append shared-secret token to the webhook URL when CDC_WEBHOOK_SECRET is set.
+  // CockroachDB changefeed sinks cannot send custom headers, so a query parameter
+  // is the standard authentication mitigation for webhook sink URLs.
+  const secret = process.env.CDC_WEBHOOK_SECRET;
+  const tokenSuffix = secret ? `?token=${encodeURIComponent(secret)}` : "";
+
   const webhookUrl = explicitUrl
-    ? `webhook-https://${explicitUrl.replace(/^https?:\/\//, "")}`
-    : `webhook-https://${devDomain}/api/internal/cdc`;
+    ? `webhook-https://${explicitUrl.replace(/^https?:\/\//, "")}${tokenSuffix}`
+    : `webhook-https://${devDomain}/api/internal/cdc${tokenSuffix}`;
 
   try {
-    // Check if an existing changefeed is already running for our tables,
-    // so we don't create a duplicate on restart.
-    const existing = await pool.query<{ job_id: string; status: string }>(
-      `SELECT job_id, status FROM [SHOW CHANGEFEED JOBS] 
+    // Check if an existing changefeed is already running for our tables.
+    // If CDC_WEBHOOK_SECRET is set, also verify the existing changefeed URL
+    // contains the token — if not, cancel and recreate with the token.
+    const existing = await pool.query<{ job_id: string; status: string; description: string }>(
+      `SELECT job_id, status, description FROM [SHOW CHANGEFEED JOBS] 
        WHERE description LIKE '%execution_logs%' 
          AND description LIKE '%agent_handoffs%'
          AND status = 'running'
@@ -129,17 +136,28 @@ export async function initChangefeed(): Promise<void> {
     );
 
     if (existing.rows.length > 0) {
-      // A changefeed is already running from a previous session — reuse it.
-      _cdcActive = true;
-      logger.info(
-        { jobId: existing.rows[0].job_id },
-        "[CDC] Existing CockroachDB changefeed reused — streaming to webhook",
-      );
-      _startHeartbeat();
-      return;
+      const job = existing.rows[0];
+      // If a token is configured but the existing changefeed URL doesn't include it,
+      // cancel and recreate so the sink is authenticated.
+      const needsToken = secret && !job.description.includes("?token=");
+      if (needsToken) {
+        logger.info(
+          { jobId: job.job_id },
+          "[CDC] Existing changefeed lacks token — cancelling to recreate with authentication",
+        );
+        await pool.query(`CANCEL JOB ${job.job_id}`).catch(() => {});
+      } else {
+        _cdcActive = true;
+        logger.info(
+          { jobId: job.job_id },
+          "[CDC] Existing CockroachDB changefeed reused — streaming to webhook",
+        );
+        _startHeartbeat();
+        return;
+      }
     }
 
-    // Create the changefeed pointing at the public webhook endpoint.
+    // Create the changefeed pointing at the authenticated public webhook endpoint.
     await pool.query(
       `CREATE CHANGEFEED FOR TABLE execution_logs, agent_handoffs
        INTO $1

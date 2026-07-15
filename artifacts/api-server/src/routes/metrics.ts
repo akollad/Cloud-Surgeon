@@ -415,4 +415,44 @@ router.post("/metrics/seed", async (req, res): Promise<void> => {
   res.json(result);
 });
 
+// ── Playbooks (AI-generated repair runbooks) ──────────────────────────────
+//
+// Returns the playbooks stored by generateAndStorePlaybook() after each
+// resolved incident. Each playbook is a Markdown document synthesised from
+// the agent's own turn history — not a human-written template.
+// Ordered by most recent first (limit 50).
+
+router.get("/metrics/playbooks", async (_req, res): Promise<void> => {
+  try {
+    const rows = await db.execute<{
+      playbook_id: string;
+      incident_id: string;
+      strategy_name: string;
+      title: string;
+      content_md: string;
+      generated_by: string;
+      created_at: string;
+    }>(sql`
+      SELECT playbook_id, incident_id, strategy_name, title, content_md, generated_by, created_at
+      FROM   playbooks
+      ORDER  BY created_at DESC
+      LIMIT  50
+    `);
+    res.json({
+      count: rows.rows.length,
+      playbooks: rows.rows.map((r) => ({
+        playbookId: r.playbook_id,
+        incidentId: r.incident_id,
+        strategyName: r.strategy_name,
+        title: r.title,
+        contentMd: r.content_md,
+        generatedBy: r.generated_by,
+        createdAt: r.created_at,
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
 export default router;

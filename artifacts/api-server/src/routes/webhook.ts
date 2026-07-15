@@ -20,10 +20,10 @@
  */
 import { Router, type IRouter } from "express";
 import { z } from "zod/v4";
-import { getOrCreateIncident, runAgentLoop, findSimilarIncident } from "../lib/cloud-surgeon";
+import { getOrCreateIncident, runAgentLoop, findSimilarIncident, detectIncidentStorm } from "../lib/cloud-surgeon";
 import { generateEmbedding } from "../lib/embeddings";
 import { sanitizeAlertText, validateAlertText } from "../lib/prompt-guard";
-import { db, executionLogsTable } from "@workspace/db";
+import { db, executionLogsTable, pool } from "@workspace/db";
 
 const router: IRouter = Router();
 
@@ -156,11 +156,45 @@ router.post("/webhook/cloudwatch", async (req, res): Promise<void> => {
   }
   const alreadyTerminal = incident.status === "RESOLVED" || incident.status === "FAILED";
 
+  let storm: { isStorm: boolean; relatedCount: number; closestDistance: number | null } | null = null;
+  let similar: { errorMessageText: string; strategyName: string; distance: number; outcomeSuccess: boolean } | undefined;
+
   if (!alreadyTerminal) {
     const { embedding } = await generateEmbedding(alertText);
-    const similar = await findSimilarIncident(embedding);
+
+    // Run RAG lookup + storm detection in parallel — both use the same embedding
+    [similar, storm] = await Promise.all([
+      findSimilarIncident(embedding),
+      detectIncidentStorm(embedding),
+    ]);
+
     if (similar) {
-      req.log.info({ distance: similar.distance }, "Found similar historical incident via RAG");
+      req.log.info({ distance: similar.distance, strategy: similar.strategyName }, "Found similar historical incident via RAG");
+    }
+
+    if (storm?.isStorm) {
+      req.log.warn(
+        { relatedCount: storm.relatedCount, closestDistance: storm.closestDistance },
+        "⚠️  Incident storm detected — forcing PENDING_APPROVAL to prevent cascade amplification",
+      );
+      // Merge storm metadata into context_json (JSONB || merge, not overwrite)
+      // so the agent loop reads stormDetected and forces PENDING_APPROVAL routing.
+      await pool.query(
+        `UPDATE incident_state
+         SET context_json = context_json || $1::jsonb, updated_at = now()
+         WHERE incident_id = $2`,
+        [
+          JSON.stringify({
+            stormDetected: true,
+            stormRelatedCount: storm.relatedCount,
+            stormWindowMinutes: 10,
+            stormNote:
+              "Incident storm detected: autonomous repair disabled to prevent cascade " +
+              "amplification. Review all related incidents before approving any remediation.",
+          }),
+          incident.incidentId,
+        ],
+      );
     }
   }
 
@@ -170,9 +204,13 @@ router.post("/webhook/cloudwatch", async (req, res): Promise<void> => {
     incidentId: incident.incidentId,
     alertFingerprint: incident.alertFingerprint,
     status: incident.status,
+    stormDetected: storm?.isStorm ?? false,
+    relatedIncidentsInWindow: storm?.relatedCount ?? 0,
     message: alreadyTerminal
       ? `Incident already ${incident.status} — no reprocessing needed.`
-      : "Incident received, agent loop started asynchronously.",
+      : storm?.isStorm
+        ? "Incident storm detected — PENDING_APPROVAL mode forced. Review before approving any repair."
+        : "Incident received, agent loop started asynchronously.",
   });
 
   // Async fire-and-forget post-response (like SNS → Lambda)

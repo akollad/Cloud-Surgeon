@@ -1,5 +1,9 @@
 - [Orval zod codegen breaks on format uuid/date-time](orval-zod-uuid-format.md) — `format: uuid` in openapi.yaml generates zod v4-only `zod.uuid()`; use plain `type: string` instead.
 - [ccloud CLI headless auth](ccloud-headless-auth.md) — v0.6.12 needs browser OAuth; call the REST API directly with COCKROACH_CLOUD_API_KEY instead.
+- [ccloud CLI headless auth in ECS](ccloud-cli-ecs.md) — COCKROACH_API_KEY env var (not COCKROACH_CLOUD_API_KEY) enables headless ccloud; binary is glibc, needs node:24-slim not Alpine.
+- [CDC webhook token auth pattern](cdc-webhook-token.md) — changefeed sink URL gets ?token=CDC_WEBHOOK_SECRET; server validates query param; existing changefeed recreated if token missing from description.
+- [Incident storm detection architecture](incident-storm-detection.md) — CockroachDB vector similarity + timestamp window detects cascades; stormDetected in context_json forces PENDING_APPROVAL routing.
+- [IAM CloudWatch Resource star justified](iam-cloudwatch-star.md) — GetMetricData and DescribeAlarms cannot be scoped to resource ARNs; this is an AWS API limitation, not a configuration gap.
 - [CockroachDB Serverless connection quirks](cockroachdb-serverless-connection.md) — psql needs `&sslrootcert=system`; use hand-written SQL instead of `drizzle-kit push` for CockroachDB DDL.
 - [Bedrock geo-block & CockroachDB Cloud API perms](bedrock-cockroach-cloud-api-blockers.md) — Anthropic-on-Bedrock geo-restricted from this container; CockroachDB Cloud API key needs a role assigned per-cluster in console.
 - [Orphaned artifact.toml still drives routing](orphaned-artifact-toml-routing.md) — imported projects can have artifact.toml the proxy honors even when listArtifacts() shows nothing; match its previewPath/port exactly.

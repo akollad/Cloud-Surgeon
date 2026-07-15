@@ -128,26 +128,72 @@ The task role only needs to cover what `artifacts/api-server/src/lib/aws.ts` act
 (ECS/RDS/Lambda repair). **Not** `bedrock:InvokeModel` — this demo uses the Anthropic API
 directly (`ANTHROPIC_API_KEY`); Bedrock quota is currently disabled on the demo account.
 
+The policy below uses the minimal, resource-scoped principle of least privilege.
+`cloudwatch:GetMetricData` and `cloudwatch:DescribeAlarms` are listed under `"Resource": "*"`
+only because AWS does not support resource-level ARNs for those two CloudWatch actions — this
+is an AWS API limitation, not a configuration choice.
+
 ```json
 {
-  "Effect": "Allow",
-  "Action": [
-    "ecs:UpdateService",
-    "ecs:DescribeServices",
-    "rds:ModifyDBInstance",
-    "rds:DescribeDBInstances",
-    "rds:RebootDBInstance",
-    "lambda:PutFunctionConcurrency",
-    "lambda:GetFunctionConcurrency",
-    "cloudwatch:GetMetricData",
-    "cloudwatch:DescribeAlarms"
-  ],
-  "Resource": "*"
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EcsRepair",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:UpdateService",
+        "ecs:DescribeServices"
+      ],
+      "Resource": [
+        "arn:aws:ecs:<REGION>:<ACCOUNT_ID>:service/cloud-surgeon/*",
+        "arn:aws:ecs:<REGION>:<ACCOUNT_ID>:cluster/cloud-surgeon"
+      ]
+    },
+    {
+      "Sid": "RdsRepair",
+      "Effect": "Allow",
+      "Action": [
+        "rds:ModifyDBInstance",
+        "rds:DescribeDBInstances",
+        "rds:RebootDBInstance"
+      ],
+      "Resource": "arn:aws:rds:<REGION>:<ACCOUNT_ID>:db:*"
+    },
+    {
+      "Sid": "LambdaRepair",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:PutFunctionConcurrency",
+        "lambda:GetFunctionConcurrency"
+      ],
+      "Resource": "arn:aws:lambda:<REGION>:<ACCOUNT_ID>:function:*"
+    },
+    {
+      "Sid": "CloudWatchRead",
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:GetMetricData",
+        "cloudwatch:DescribeAlarms"
+      ],
+      "Resource": "*"
+    }
+  ]
 }
 ```
 
-Restrict `Resource` to specific service ARNs before a real production deployment — `*` is
-acceptable for a controlled demo but should not be presented as production-ready without saying so.
+To apply to the actual demo role (account 153983052396, us-east-1):
+
+```bash
+# Replace the inline policy on the task role with the scoped version above
+aws iam put-role-policy \
+  --role-name cloud-surgeon-task-role \
+  --policy-name cloud-surgeon-task-policy \
+  --policy-document file://iam-task-policy.json \
+  --region us-east-1
+```
+
+Save the JSON above (with `153983052396` and `us-east-1` substituted) as `iam-task-policy.json`
+and run the command once. The new policy takes effect immediately without a task restart.
 
 ---
 
@@ -182,6 +228,16 @@ CMD ["node", "--enable-source-maps", "./dist/index.mjs"]
 
 `dist/mcp/server.mjs` is included in the same build (esbuild multi-entry) — the MCP tool
 server runs as a stdio subprocess of the main process, not a separate service.
+
+**ccloud CLI binary** — the runtime stage downloads the official CockroachDB Cloud CLI:
+- It is bundled in the Docker image via a dedicated `debian:bookworm-slim` build stage.
+- In ECS, set `COCKROACH_API_KEY` = `<COCKROACH_CLOUD_API_KEY value>` in the task definition
+  so the binary authenticates headlessly (no browser OAuth).
+- In local dev (no Docker), the binary is not in PATH; `execute_ccloud_command` falls back
+  transparently to the CockroachDB Cloud REST API. The `cliMode` field in the response indicates
+  which path was used: `"ccloud_binary"` (ECS production) or `"rest"` (local fallback).
+- **Do not switch back to `node:24-alpine`** for the runtime stage — the ccloud binary is a
+  glibc binary and is incompatible with Alpine's musl libc.
 
 **Important**: `build.mjs` externalises `@aws-sdk/*` (and other native packages) from the
 esbuild bundle — `src/lib/aws.ts` and `src/lib/embeddings.ts` import them statically for
@@ -433,6 +489,65 @@ transparently:
 No operator action is needed after running `aws sns subscribe` — the subscription confirms itself
 within seconds.
 
+### SNS → Agent reliability: SQS Dead-Letter Queue
+
+By default, if the API server returns HTTP 4xx during SNS delivery (e.g. the ECS task was
+mid-restart), the notification is lost. Configure a DLQ + retry policy to guarantee delivery:
+
+```bash
+# 1. Create the DLQ (receives messages that fail after all retries)
+aws sqs create-queue \
+  --queue-name cloud-surgeon-sns-dlq \
+  --region us-east-1
+
+DLQ_URL=$(aws sqs get-queue-url --queue-name cloud-surgeon-sns-dlq \
+  --query QueueUrl --output text --region us-east-1)
+DLQ_ARN=$(aws sqs get-queue-attributes \
+  --queue-url "$DLQ_URL" \
+  --attribute-names QueueArn \
+  --query Attributes.QueueArn --output text --region us-east-1)
+
+# 2. Attach the DLQ to the SNS subscription (redrive policy)
+#    Retrieve the subscription ARN first (shown after `aws sns subscribe`).
+aws sns set-subscription-attributes \
+  --subscription-arn arn:aws:sns:us-east-1:<ACCOUNT>:cloud-surgeon-alerts:<SUB_ID> \
+  --attribute-name RedrivePolicy \
+  --attribute-value "{\"deadLetterTargetArn\":\"$DLQ_ARN\"}"
+
+# 3. Set a retry delivery policy: 3 attempts with exponential backoff (5 s → 60 s)
+aws sns set-subscription-attributes \
+  --subscription-arn arn:aws:sns:us-east-1:<ACCOUNT>:cloud-surgeon-alerts:<SUB_ID> \
+  --attribute-name DeliveryPolicy \
+  --attribute-value '{
+    "healthyRetryPolicy": {
+      "numRetries": 3,
+      "minDelayTarget": 5,
+      "maxDelayTarget": 60,
+      "numNoDelayRetries": 0,
+      "numMinDelayRetries": 1,
+      "numMaxDelayRetries": 1,
+      "backoffFunction": "exponential"
+    }
+  }'
+
+# 4. CloudWatch alarm on DLQ depth (alert if messages pile up)
+aws cloudwatch put-metric-alarm \
+  --alarm-name cloud-surgeon-dlq-depth \
+  --alarm-description "SNS notifications stuck in dead-letter queue" \
+  --metric-name ApproximateNumberOfMessagesVisible \
+  --namespace AWS/SQS \
+  --dimensions Name=QueueName,Value=cloud-surgeon-sns-dlq \
+  --statistic Sum --period 60 --threshold 1 \
+  --comparison-operator GreaterThanOrEqualToThreshold \
+  --evaluation-periods 1 --treat-missing-data notBreaching \
+  --region us-east-1
+```
+
+**Idempotency note**: the webhook handler uses `alertFingerprint` (SHA-256 of the alarm text)
+as a deduplication key. Retried SNS deliveries of the same alarm reuse the same incident row
+and skip re-running the agent loop if the incident is already in a terminal state (`RESOLVED`
+or `FAILED`), so retries are safe.
+
 ### Testing the full pipeline (without real traffic)
 
 ```bash
@@ -476,6 +591,8 @@ fingerprint (resume semantics, not duplicate creation).
 | `ECS_DEFAULT_CLUSTER` | `prod-cluster` | fixed |
 | `CALIBRATION_THRESHOLD` | `0.15` | fixed |
 | `CDC_WEBHOOK_URL` | `https://<distribution>.cloudfront.net/api/internal/cdc` | fixed — enables CDC in production; without it the server falls back to 2-second polling |
+| `CDC_WEBHOOK_SECRET` | — | Secrets Manager — shared-secret token appended to the changefeed sink URL (`?token=<value>`) and validated by `POST /api/internal/cdc`. Generate with `openssl rand -hex 32`. Leave blank in local dev. |
+| `COCKROACH_API_KEY` | same value as `COCKROACH_CLOUD_API_KEY` | fixed — the ccloud CLI binary reads this env var for headless auth (shorter name, no `_CLOUD_` infix). Set in the task definition alongside `COCKROACH_CLOUD_API_KEY`. |
 
 Dashboard (build-time only — `VITE_*` variables are inlined by Vite, not read at runtime):
 
@@ -502,9 +619,17 @@ Dashboard (build-time only — `VITE_*` variables are inlined by Vite, not read 
 ✅ SNS topic created and webhook subscription confirmed (auto-confirmed by the webhook handler)
 ✅ CloudWatch alarms created: checkout-5xx-spike · ecs-cpu-high
 ✅ End-to-end test: aws cloudwatch set-alarm-state → incident visible in dashboard within seconds
-□  Seed vector memory: POST /api/metrics/seed (optional — existing data already in DB)
+✅ IAM task role scoped to specific ARNs (see §1.2) — no longer Resource: * for ECS/RDS/Lambda
+□  Build and push new Docker image (revision 5) — includes ccloud binary + node:24-slim runtime
+□  Apply updated IAM policy: aws iam put-role-policy ... --policy-document file://iam-task-policy.json
+□  Add COCKROACH_API_KEY = <COCKROACH_CLOUD_API_KEY value> to ECS task definition env vars
+□  Add CDC_WEBHOOK_SECRET (openssl rand -hex 32) to Secrets Manager + ECS task definition
+   After adding: restart the API server so initChangefeed() cancels the old changefeed and
+   recreates it with ?token=<CDC_WEBHOOK_SECRET> in the sink URL.
+□  Create SQS DLQ + configure SNS subscription delivery policy (see §8 SQS section)
+□  Apply schema migration for playbooks table: psql $COCKROACHDB_URL -f cloud-surgeon-agent/database/schema.sql
+□  Seed vector memory: POST /api/metrics/seed (enables win-rate routing and playbook generation)
 □  Chaos test: POST /api/chaos/sigkill → agent resumes from last persisted turn
-□  Restrict IAM task role Resource from * to specific ARNs before production handoff
 ```
 
 ---

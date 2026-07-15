@@ -289,7 +289,13 @@ All endpoints require `X-API-Key: <CLOUD_SURGEON_API_KEY>` header.
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/webhook/cloudwatch` | Receives CloudWatch alarms via SNS. Accepts `Type=Notification` (alarm payload) and `Type=SubscriptionConfirmation` (auto-confirmed by fetching `SubscribeURL`). Parses both `application/json` and `text/plain` content types (SNS uses `text/plain`). Protected by prompt-injection guard before reaching the agent. |
+| `POST` | `/api/webhook/cloudwatch` | Receives CloudWatch alarms via SNS. Accepts `Type=Notification` (alarm payload) and `Type=SubscriptionConfirmation` (auto-confirmed by fetching `SubscribeURL`). Parses both `application/json` and `text/plain` content types (SNS uses `text/plain`). Protected by prompt-injection guard. Runs storm detection (3+ similar incidents in 10 min → forces `PENDING_APPROVAL`) before handing off to the agent loop. |
+
+### Playbooks & Memory
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/metrics/playbooks` | Returns AI-generated repair playbooks stored after each resolved incident. Each playbook is a Markdown document synthesised from the agent's own turn history (thoughts + tool calls + results) — not a human template. |
 
 ---
 

@@ -198,3 +198,38 @@ ALTER TABLE incident_vectors
 
 ALTER TABLE strategy_calibration
     ADD COLUMN IF NOT EXISTS human_signal_count INT NOT NULL DEFAULT 0;
+
+-- ----------------------------------------------------------------------------
+-- Table playbooks (AI-generated repair runbooks)
+--
+-- After each resolved incident Cloud-Surgeon synthesises a Markdown playbook
+-- from its own turn history (thoughts + tool calls + results) and stores it
+-- here. Unlike human-written runbooks, these capture the actual reasoning
+-- chain used by the model. Retrievable via GET /api/metrics/playbooks.
+--
+-- UNIQUE (incident_id) ensures one canonical playbook per incident
+-- (ON CONFLICT ... DO UPDATE for idempotent regeneration).
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS playbooks (
+    playbook_id   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    incident_id   UUID NOT NULL UNIQUE REFERENCES incident_state (incident_id),
+    strategy_name VARCHAR(100) NOT NULL,
+    title         TEXT NOT NULL,
+    content_md    TEXT NOT NULL,
+    generated_by  VARCHAR(50) NOT NULL DEFAULT 'cloud-surgeon',
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_playbooks_strategy
+    ON playbooks (strategy_name);
+
+-- ----------------------------------------------------------------------------
+-- CDC changefeed token authentication
+--
+-- When CDC_WEBHOOK_SECRET is set, the changefeed sink URL includes
+-- ?token=<CDC_WEBHOOK_SECRET>. The /api/internal/cdc endpoint validates
+-- this token and rejects unauthenticated requests with HTTP 401.
+-- Apply the new secret and recreate the changefeed via:
+--   CANCEL JOB <job_id>;
+-- Then restart the API server — initChangefeed() recreates it with the token.
+-- ----------------------------------------------------------------------------

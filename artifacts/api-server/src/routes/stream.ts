@@ -84,11 +84,24 @@ router.get("/stream/audit", (req, res): void => {
 
 // ── CDC webhook receiver — POST /api/internal/cdc ─────────────────────────
 //
-// No authentication — CockroachDB's basic webhook sink cannot send custom
-// auth headers. The endpoint is only reachable from CockroachDB's network
-// (known IP ranges) and is not listed in the public API surface.
+// Authentication: shared-secret token in query string (?token=<CDC_WEBHOOK_SECRET>).
+// The changefeed sink URL includes this token so every push is authenticated.
+// CockroachDB's basic webhook sink cannot send custom headers, so a URL query
+// parameter is the standard mitigation for unauthenticated sink URLs.
+//
+// If CDC_WEBHOOK_SECRET is not set (local dev), validation is skipped so
+// the fallback polling mode and manual testing continue to work.
 
 router.post("/internal/cdc", (req, res): void => {
+  const expectedToken = process.env.CDC_WEBHOOK_SECRET;
+  if (expectedToken) {
+    const provided = req.query["token"];
+    if (provided !== expectedToken) {
+      res.status(401).json({ error: "Unauthorized — invalid CDC webhook token" });
+      return;
+    }
+  }
+
   const events = parseCdcPayload(req.body);
   for (const event of events) {
     broadcast(event);

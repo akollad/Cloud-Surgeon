@@ -213,3 +213,29 @@ export const metricSnapshotsTable = pgTable("metric_snapshots", {
 });
 
 export type MetricSnapshot = typeof metricSnapshotsTable.$inferSelect;
+
+/**
+ * AI-generated repair playbooks.
+ *
+ * After each resolved incident the agent synthesises a structured Markdown
+ * playbook from its own turn history and stores it here. Unlike human-written
+ * runbooks, these capture the actual reasoning chain — the model's thought at
+ * each turn, the tool it called, and the result it got.
+ *
+ * Retrieved by operators via GET /api/metrics/playbooks.
+ * Also visible on the dashboard as a growing institutional memory.
+ */
+export const playbooksTable = pgTable("playbooks", {
+  playbookId: uuid("playbook_id").primaryKey().defaultRandom(),
+  incidentId: uuid("incident_id")
+    .notNull()
+    .unique()
+    .references(() => incidentStateTable.incidentId),
+  strategyName: varchar("strategy_name", { length: 100 }).notNull(),
+  title: text("title").notNull(),
+  contentMd: text("content_md").notNull(),
+  generatedBy: varchar("generated_by", { length: 50 }).notNull().default("cloud-surgeon"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type Playbook = typeof playbooksTable.$inferSelect;
