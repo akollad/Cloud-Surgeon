@@ -34,8 +34,8 @@ The API is at `/api/` (proxied through the dashboard's Vite dev server).
 - `CLOUD_SURGEON_API_KEY` — API key for all `/api/*` endpoints
 - `AI_PROVIDER=anthropic` — LLM provider selection
 - `AWS_REGION=us-east-1` — AWS region for ECS/RDS/Lambda calls
-- `VITE_API_BASE_URL=/api` — Dashboard → API base path
 - `VITE_API_KEY` — Dashboard API key (matches `CLOUD_SURGEON_API_KEY`)
+- `VITE_API_BASE_URL` — leave unset; the generated client already includes `/api/` in every path
 
 ## Key API Endpoints
 
