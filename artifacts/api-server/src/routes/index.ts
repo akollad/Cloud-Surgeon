@@ -5,10 +5,12 @@ import incidentsRouter from "./incidents";
 import metricsRouter from "./metrics";
 import webhookRouter from "./webhook";
 import streamRouter from "./stream";
+import setupRouter from "./setup";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
+router.use(setupRouter);
 
 // Webhook CloudWatch/SNS mounted BEFORE incidentsRouter — the latter applies
 // apiKeyAuth to everything that passes through it (no path prefix), so the

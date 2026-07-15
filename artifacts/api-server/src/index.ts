@@ -5,6 +5,14 @@ import { pool } from "@workspace/db";
 import { bedrockIsConfigured, bedrockAuthMethod } from "./lib/bedrock";
 import { createMetricSnapshotsTable } from "./lib/anomaly";
 import { initChangefeed } from "./lib/cdc";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const execFileAsync = promisify(execFile);
+const __dirnameIndex = path.dirname(fileURLToPath(import.meta.url));
+const CCLOUD_BINARY = path.resolve(__dirnameIndex, "..", "..", "..", ".tools", "ccloud");
 
 const rawPort = process.env["PORT"];
 
@@ -68,6 +76,25 @@ app.listen(port, async (err) => {
   logger.info(
     `[BOOT] AI: ${aiProviderLabel} | AWS tools: ${awsStatus} | DB: ${dbStatus} | Rate limiting: on`,
   );
+
+  // ccloud binary status
+  try {
+    const { stdout: vOut } = await execFileAsync(CCLOUD_BINARY, ["version"], { timeout: 5_000 });
+    let ccloudAuthStatus = "⚠️ not authenticated (run POST /api/setup/ccloud-auth)";
+    try {
+      const { stdout: whoOut, stderr: whoErr } = await execFileAsync(CCLOUD_BINARY, ["auth", "whoami"], {
+        env: { ...process.env, HOME: process.env.HOME ?? "/home/runner" },
+        timeout: 8_000,
+      });
+      const whoami = (whoOut + whoErr).trim();
+      if (!whoami.toLowerCase().includes("not logged in")) {
+        ccloudAuthStatus = `🟢 authenticated (${whoami.split("\n")[0]})`;
+      }
+    } catch { /* not authenticated */ }
+    logger.info(`[BOOT] ccloud: ${vOut.trim().split("\n")[0]} | ${ccloudAuthStatus} | Layer-1 (binary) active when authenticated, REST fallback otherwise`);
+  } catch {
+    logger.warn(`[BOOT] ccloud: binary not found at ${CCLOUD_BINARY} — execute_ccloud_command uses REST API fallback only`);
+  }
 
   if (dbStatus === "UNREACHABLE") {
     logger.warn("[BOOT] CockroachDB is unreachable — check COCKROACHDB_URL and cluster status");

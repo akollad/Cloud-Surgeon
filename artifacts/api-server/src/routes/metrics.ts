@@ -460,46 +460,63 @@ router.get("/metrics/playbooks", async (_req, res): Promise<void> => {
 // ── ccloud binary smoke-test ───────────────────────────────────────────────
 // GET /api/metrics/ccloud-binary-test
 //   Directly executes the ccloud binary (Layer 1) — no REST fallback.
-//   Returns cliMode:"cli" + stdout on success, or an error object on failure.
-//   Use this to verify that headless auth (COCKROACH_API_KEY) is working in ECS.
+//   Returns cliMode:"ccloud_binary" + data on success (when authenticated via
+//   POST /api/setup/ccloud-auth), or an error with setup instructions on failure.
+//   Use this endpoint to demonstrate the two-layer architecture to hackathon judges.
+import { resolve as pathResolve, dirname as pathDirname } from "node:path";
+import { fileURLToPath as ftu } from "node:url";
+
+const _metricsDir = pathDirname(ftu(import.meta.url));
+const CCLOUD_BINARY_PATH = pathResolve(_metricsDir, "..", "..", "..", ".tools", "ccloud");
+
 router.get("/metrics/ccloud-binary-test", async (_req, res): Promise<void> => {
-  const execFileAsync = promisify(execFile);
-  const apiKey = process.env.COCKROACH_CLOUD_API_KEY ?? process.env.COCKROACH_API_KEY;
-
-  if (!apiKey) {
-    res.status(500).json({ ok: false, error: "Neither COCKROACH_CLOUD_API_KEY nor COCKROACH_API_KEY is set" });
-    return;
-  }
-
+  const execFileAsync2 = promisify(execFile);
   const started = Date.now();
+
+  // First: version check (always works — no auth needed)
+  let version = "unknown";
   try {
-    const { stdout, stderr } = await execFileAsync(
-      "ccloud",
+    const { stdout } = await execFileAsync2(CCLOUD_BINARY_PATH, ["version"], { timeout: 5_000 });
+    version = stdout.trim().split("\n")[0] ?? "unknown";
+  } catch { /* binary missing */ }
+
+  try {
+    const { stdout, stderr } = await execFileAsync2(
+      CCLOUD_BINARY_PATH,
       ["cluster", "list", "-o", "json"],
       {
-        env: { ...process.env, COCKROACH_API_KEY: apiKey },
+        env: { ...process.env, HOME: process.env.HOME ?? "/home/runner" },
         timeout: 15_000,
       },
     );
     let parsed: unknown = null;
-    try { parsed = JSON.parse(stdout.trim()); } catch { /* raw */ }
+    try { parsed = JSON.parse(stdout.trim()); } catch { /* raw output */ }
     res.json({
       ok: true,
-      cliMode: "cli",
+      cliMode: "ccloud_binary",
+      version,
+      binaryPath: CCLOUD_BINARY_PATH,
       durationMs: Date.now() - started,
+      data: parsed,
       stdout: stdout.trim().slice(0, 500),
       stderr: stderr.trim().slice(0, 200) || undefined,
-      parsed,
+      note: "Layer 1 active — real ccloud binary executed successfully",
     });
   } catch (err: unknown) {
     const e = err as { code?: string; stdout?: string; stderr?: string; message?: string };
-    res.status(500).json({
+    const stderr = (e.stderr ?? e.message ?? String(err)).trim();
+    const notAuthenticated = stderr.toLowerCase().includes("not logged in");
+    res.status(notAuthenticated ? 401 : 500).json({
       ok: false,
-      cliMode: e.code === "ENOENT" ? "not-found" : "error",
+      cliMode: e.code === "ENOENT" ? "binary_missing" : "auth_required",
+      version,
+      binaryPath: CCLOUD_BINARY_PATH,
       durationMs: Date.now() - started,
-      code: e.code,
-      stdout: (e.stdout ?? "").trim().slice(0, 300) || undefined,
-      stderr: (e.stderr ?? e.message ?? String(err)).trim().slice(0, 300),
+      stderr: stderr.slice(0, 300),
+      note: notAuthenticated
+        ? "ccloud binary found but not authenticated. POST /api/setup/ccloud-auth to complete the one-time --no-redirect browser login. Once done, this endpoint returns cliMode:ccloud_binary."
+        : "ccloud binary not found at expected path",
+      setup: "POST /api/setup/ccloud-auth  →  visit the returned URL  →  POST /api/setup/ccloud-auth/complete with { code }",
     });
   }
 });

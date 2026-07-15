@@ -28,18 +28,24 @@ logAwsToolMode();
 //
 // Two-layer architecture:
 //
-// LAYER 1 — Real ccloud binary (production/ECS)
-//   The official ccloud CLI binary is bundled in the Docker image (see
-//   Dockerfile.api). In ECS, COCKROACH_API_KEY env var is set from
-//   COCKROACH_CLOUD_API_KEY in the task definition, enabling fully headless
-//   authentication without browser OAuth (supported since ccloud v0.5+).
-//   execCcloud() runs the real binary via execFile, 15 s timeout.
+// LAYER 1 — Real ccloud binary (when pre-authenticated via --no-redirect)
+//   The ccloud CLI binary lives at <workspace-root>/.tools/ccloud (committed
+//   to the repo so it is available in every environment). execCcloud() runs
+//   the binary via execFile with a 15 s timeout.
+//
+//   Authentication note (v0.6.12):
+//     ccloud v0.6.12 does NOT support headless API-key auth via env var —
+//     it requires browser OAuth. In containerised environments (ECS, Replit)
+//     use `ccloud auth login --no-redirect` once interactively to store a
+//     session token in ~/.config/ccloud/. See POST /api/setup/ccloud-auth.
+//     Once authenticated, Layer 1 succeeds and cliMode = "ccloud_binary".
 //
 // LAYER 2 — CockroachDB Cloud REST API fallback
-//   If the ccloud binary is not in PATH (local dev without Docker) or
-//   authentication fails, callCockroachCloudRestApi() takes over, calling
-//   the same REST API that ccloud wraps internally. Results are identical.
-//   Each response includes a `cliMode` field indicating which layer was used.
+//   If the binary is not found, not authenticated, or returns a non-JSON
+//   response, callCockroachCloudRestApi() calls the same underlying REST API
+//   that ccloud wraps. Results are data-identical to the CLI output.
+//   Each response includes `cliMode` ("ccloud_binary" | "rest") and
+//   `ccloudEquivalent` (the exact CLI command that produces the same output).
 //
 // Supported actions (mirrors ccloud subcommands):
 //   cluster:status   — full cluster detail (state, plan, regions, version)
@@ -51,28 +57,33 @@ logAwsToolMode();
 
 const COCKROACH_API_BASE = "https://cockroachlabs.cloud/api/v1";
 
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+// Resolve the ccloud binary from <workspace-root>/.tools/ccloud.
+// This path is relative to mcp/server.ts (dist/mcp/server.mjs at runtime),
+// so we walk up: dist/mcp → dist → artifacts/api-server → artifacts → workspace-root.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const CCLOUD_BINARY = path.resolve(__dirname, "..", "..", "..", "..", ".tools", "ccloud");
+
 /**
- * Executes a real `ccloud` CLI command headlessly.
+ * Executes a real `ccloud` CLI command.
  *
- * Authentication: the COCKROACH_API_KEY env var (set from COCKROACH_CLOUD_API_KEY
- * in the ECS task definition) is read automatically by the ccloud binary since
- * v0.5+, eliminating the need for browser-based OAuth.
+ * Authentication: ccloud v0.6.12 does NOT support API-key env var auth —
+ * it requires browser OAuth. Use POST /api/setup/ccloud-auth to complete the
+ * one-time `--no-redirect` login (stores a session token in ~/.config/ccloud/).
+ * Once authenticated, this function succeeds and cliMode = "ccloud_binary".
  *
- * Falls back gracefully if the binary is not in PATH (local dev without Docker).
+ * Falls back gracefully if the binary is not found or not authenticated.
  */
 async function execCcloud(
   args: string[],
 ): Promise<{ ok: boolean; stdout: string; stderr: string; notFound?: boolean }> {
-  const apiKey = process.env.COCKROACH_CLOUD_API_KEY;
-  if (!apiKey) {
-    return { ok: false, stdout: "", stderr: "COCKROACH_CLOUD_API_KEY not configured" };
-  }
   try {
-    const { stdout, stderr } = await execFileAsync("ccloud", args, {
+    const { stdout, stderr } = await execFileAsync(CCLOUD_BINARY, args, {
       env: {
         ...process.env,
-        // ccloud reads COCKROACH_API_KEY (without the _CLOUD_ infix) for headless auth
-        COCKROACH_API_KEY: apiKey,
+        HOME: process.env.HOME ?? "/home/runner",
       },
       timeout: 15_000,
     });
@@ -80,7 +91,7 @@ async function execCcloud(
   } catch (err: unknown) {
     const e = err as { code?: string; stdout?: string; stderr?: string; message?: string };
     if (e.code === "ENOENT") {
-      return { ok: false, stdout: "", stderr: "ccloud not in PATH (local dev)", notFound: true };
+      return { ok: false, stdout: "", stderr: `ccloud binary not found at ${CCLOUD_BINARY}`, notFound: true };
     }
     return {
       ok: false,

@@ -1,0 +1,43 @@
+Les deux notes mémoire se contredisaient — le test live tranche : ccloud-headless-auth.md avait raison depuis le début.
+
+Verdict définitif :
+
+Résultat
+ccloud binary headless auth (COCKROACH_API_KEY)	❌ — v0.6.12 ne supporte pas l'env var, exige OAuth browser
+REST API CockroachDB Cloud (COCKROACH_CLOUD_API_KEY)	✅ — fonctionne, résultats identiques
+Ce n'est pas un bug — c'est architecturalement propre. Chaque réponse du tool execute_ccloud_command inclut le champ ccloudEquivalent qui documente la commande exacte :
+
+{
+  "cliMode": "rest",
+  "ccloudEquivalent": "ccloud cluster get 2d0790c4-... -o json",
+  "state": "CREATED",
+  "cockroachVersion": "v26.2.1"
+}
+
+L'agent voit les mêmes données que ccloud — c'est la même REST API en dessous. Je mets à jour la mémoire pour éliminer la contradiction et nettoie.
+
+
+6 actions
+Réponse définitive à ta question :
+
+Le ccloud binary ne peut pas s'authentifier headlessly (v0.6.12 exige un OAuth browser), même avec COCKROACH_API_KEY correctement injecté. Le test live dans le container ECS rev 8 le confirme sans ambiguïté.
+
+Ce qui fonctionne en prod :
+
+execute_ccloud_command (tool de l'agent)
+├── Layer 1: ccloud binary  →  ❌ "not logged in" (v0.6.12 limite)
+└── Layer 2: REST API       →  ✅ données réelles, résultats identiques
+
+Chaque réponse documente la commande équivalente :
+
+{
+  "cliMode": "rest",
+  "ccloudEquivalent": "ccloud cluster get 2d0790c4-... -o json",
+  "clusterName": "polite-genie",
+  "state": "CREATED",
+  "cockroachVersion": "v26.2.1"
+}
+
+Le binary est dans l'image (utile pour le démo "look"), mais c'est la REST API qui fait vraiment le travail — même source de données que ccloud en dessous. Pour le hackathon c'est parfaitement défendable : les réponses montrent explicitement ccloudEquivalent.
+
+Au passage, j'ai aussi corrigé deux autres bugs découverts pendant le process : ca-certificates manquait dans l'image (ccloud ne pouvait même pas atteindre cockroachlabs.cloud), et l'endpoint /api/metrics/ccloud-binary-test est maintenant en prod si tu veux montrer la transparence du fallback.
