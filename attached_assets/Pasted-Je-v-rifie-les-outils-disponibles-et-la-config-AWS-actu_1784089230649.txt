@@ -1,0 +1,49 @@
+Je vérifie les outils disponibles et la config AWS actuelle en parallèle.
+Installing AWS CLI
+Utilisation de conteneurs Docker
+Deploying application components
+
+Good, AWS CLI is available via pip. Let me now proceed with the full deployment pipeline:
+
+    Configure AWS credentials
+    Login to ECR
+    Build the Docker image
+    Push to ECR
+    Update ECS task definition (add COCKROACH_API_KEY, CDC_WEBHOOK_SECRET)
+    Update ECS service
+    Apply schema migration (playbooks table)
+    Update IAM policy
+
+Let me start by checking the current task definition and configuring AWS, then do the Docker build in parallel.
+Updating AWS deployment
+
+I need to continue with the AWS deployment. I have the AWS credentials configured and I can see the current task definition (revision 4). Now I need to:
+
+    Get the full task definition JSON to create revision 5
+    Build the Docker image with the new Dockerfile
+    Login to ECR and push
+    Create new task definition with COCKROACH_API_KEY added
+    Update ECS service
+    Apply schema migration (playbooks table)
+    Update IAM policy
+
+Let me get the full task definition and start the Docker build in parallel.
+$ aws ecs describe-task-definition --task-definition cloud-surgeon-api --region us-east-1 2>&1 | python3 -c " import sys,json d=json.load(sys.stdin) td=d['taskDefinition'] # Print full container def for secrets/environment for c in td['containerDefinitions']: print(json.dumps({'name':c['name'],'image':c['image'],'secrets':c.get('secrets',[]),'environment':c.get('environment',[]),'logConfiguration':c.get('logConfiguration',{})}, indent=2)) print('executionRoleArn:', td.get('executionRoleArn','')) print('taskRoleArn:', td.get('taskRoleArn','')) print('cpu:', td.get('cpu','')) print('memory:', td.get('memory','')) print('networkMode:', td.get('networkMode','')) " 2>&1
+Managing deployment and configuration
+
+Je lance le build Docker et toutes les tâches parallèles indépendantes simultanément.
+Batching deployment steps
+$ aws iam put-role-policy \ --role-name cloud-surgeon-task-role \ --policy-name cloud-surgeon-task-policy \ --policy-document file:///home/runner/workspace/iam-task-policy.json \ --region us-east-1 2>&1 && echo "IAM policy applied ✅" || echo "IAM policy failed"
+$ which psql 2>/dev/null && echo "psql available" || echo "no psql"
+Finding ccloud binary URL
+
+Deux problèmes à corriger en parallèle : URL ccloud 404 et secret Secrets Manager introuvable.
+Finding correct URLs
+
+Je résous les deux problèmes en parallèle : URL ccloud correcte + Secrets Manager avec le bon nom.
+
+Je résous les 3 problèmes en parallèle : URL ccloud, Secrets Manager (mauvaise syntaxe Python), psql sslrootcert.
+$ # Trouver l'URL ccloud — essayer plus de patterns for url in \ "https://binaries.cockroachdb.com/ccloud-v0.6.12-linux-amd64.tar.gz" \ "https://binaries.cockroachdb.com/ccloud-latest-linux-amd64.tar.gz" \ "https://binaries.cockroachdb.com/ccloud/ccloud_v0.6.12_linux_amd64.tar.gz" \ "https://storage.googleapis.com/ccloud-binaries/ccloud_linux_amd64.tar.gz" \ "https://cockroachdb-ccloud-download.s3.amazonaws.com/ccloud_linux_amd64.tar.gz"; do STATUS=$(curl -o /dev/null -s -w "%{http_code}" --max-time 5 --head "$url" 2>/dev/null) echo "$STATUS $url" done # Tenter de trouver le vrai domaine via la doc publique curl -fsSL "https://www.cockroachlabs.com/docs/cockroachcloud/ccloud-get-started" 2>/dev/null | grep -oP 'https://[^"]+ccloud[^"]+\.tar\.gz' | head -5 || echo "no match in docs"
+Correcting ccloud URL
+
+URL ccloud trouvée ! Le format correct est ccloud_linux-amd64_0.6.12.tar.gz. Je corrige le Dockerfile et lance le build.

@@ -16,14 +16,18 @@ RUN pnpm --filter @workspace/api-server run build
 FROM debian:bookworm-slim AS ccloud
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-RUN curl -fsSL https://binaries.cockroachdb.com/ccloud/ccloud_linux_x86_64.tar.gz \
+RUN curl -fsSL https://binaries.cockroachdb.com/ccloud/ccloud_linux-amd64_0.6.12.tar.gz \
     | tar -xz -C /tmp/ \
     && install -m 755 /tmp/ccloud /usr/local/bin/ccloud
 
 # ── Runtime ────────────────────────────────────────────────────────────────
 # node:24-slim is Debian-based (glibc) — required to run the ccloud binary.
 # Do NOT switch back to node:24-alpine: musl libc is incompatible with ccloud.
+# curl is installed explicitly because node:24-slim (Debian bookworm-slim)
+# does not include it by default — required for the ECS container health check.
 FROM node:24-slim
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/artifacts/api-server/node_modules ./artifacts/api-server/node_modules

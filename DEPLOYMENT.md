@@ -12,7 +12,7 @@
 | **Dashboard** | https://d3ddnpg3hz3st4.cloudfront.net/ |
 | **API (via CloudFront)** | https://d3ddnpg3hz3st4.cloudfront.net/api/healthz |
 | **ALB (API origin)** | cloud-surgeon-alb-1044163999.us-east-1.elb.amazonaws.com |
-| **ECS cluster / service** | `cloud-surgeon` / `api` (Fargate, 1 task, task-def revision 4) |
+| **ECS cluster / service** | `cloud-surgeon` / `api` (Fargate, 1 task, task-def revision 6) |
 | **ECR** | `153983052396.dkr.ecr.us-east-1.amazonaws.com/cloud-surgeon-api` |
 | **S3 dashboard** | `cloud-surgeon-dashboard-153983052396` |
 | **CloudFront distribution** | `E2PQU895O3WVQ2` |
@@ -20,8 +20,10 @@
 | **SNS topic** | `arn:aws:sns:us-east-1:153983052396:cloud-surgeon-alerts` (webhook confirmed ✅) |
 | **CloudWatch alarms** | `checkout-5xx-spike` · `ecs-cpu-high` (both OK ✅) |
 
-Last verified (July 14 2026): `[BOOT] AI: anthropic 🟢 LIVE | AWS tools: 🟢 LIVE (region: us-east-1) | DB: connected | CDC: [CDC] Existing CockroachDB changefeed reused — streaming to webhook`.
+Last verified (July 15 2026): `[BOOT] AI: anthropic 🟢 LIVE (direct API key) | AWS tools: 🟢 LIVE (region: us-east-1) | DB: connected | CDC: [CDC] Existing CockroachDB changefeed reused — streaming to webhook`.
 Demo dashboard password: `cloudsurgeon-demo`.
+
+**Task definition revision 6** (current): adds `curl` to runtime stage (required for ECS container health check — `node:24-slim` does not include it), adds `COCKROACH_API_KEY` and `CDC_WEBHOOK_SECRET` secrets.
 
 **Live AWS repair note**: `src/lib/aws.ts` explicitly requires `AWS_ACCESS_KEY_ID` +
 `AWS_SECRET_ACCESS_KEY` as environment variables to enter LIVE mode — the ECS task role alone
@@ -620,16 +622,21 @@ Dashboard (build-time only — `VITE_*` variables are inlined by Vite, not read 
 ✅ CloudWatch alarms created: checkout-5xx-spike · ecs-cpu-high
 ✅ End-to-end test: aws cloudwatch set-alarm-state → incident visible in dashboard within seconds
 ✅ IAM task role scoped to specific ARNs (see §1.2) — no longer Resource: * for ECS/RDS/Lambda
-□  Build and push new Docker image (revision 5) — includes ccloud binary + node:24-slim runtime
-□  Apply updated IAM policy: aws iam put-role-policy ... --policy-document file://iam-task-policy.json
-□  Add COCKROACH_API_KEY = <COCKROACH_CLOUD_API_KEY value> to ECS task definition env vars
-□  Add CDC_WEBHOOK_SECRET (openssl rand -hex 32) to Secrets Manager + ECS task definition
-   After adding: restart the API server so initChangefeed() cancels the old changefeed and
-   recreates it with ?token=<CDC_WEBHOOK_SECRET> in the sink URL.
+✅ Docker image revision 6 built and pushed (ccloud binary + node:24-slim + curl for health check)
+✅ IAM task role policy updated (scoped ARNs)
+✅ COCKROACH_API_KEY + CDC_WEBHOOK_SECRET added to Secrets Manager and ECS task definition (rev 6)
+✅ Schema migration applied (playbooks table idempotent)
+✅ Dashboard rebuilt and pushed to S3 (CloudFront invalidation triggered)
+✅ ECS service updated to task-def revision 6 — steady state reached
 □  Create SQS DLQ + configure SNS subscription delivery policy (see §8 SQS section)
-□  Apply schema migration for playbooks table: psql $COCKROACHDB_URL -f cloud-surgeon-agent/database/schema.sql
 □  Seed vector memory: POST /api/metrics/seed (enables win-rate routing and playbook generation)
 □  Chaos test: POST /api/chaos/sigkill → agent resumes from last persisted turn
+
+**Fix note (rev 5 → rev 6)**: `node:24-slim` (Debian bookworm-slim) does not include `curl`.
+The ECS container health check (`CMD-SHELL curl -f http://localhost:8080/api/healthz`) was silently
+failing — curl was missing, so the command exited non-zero while the app itself was healthy (ALB
+health checks were passing, visible as 200s in application logs). Fix: `RUN apt-get install -y curl`
+in the runtime stage of `Dockerfile.api`.
 ```
 
 ---
