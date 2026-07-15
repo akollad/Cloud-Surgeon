@@ -1,0 +1,45 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EcsRepair",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:UpdateService",
+        "ecs:DescribeServices"
+      ],
+      "Resource": [
+        "arn:aws:ecs:us-east-1:153983052396:service/cloud-surgeon/*",
+        "arn:aws:ecs:us-east-1:153983052396:cluster/cloud-surgeon"
+      ]
+    },
+    {
+      "Sid": "RdsRepair",
+      "Effect": "Allow",
+      "Action": [
+        "rds:ModifyDBInstance",
+        "rds:DescribeDBInstances",
+        "rds:RebootDBInstance"
+      ],
+      "Resource": "arn:aws:rds:us-east-1:153983052396:db:*"
+    },
+    {
+      "Sid": "LambdaRepair",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:PutFunctionConcurrency",
+        "lambda:GetFunctionConcurrency"
+      ],
+      "Resource": "arn:aws:lambda:us-east-1:153983052396:function:*"
+    },
+    {
+      "Sid": "CloudWatchRead",
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:GetMetricData",
+        "cloudwatch:DescribeAlarms"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
