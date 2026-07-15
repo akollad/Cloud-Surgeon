@@ -1,76 +1,53 @@
 # Cloud-Surgeon
 
-> Autonomous AI DevOps agent — detects, diagnoses, and repairs cloud infrastructure incidents using a three-layer CockroachDB memory system that learns from every repair.
+Autonomous AI DevOps agent that detects, diagnoses, and repairs cloud infrastructure incidents. Built for the CockroachDB × AWS Hackathon 2026.
 
-Built for the **CockroachDB × AWS Hackathon 2026**.
+## Architecture
 
----
+- **`artifacts/api-server`** — Express 5 + TypeScript backend (AI agent loop, CockroachDB, AWS SDKs). Runs on port 8080.
+- **`artifacts/dashboard`** — React 19 + Vite frontend (live incident dashboard with CDC stream). Runs on port 23183 at `/dashboard/`.
+- **`lib/db`** — Drizzle ORM schema + CockroachDB connection pool.
+- **`lib/api-zod`** — Generated Zod schemas from OpenAPI spec.
+- **`lib/integrations-anthropic-ai`** — Anthropic SDK client wrapper.
 
-## How to run
+## How to Run
 
-Two services start automatically via Replit workflows:
+Two workflows are configured and start automatically:
 
-| Service | Workflow | Preview |
+| Workflow | Command | Port |
 |---|---|---|
-| API Server (Express 5 / TypeScript) | `artifacts/api-server: API Server` | `/api` |
-| React Dashboard | `artifacts/dashboard: web` | `/dashboard/` |
+| **API Server** | `PORT=8080 pnpm --filter @workspace/api-server run dev` | 8080 |
+| **Dashboard** | `PORT=23183 BASE_PATH=/dashboard/ pnpm --filter @workspace/dashboard run dev` | 23183 |
 
-Both workflows are managed by Replit and restart on file changes.
+The dashboard is visible at `/dashboard/` in the preview pane.
+The API is at `/api/` (proxied through the dashboard's Vite dev server).
 
-To start manually:
-```bash
-# API server
-pnpm --filter @workspace/api-server run dev
-
-# Dashboard
-pnpm --filter @workspace/dashboard run dev
-```
-
-## Stack
-
-- **Backend**: Express 5, TypeScript, pnpm monorepo
-- **Frontend**: React + Vite + Tailwind (shadcn/ui)
-- **Database**: CockroachDB Serverless (SQL + VECTOR index + CDC changefeed)
-- **AI**: Anthropic Claude (direct API key) — Bedrock optional
-- **Tools**: MCP server (stdio subprocess) with ECS/RDS/Lambda repair tools
-
-## Required secrets (set in Replit Secrets panel)
+## Required Secrets
 
 | Secret | Purpose |
 |---|---|
-| `COCKROACHDB_URL` | CockroachDB connection string |
+| `COCKROACHDB_URL` | CockroachDB Serverless connection string |
 | `ANTHROPIC_API_KEY` | Claude API key for the agent loop |
-| `COCKROACH_CLOUD_API_KEY` | CockroachDB Cloud REST API (live cluster tools) |
-| `COCKROACH_CLOUD_CLUSTER_ID` | Cluster UUID from Cloud Console |
-| `VOYAGE_API_KEY` | Semantic embeddings (falls back to hash if absent) |
-| `SESSION_SECRET` | Cookie signing secret |
 
-Shared env vars (non-secret, set in `.replit` `[userenv.shared]`):
-- `CLOUD_SURGEON_API_KEY` — API auth key between dashboard and API server
-- `AI_PROVIDER` — `anthropic` (default) or `bedrock`
-- `AWS_REGION` — `us-east-1`
-- `BEDROCK_REGION` — `eu-west-1`
+## Pre-configured Env Vars (shared)
 
-## Database schema
+- `CLOUD_SURGEON_API_KEY` — API key for all `/api/*` endpoints
+- `AI_PROVIDER=anthropic` — LLM provider selection
+- `AWS_REGION=us-east-1` — AWS region for ECS/RDS/Lambda calls
+- `VITE_API_BASE_URL=/api` — Dashboard → API base path
+- `VITE_API_KEY` — Dashboard API key (matches `CLOUD_SURGEON_API_KEY`)
 
-Apply once (idempotent):
-```bash
-psql "$COCKROACHDB_URL&sslrootcert=system" -f cloud-surgeon-agent/database/schema.sql
-```
+## Key API Endpoints
 
-> **Do not use `drizzle-kit push`** — CockroachDB Serverless requires `sslrootcert=system` and uses non-standard VECTOR syntax. Use raw SQL DDL only.
+All endpoints require `X-API-Key: <CLOUD_SURGEON_API_KEY>` header.
 
-## Trigger a test incident
+- `GET /api/healthz` — Health check
+- `POST /api/incidents/trigger` — Trigger an incident from alert text
+- `GET /api/incidents` — List incidents
+- `GET /api/audit` — Audit log (SSE stream)
+- `POST /api/chaos/sigkill` — Simulate crash for chaos demo
 
-```bash
-curl -X POST https://$REPLIT_DEV_DOMAIN/api/incidents/trigger \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: $CLOUD_SURGEON_API_KEY" \
-  -d '{"alertText": "ECS checkout-service CPU 92% — task count 2/5"}'
-```
+## User Preferences
 
-## User preferences
-
-- Communiquer en français.
-- Keep existing project structure — do not restructure or migrate the monorepo layout.
-- AWS tools run in SIMULATED mode by default (no `AWS_ACCESS_KEY_ID` set); this is intentional for demo safety.
+- Keep existing monorepo structure (`pnpm` workspace with `artifacts/` and `lib/`)
+- Do not restructure or migrate the stack
