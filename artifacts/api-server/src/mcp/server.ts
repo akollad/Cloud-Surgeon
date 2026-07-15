@@ -57,14 +57,7 @@ logAwsToolMode();
 
 const COCKROACH_API_BASE = "https://cockroachlabs.cloud/api/v1";
 
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-// Resolve the ccloud binary from <workspace-root>/.tools/ccloud.
-// This path is relative to mcp/server.ts (dist/mcp/server.mjs at runtime),
-// so we walk up: dist/mcp → dist → artifacts/api-server → artifacts → workspace-root.
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CCLOUD_BINARY = path.resolve(__dirname, "..", "..", "..", "..", ".tools", "ccloud");
+import { CCLOUD_BINARY } from "../lib/ccloud-path";
 
 /**
  * Executes a real `ccloud` CLI command.

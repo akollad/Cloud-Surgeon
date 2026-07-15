@@ -463,11 +463,7 @@ router.get("/metrics/playbooks", async (_req, res): Promise<void> => {
 //   Returns cliMode:"ccloud_binary" + data on success (when authenticated via
 //   POST /api/setup/ccloud-auth), or an error with setup instructions on failure.
 //   Use this endpoint to demonstrate the two-layer architecture to hackathon judges.
-import { resolve as pathResolve, dirname as pathDirname } from "node:path";
-import { fileURLToPath as ftu } from "node:url";
-
-const _metricsDir = pathDirname(ftu(import.meta.url));
-const CCLOUD_BINARY_PATH = pathResolve(_metricsDir, "..", "..", "..", ".tools", "ccloud");
+import { CCLOUD_BINARY as CCLOUD_BINARY_PATH } from "../lib/ccloud-path";
 
 router.get("/metrics/ccloud-binary-test", async (_req, res): Promise<void> => {
   const execFileAsync2 = promisify(execFile);

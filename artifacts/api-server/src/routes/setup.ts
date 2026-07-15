@@ -18,20 +18,11 @@
 
 import { Router } from "express";
 import { spawn } from "node:child_process";
-import path from "node:path";
 import { apiKeyAuth } from "../middleware/apiKeyAuth";
 import { logger } from "../lib/logger";
+import { CCLOUD_BINARY } from "../lib/ccloud-path";
 
 const router = Router();
-
-// Resolve the ccloud binary: workspace root .tools/ccloud
-const CCLOUD_BINARY = path.resolve(
-  process.cwd(),
-  "..",
-  "..",
-  ".tools",
-  "ccloud",
-);
 
 // In-flight auth session (only one at a time)
 type AuthSession = {

@@ -25,34 +25,82 @@ const CCLOUD_BINARY =
 /**
  * Bootstrap ccloud credentials from COCKROACH_CLOUD_API_KEY.
  *
- * ccloud v0.6.12 does not support headless API-key auth via env var — it reads
- * its session from ~/.config/.cockroachdb/credentials.json (or
- * $XDG_CONFIG_HOME/.cockroachdb/credentials.json). The file format is simply:
- *   { "default": { "apiKey": "<COCKROACH_CLOUD_API_KEY>" } }
+ * ccloud v0.6.12 requires three config files to consider itself authenticated:
+ *   credentials.json   — { "default": { "apiKey": "..." } }
+ *   profiles.json      — org info (organizationId, name, server, etc.)
+ *   configuration.json — SDK publishable keys + feature flags (non-sensitive)
  *
- * Writing this file at startup lets ccloud run without any browser OAuth in
- * ECS, CI, or any headless environment. The API key is already present as a
- * secret — this just tells ccloud where to find it.
+ * The OAuth flow (ccloud auth login --no-redirect) writes all three. In ECS /
+ * any headless environment we write them at startup from known values so the
+ * binary works without browser interaction. The API key is already present as
+ * a secret — the org info comes from the CockroachDB Cloud REST API.
+ *
+ * Fetches org info asynchronously so we don't block the process start.
  */
-function bootstrapCcloudCredentials(): void {
+async function bootstrapCcloudCredentials(): Promise<void> {
   const apiKey = process.env.COCKROACH_CLOUD_API_KEY;
   if (!apiKey) return;
 
   const configHome = process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config");
   const dir = path.join(configHome, ".cockroachdb");
-  const file = path.join(dir, "credentials.json");
 
   try {
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(file, JSON.stringify({ default: { apiKey } }, null, 2), { mode: 0o600 });
-    logger.info(`[CCLOUD] Credentials written to ${file} — Layer 1 (binary) will be active`);
+
+    // 1. credentials.json — always written from env var
+    fs.writeFileSync(
+      path.join(dir, "credentials.json"),
+      JSON.stringify({ default: { apiKey } }, null, 2),
+      { mode: 0o600 },
+    );
+
+    // 2. profiles.json — fetch org info from the REST API (same key, same call path as the MCP layer)
+    let orgId = "b1641606-7293-4689-8f8a-ebe0efe912de"; // known from initial auth — overwritten below if fetchable
+    let orgLabel = "org-3bf3g";
+    let orgName = "Akollad Groupe";
+    let userFullName = "Ryan Sabowa";
+    try {
+      const resp = await fetch("https://cockroachlabs.cloud/api/v1/jwt-issuer/service-accounts/self", {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+      if (resp.ok) {
+        const data = await resp.json() as { organization_id?: string; organization_label?: string; organization_name?: string; name?: string };
+        if (data.organization_id) orgId = data.organization_id;
+        if (data.organization_label) orgLabel = data.organization_label;
+        if (data.organization_name) orgName = data.organization_name;
+        if (data.name) userFullName = data.name;
+      }
+    } catch { /* keep defaults */ }
+
+    fs.writeFileSync(
+      path.join(dir, "profiles.json"),
+      JSON.stringify({
+        default: {
+          organizationId: orgId,
+          organizationLabel: orgLabel,
+          organizationName: orgName,
+          server: "https://cockroachlabs.cloud",
+          userFullName,
+        },
+      }, null, 2),
+      { mode: 0o600 },
+    );
+
+    // 3. configuration.json — non-sensitive SDK config ccloud expects to exist
+    fs.writeFileSync(
+      path.join(dir, "configuration.json"),
+      JSON.stringify({ publishableKeys: { segmentCCloudAPIKey: "T1T8EQjYCBgeWPsoG0Zs8wFZSDB6xLXF" }, flags: {} }, null, 2),
+      { mode: 0o600 },
+    );
+
+    logger.info(`[CCLOUD] Config written to ${dir} (credentials + profiles + configuration) — Layer 1 active`);
   } catch (err) {
-    logger.warn({ err }, "[CCLOUD] Could not write credentials.json — falling back to REST API");
+    logger.warn({ err }, "[CCLOUD] Could not write ccloud config — falling back to REST API");
   }
 }
 
-// Bootstrap ccloud before the server starts listening
-bootstrapCcloudCredentials();
+// Bootstrap ccloud before the server starts listening (fire-and-forget — non-blocking)
+bootstrapCcloudCredentials().catch(() => {});
 
 const rawPort = process.env["PORT"];
 
