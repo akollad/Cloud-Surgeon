@@ -47,6 +47,10 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# ccloud CLI session token (stored by ccloud after `auth login --no-redirect`)
+# Never commit — re-authenticate via POST /api/setup/ccloud-auth
+.config/.cockroachdb/credentials.json
 # Environment files (ignore .env but keep .env.example)
 .env
 ! .env.example
