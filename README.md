@@ -4,6 +4,8 @@
 
 Built for the **CockroachDB × AWS Hackathon 2026**.
 
+**🔗 Live demo:** https://d3ddnpg3hz3st4.cloudfront.net/ · password `cloudsurgeon-demo`
+
 ---
 
 ## What it does
@@ -164,7 +166,7 @@ graph TB
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/<your-org>/cloud-surgeon.git
+git clone https://github.com/<your-github-username>/cloud-surgeon.git
 cd cloud-surgeon
 
 # Node dependencies (all workspaces)
