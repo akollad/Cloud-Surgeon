@@ -1,23 +1,25 @@
 ---
 name: ccloud CLI headless auth in ECS
-description: How to run the ccloud binary in a container without browser OAuth — env var name, base image, fallback pattern.
+description: ccloud v0.6.12 cannot authenticate headlessly — REST API fallback is the real working path; binary is present for cosmetic/demo value only.
 ---
 
-## Rule
-Set `COCKROACH_API_KEY` (not `COCKROACH_CLOUD_API_KEY`) in the ECS task definition. The ccloud binary reads this shorter name automatically for headless auth (supported since v0.5+).
+# ccloud CLI in ECS — what actually works
 
-## Dockerfile requirements
-- Use `node:24-slim` (Debian/glibc) for the runtime stage — ccloud is a glibc binary.
-- `node:24-alpine` (musl libc) is **incompatible** — do not switch back.
-- Download in a separate `debian:bookworm-slim` build stage, then `COPY --from=ccloud`.
+## Confirmed behaviour (live test, July 2026)
+`COCKROACH_API_KEY` is set in the ECS task definition with the correct value, but ccloud v0.6.12
+still responds: `Error: not logged in. Use 'ccloud auth login' to login`.
 
-## Fallback pattern
-`execCcloud()` in `artifacts/api-server/src/mcp/server.ts`:
-- Passes `COCKROACH_API_KEY: process.env.COCKROACH_CLOUD_API_KEY` in the child process env.
-- Returns `{ ok: false, notFound: true }` when binary is not in PATH (local dev).
-- On `notFound`, `callCockroachCloudApi()` falls back to `callCockroachCloudRestApi()`.
-- Response always includes `cliMode: "ccloud_binary"` or `"rest"` so the agent knows which path was taken.
+**The binary cannot authenticate headlessly.** `ccloud-headless-auth.md` is the authoritative note.
 
-**Why:** ccloud v0.6.12 requires browser OAuth in interactive mode; `COCKROACH_API_KEY` env var is the headless bypass. REST fallback ensures local dev continues working without Docker.
+## Dockerfile requirements (still needed)
+- Use `node:24-slim` (Debian/glibc) — ccloud is a glibc binary; Alpine (musl) is incompatible.
+- Install `ca-certificates` via apt-get — Debian slim ships without the system CA bundle; the binary
+  needs it to reach `cockroachlabs.cloud` even if auth ultimately fails.
+- `curl` must also be installed for the ECS container health check.
 
-**How to apply:** Any time a new ECS task definition is created, add both `COCKROACH_CLOUD_API_KEY` (for the REST API and MCP) and `COCKROACH_API_KEY` (same value, for the ccloud binary).
+## What actually runs
+`callCockroachCloudRestApi()` in `artifacts/api-server/src/mcp/server.ts` — calls the same REST API
+that ccloud wraps. Results are identical. Every response includes `cliMode: "rest"` and a
+`ccloudEquivalent` field showing the exact ccloud command for transparency.
+
+**Why acceptable:** The REST API is the same data source. Documented explicitly in tool descriptions.

@@ -1,6 +1,6 @@
 - [Orval zod codegen breaks on format uuid/date-time](orval-zod-uuid-format.md) — `format: uuid` in openapi.yaml generates zod v4-only `zod.uuid()`; use plain `type: string` instead.
 - [ccloud CLI headless auth](ccloud-headless-auth.md) — v0.6.12 needs browser OAuth; call the REST API directly with COCKROACH_CLOUD_API_KEY instead.
-- [ccloud CLI headless auth in ECS](ccloud-cli-ecs.md) — COCKROACH_API_KEY env var (not COCKROACH_CLOUD_API_KEY) enables headless ccloud; binary is glibc, needs node:24-slim not Alpine.
+- [ccloud CLI headless auth in ECS](ccloud-cli-ecs.md) — v0.6.12 headless auth fails even with COCKROACH_API_KEY; REST fallback is the real path; node:24-slim + ca-certificates + curl required.
 - [CDC webhook token auth pattern](cdc-webhook-token.md) — changefeed sink URL gets ?token=CDC_WEBHOOK_SECRET; server validates query param; existing changefeed recreated if token missing from description.
 - [Incident storm detection architecture](incident-storm-detection.md) — CockroachDB vector similarity + timestamp window detects cascades; stormDetected in context_json forces PENDING_APPROVAL routing.
 - [IAM CloudWatch Resource star justified](iam-cloudwatch-star.md) — GetMetricData and DescribeAlarms cannot be scoped to resource ARNs; this is an AWS API limitation, not a configuration gap.

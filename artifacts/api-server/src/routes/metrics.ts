@@ -16,6 +16,8 @@
  */
 
 import { Router, type IRouter } from "express";
+import { promisify } from "node:util";
+import { execFile } from "node:child_process";
 import { sql } from "drizzle-orm";
 import { db } from "@workspace/db";
 import { apiKeyAuth } from "../middleware/apiKeyAuth";
@@ -452,6 +454,53 @@ router.get("/metrics/playbooks", async (_req, res): Promise<void> => {
     });
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// ── ccloud binary smoke-test ───────────────────────────────────────────────
+// GET /api/metrics/ccloud-binary-test
+//   Directly executes the ccloud binary (Layer 1) — no REST fallback.
+//   Returns cliMode:"cli" + stdout on success, or an error object on failure.
+//   Use this to verify that headless auth (COCKROACH_API_KEY) is working in ECS.
+router.get("/metrics/ccloud-binary-test", async (_req, res): Promise<void> => {
+  const execFileAsync = promisify(execFile);
+  const apiKey = process.env.COCKROACH_CLOUD_API_KEY ?? process.env.COCKROACH_API_KEY;
+
+  if (!apiKey) {
+    res.status(500).json({ ok: false, error: "Neither COCKROACH_CLOUD_API_KEY nor COCKROACH_API_KEY is set" });
+    return;
+  }
+
+  const started = Date.now();
+  try {
+    const { stdout, stderr } = await execFileAsync(
+      "ccloud",
+      ["cluster", "list", "-o", "json"],
+      {
+        env: { ...process.env, COCKROACH_API_KEY: apiKey },
+        timeout: 15_000,
+      },
+    );
+    let parsed: unknown = null;
+    try { parsed = JSON.parse(stdout.trim()); } catch { /* raw */ }
+    res.json({
+      ok: true,
+      cliMode: "cli",
+      durationMs: Date.now() - started,
+      stdout: stdout.trim().slice(0, 500),
+      stderr: stderr.trim().slice(0, 200) || undefined,
+      parsed,
+    });
+  } catch (err: unknown) {
+    const e = err as { code?: string; stdout?: string; stderr?: string; message?: string };
+    res.status(500).json({
+      ok: false,
+      cliMode: e.code === "ENOENT" ? "not-found" : "error",
+      durationMs: Date.now() - started,
+      code: e.code,
+      stdout: (e.stdout ?? "").trim().slice(0, 300) || undefined,
+      stderr: (e.stderr ?? e.message ?? String(err)).trim().slice(0, 300),
+    });
   }
 });
 
