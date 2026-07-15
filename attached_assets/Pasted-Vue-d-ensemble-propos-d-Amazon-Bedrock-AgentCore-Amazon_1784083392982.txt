@@ -1,0 +1,46 @@
+Vue d’ensemble
+À propos d’Amazon Bedrock AgentCore
+Amazon Bedrock AgentCore est un ensemble modulaire de fonctionnalités permettant de créer, déployer et exploiter des agents de niveau production de manière sécurisée et à l’échelle à l’aide de tout framework ou modèle.
+
+Les fonctionnalités d’AgentCore sont optimisées pour fonctionner ensemble ou individuellement, ce qui vous donne la flexibilité nécessaire pour les intégrer à n’importe quel framework open source.
+
+Amazon Bedrock AgentCore Overview Chart
+Créer et déployer
+Harness
+Harness offre un moyen entièrement géré de créer et d'exécuter des agents d'IA sans gérer l'infrastructure ni écrire de code d'orchestration. Harness gère automatiquement la boucle de l'agent, offrant à chaque session un environnement d'exécution isolé avec son propre système de fichiers et son propre shell. Connectez-vous aux fonctionnalités AgentCore intégrées telles que Browser, Memory et Gateway, ou apportez vos propres outils via des serveurs MCP et des définitions de fonctions en ligne. Créez simplement un Harness en définissant votre modèle, l'invite du système et les outils nécessaires pour démarrer.
+Voir l’agent Harness
+Outils intégrés
+Les outils intégrés offrent un moyen simple d’intégrer les outils entièrement gérés d’Amazon, comme l’interpréteur de code et le navigateur, à votre agent. Ces fonctionnalités sont généralement essentielles pour créer des flux de travail agentiques robustes et adaptés au monde réel.
+Voir les outils intégrés
+Passerelles
+Les passerelles utilisent des protocoles open source, comme MCP (Model Context Protocol) pour appeler des outils via des schémas OpenAPI, des schémas d’API REST ou sous forme d’intégrations préconfigurées sans que vous ayez à écrire du code supplémentaire ou à gérer l’infrastructure. Vous pouvez également configurer les paramètres d’identité de vos passerelles afin de gérer de façon sécurisée l’accès aux ressources en aval.
+Voir les passerelles
+Identité
+L’identité permet aux agents de gérer en toute sécurité l’accès aux ressources en s’intégrant aux principaux fournisseurs d’identité. Vous pouvez ajouter l’identité entrante aux ressources pour activer l’authentification et l’autorisation de l’appelant, et vous pouvez activer l’identité sortante pour fournir un accès aux ressources en aval.
+Afficher l’identité
+Mémoire
+La mémoire permet aux agents de conserver leurs connaissances et d’apprendre en permanence en tirant parti de stratégies intégrées et/ou personnalisées pour extraire et stocker automatiquement les principaux types de mémoire à chaque interaction. Cela permet aux agents d’être conscients du contexte d’une session à l’autre.
+Voir la mémoire
+Paiements
+Permettez aux agents d’IA d’exécuter de manière autonome des paiements de microtransactions pour les API payantes, les MCP et le contenu en quelques lignes de code seulement grâce à une gestion sécurisée des informations d’identification via le service d’identification AgentCore.
+Voir les paiements
+Politique
+La politique offre un contrôle déterministe pour garantir que les agents opèrent dans le respect de limites et de règles métier définies sans les ralentir. Créez facilement des règles précises à l’aide du langage naturel ou de Cedar (le langage de politique open source d’AWS). Cette fonctionnalité s’intègre à Gateway, contrôlant qui peut effectuer quelles actions dans quelles conditions.
+Voir les politiques
+Registry – Version préliminaire
+Registry offre un moyen centralisé de répertorier et de gérer les agents, les serveurs MCP, les outils et les compétences au sein de votre organisation. Registry permet aux équipes de publier, de gérer les versions et de réutiliser les ressources liées aux agents, ce qui facilite la recherche et l’intégration des outils et agents adaptés à chaque flux de travail. Il vous suffit d’enregistrer vos agents et outils existants dans Registry pour commencer.
+Afficher Registry
+Environnement d’exécution pour les agents et les outils
+L’environnement d’exécution offre un moyen sécurisé, sans serveur et spécialement conçu pour déployer et mettre à l’échelle des agents et des outils d’IA en utilisant n’importe quel cadre d’agent et n’importe quel modèle. Exécution permet des démarrages à froid rapides, une exécution longue à la pointe de l’industrie, une véritable isolation des sessions, une identité intégrée et la prise en charge de données utiles multimodales. Il vous suffit d’héberger le code de votre agent ou de votre outil existant dans Exécution pour commencer.
+Voir l’exécution pour les agents et les outils
+Tester
+Terrain de jeu Runtime
+Terrain de jeu Runtime offre un moyen léger de tester facilement votre agent en envoyant une entrée JSON pour voir sa réponse et les spans associés.
+Voir Runtime Playground
+Évaluer
+Observabilité
+Les tableaux de bord d’observabilité vous permettent de surveiller les performances des agents en temps réel afin de comprendre les métriques opérationnelles clés, comme le nombre de sessions, la latence, la durée, l’utilisation des jetons, les taux d’erreur, etc. Activez l’observabilité par ressource pour commencer à visualiser vos données.
+Afficher le tableau de bord d'observabilité 
+Évaluations
+Les évaluations vous permettent d’évaluer les qualités de performance des agents d’IA. Définissez les configurations d’évaluation à l’aide d’évaluateurs intégrés, comme l’exactitude, la précision des appels d’outils, la nocivité, etc. Améliorez encore les capacités d’évaluation en définissant des évaluateurs personnalisés. Consultez les résultats des évaluations dans les tableaux de bord des métriques d’observabilité.
+Voir les évaluations
