@@ -38,7 +38,9 @@ import type {
   LogCount,
   MetricIngestInput,
   MetricIngestResult,
+  Playbook,
   RecalibrateResult,
+  RollbackPlanResult,
   SeedResult,
   SigkillResult,
   WebhookResult,
@@ -653,6 +655,160 @@ export function useGetIncidentCausalChain<TData = Awaited<ReturnType<typeof getI
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetIncidentCausalChainQueryOptions(incidentId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetIncidentPlaybookUrl = (incidentId: string,) => {
+
+
+
+
+  return `/api/incidents/${incidentId}/playbook`
+}
+
+/**
+ * @summary Get AI-generated repair playbook for an incident (Feature 1 — Explainable AI)
+ */
+export const getIncidentPlaybook = async (incidentId: string, options?: RequestInit): Promise<Playbook> => {
+
+  return customFetch<Playbook>(getGetIncidentPlaybookUrl(incidentId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetIncidentPlaybookQueryKey = (incidentId: string,) => {
+    return [
+    `/api/incidents/${incidentId}/playbook`
+    ] as const;
+    }
+
+
+export const getGetIncidentPlaybookQueryOptions = <TData = Awaited<ReturnType<typeof getIncidentPlaybook>>, TError = ErrorType<void>>(incidentId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getIncidentPlaybook>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetIncidentPlaybookQueryKey(incidentId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getIncidentPlaybook>>> = ({ signal }) => getIncidentPlaybook(incidentId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: incidentId !== null && incidentId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getIncidentPlaybook>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetIncidentPlaybookQueryResult = NonNullable<Awaited<ReturnType<typeof getIncidentPlaybook>>>
+export type GetIncidentPlaybookQueryError = ErrorType<void>
+
+
+/**
+ * @summary Get AI-generated repair playbook for an incident (Feature 1 — Explainable AI)
+ */
+
+export function useGetIncidentPlaybook<TData = Awaited<ReturnType<typeof getIncidentPlaybook>>, TError = ErrorType<void>>(
+ incidentId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getIncidentPlaybook>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetIncidentPlaybookQueryOptions(incidentId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetIncidentRollbackPlanUrl = (incidentId: string,) => {
+
+
+
+
+  return `/api/incidents/${incidentId}/rollback-plan`
+}
+
+/**
+ * @summary Get rollback plan for an incident (Feature 3 — Rollback Policy)
+ */
+export const getIncidentRollbackPlan = async (incidentId: string, options?: RequestInit): Promise<RollbackPlanResult> => {
+
+  return customFetch<RollbackPlanResult>(getGetIncidentRollbackPlanUrl(incidentId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetIncidentRollbackPlanQueryKey = (incidentId: string,) => {
+    return [
+    `/api/incidents/${incidentId}/rollback-plan`
+    ] as const;
+    }
+
+
+export const getGetIncidentRollbackPlanQueryOptions = <TData = Awaited<ReturnType<typeof getIncidentRollbackPlan>>, TError = ErrorType<void>>(incidentId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getIncidentRollbackPlan>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetIncidentRollbackPlanQueryKey(incidentId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getIncidentRollbackPlan>>> = ({ signal }) => getIncidentRollbackPlan(incidentId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: incidentId !== null && incidentId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getIncidentRollbackPlan>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetIncidentRollbackPlanQueryResult = NonNullable<Awaited<ReturnType<typeof getIncidentRollbackPlan>>>
+export type GetIncidentRollbackPlanQueryError = ErrorType<void>
+
+
+/**
+ * @summary Get rollback plan for an incident (Feature 3 — Rollback Policy)
+ */
+
+export function useGetIncidentRollbackPlan<TData = Awaited<ReturnType<typeof getIncidentRollbackPlan>>, TError = ErrorType<void>>(
+ incidentId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getIncidentRollbackPlan>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetIncidentRollbackPlanQueryOptions(incidentId,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

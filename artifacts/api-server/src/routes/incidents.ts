@@ -378,6 +378,68 @@ router.get("/incidents/:incidentId/causal-chain", async (req, res): Promise<void
   });
 });
 
+// ── Playbook for incident (Feature 1: Explainable AI) ─────────────────────
+
+router.get("/incidents/:incidentId/playbook", async (req, res): Promise<void> => {
+  const params = GetIncidentParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+  const { incidentId } = params.data;
+  const rows = await db.execute<{
+    playbook_id: string; incident_id: string; strategy_name: string;
+    title: string; content_md: string; generated_by: string; created_at: string;
+  }>(sql`
+    SELECT playbook_id, incident_id, strategy_name, title, content_md, generated_by, created_at
+    FROM   playbooks
+    WHERE  incident_id = ${incidentId}
+    LIMIT  1
+  `);
+  if (rows.rows.length === 0) {
+    res.status(404).json({ error: "Playbook not found — incident may not be resolved yet" });
+    return;
+  }
+  const r = rows.rows[0];
+  res.json({
+    playbookId: r.playbook_id, incidentId: r.incident_id, strategyName: r.strategy_name,
+    title: r.title, contentMd: r.content_md, generatedBy: r.generated_by, createdAt: r.created_at,
+  });
+});
+
+// ── Rollback plan for incident (Feature 3: Rollback Policy) ───────────────
+
+router.get("/incidents/:incidentId/rollback-plan", async (req, res): Promise<void> => {
+  const params = GetIncidentParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+  const { incidentId } = params.data;
+  const rows = await db.execute<{
+    rollback_id: string; incident_id: string; strategy_name: string;
+    pre_repair_state: unknown; executed_commands: string; rollback_steps: string;
+    estimated_rollback_time: string | null; risk_level: string; created_at: string;
+  }>(sql`
+    SELECT rollback_id, incident_id, strategy_name, pre_repair_state, executed_commands,
+           rollback_steps, estimated_rollback_time, risk_level, created_at
+    FROM   rollback_plans
+    WHERE  incident_id = ${incidentId}
+    LIMIT  1
+  `);
+  if (rows.rows.length === 0) {
+    res.status(404).json({ error: "Rollback plan not found — incident may not have reached repair phase yet" });
+    return;
+  }
+  const r = rows.rows[0];
+  res.json({
+    rollbackId: r.rollback_id, incidentId: r.incident_id, strategyName: r.strategy_name,
+    preRepairState: r.pre_repair_state, executedCommands: r.executed_commands,
+    rollbackSteps: r.rollback_steps, estimatedRollbackTime: r.estimated_rollback_time,
+    riskLevel: r.risk_level, createdAt: r.created_at,
+  });
+});
+
 // ── Incident handoffs ─────────────────────────────────────────────────────
 
 router.get("/incidents/:incidentId/handoffs", async (req, res): Promise<void> => {

@@ -211,6 +211,33 @@ export interface CausalChainResult {
   note?: string;
 }
 
+export interface Playbook {
+  playbookId?: string;
+  incidentId?: string;
+  strategyName?: string;
+  title?: string;
+  contentMd?: string;
+  generatedBy?: string;
+  createdAt?: string;
+  [key: string]: unknown;
+ }
+
+export type RollbackPlanResultPreRepairState = { [key: string]: unknown };
+
+export interface RollbackPlanResult {
+  rollbackId?: string;
+  incidentId?: string;
+  strategyName?: string;
+  preRepairState?: RollbackPlanResultPreRepairState;
+  executedCommands?: string;
+  rollbackSteps?: string;
+  /** @nullable */
+  estimatedRollbackTime?: string | null;
+  riskLevel?: string;
+  createdAt?: string;
+  [key: string]: unknown;
+ }
+
 export interface Handoff {
   fromAgent?: string;
   toAgent?: string;

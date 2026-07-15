@@ -53,8 +53,7 @@ export const TriggerIncidentResponse = zod.object({
 })).optional(),
   "finalResponse": zod.string().nullish(),
   "crashed": zod.boolean().optional()
-// additionalProperties: true — orval omits .passthrough(); added manually to match openapi spec
-}).passthrough(),
+}),
   "claimedByAgent": zod.string().nullish(),
   "causedByIncidentId": zod.string().nullish(),
   "updatedAt": zod.string()
@@ -89,8 +88,7 @@ export const ListIncidentsResponseItem = zod.object({
 })).optional(),
   "finalResponse": zod.string().nullish(),
   "crashed": zod.boolean().optional()
-// additionalProperties: true — orval omits .passthrough(); added manually to match openapi spec
-}).passthrough(),
+}),
   "claimedByAgent": zod.string().nullish(),
   "causedByIncidentId": zod.string().nullish(),
   "updatedAt": zod.string()
@@ -130,8 +128,7 @@ export const GetIncidentResponse = zod.object({
 })).optional(),
   "finalResponse": zod.string().nullish(),
   "crashed": zod.boolean().optional()
-// additionalProperties: true — orval omits .passthrough(); added manually to match openapi spec
-}).passthrough(),
+}),
   "claimedByAgent": zod.string().nullish(),
   "causedByIncidentId": zod.string().nullish(),
   "updatedAt": zod.string()
@@ -270,6 +267,44 @@ export const GetIncidentCausalChainResponse = zod.object({
   "incidentId": zod.string().optional(),
   "chain": zod.array(zod.record(zod.string(), zod.unknown())).optional(),
   "note": zod.string().optional()
+})
+
+
+/**
+ * @summary Get AI-generated repair playbook for an incident (Feature 1 — Explainable AI)
+ */
+export const GetIncidentPlaybookParams = zod.object({
+  "incidentId": zod.coerce.string()
+})
+
+export const GetIncidentPlaybookResponse = zod.object({
+  "playbookId": zod.string().optional(),
+  "incidentId": zod.string().optional(),
+  "strategyName": zod.string().optional(),
+  "title": zod.string().optional(),
+  "contentMd": zod.string().optional(),
+  "generatedBy": zod.string().optional(),
+  "createdAt": zod.string().optional()
+})
+
+
+/**
+ * @summary Get rollback plan for an incident (Feature 3 — Rollback Policy)
+ */
+export const GetIncidentRollbackPlanParams = zod.object({
+  "incidentId": zod.coerce.string()
+})
+
+export const GetIncidentRollbackPlanResponse = zod.object({
+  "rollbackId": zod.string().optional(),
+  "incidentId": zod.string().optional(),
+  "strategyName": zod.string().optional(),
+  "preRepairState": zod.record(zod.string(), zod.unknown()).optional(),
+  "executedCommands": zod.string().optional(),
+  "rollbackSteps": zod.string().optional(),
+  "estimatedRollbackTime": zod.string().nullish(),
+  "riskLevel": zod.string().optional(),
+  "createdAt": zod.string().optional()
 })
 
 

@@ -239,3 +239,32 @@ export const playbooksTable = pgTable("playbooks", {
 });
 
 export type Playbook = typeof playbooksTable.$inferSelect;
+
+/**
+ * Rollback plans — Feature 3 (Rollback Policy).
+ *
+ * Before each AWS repair, Cloud-Surgeon captures the pre-repair state and
+ * generates a structured rollback plan. Stored here so operators can
+ * review and execute it if the repair causes unintended side effects.
+ */
+export const rollbackPlansTable = pgTable("rollback_plans", {
+  rollbackId: uuid("rollback_id").primaryKey().defaultRandom(),
+  incidentId: uuid("incident_id")
+    .notNull()
+    .unique()
+    .references(() => incidentStateTable.incidentId),
+  strategyName: varchar("strategy_name", { length: 100 }).notNull(),
+  /** JSON snapshot of the service state captured before any repair action. */
+  preRepairState: jsonb("pre_repair_state").notNull().default({}),
+  /** Newline-separated list of commands/actions actually executed. */
+  executedCommands: text("executed_commands").notNull().default(""),
+  /** Step-by-step instructions to undo the repair. */
+  rollbackSteps: text("rollback_steps").notNull().default(""),
+  /** Human-readable time estimate to complete the rollback. */
+  estimatedRollbackTime: varchar("estimated_rollback_time", { length: 50 }),
+  /** low / medium / high — rollback risk tier. */
+  riskLevel: varchar("risk_level", { length: 20 }).notNull().default("low"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type RollbackPlan = typeof rollbackPlansTable.$inferSelect;

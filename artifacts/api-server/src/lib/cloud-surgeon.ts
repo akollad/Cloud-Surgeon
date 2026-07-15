@@ -38,6 +38,28 @@ interface AgentTurn {
   toolOutput: Record<string, unknown>;
 }
 
+export interface RepairPlan {
+  strategy: string;
+  estimatedDuration: string;
+  riskLevel: "low" | "medium" | "high";
+  blastRadius: string;
+  steps: string[];
+  preconditions: string[];
+  expectedOutcome: string;
+  alternatives: string[];
+  generatedBy: "llm" | "deterministic";
+  generatedAt: string;
+}
+
+export interface RollbackInfo {
+  steps: string[];
+  estimatedTime: string;
+  riskLevel: "low" | "medium" | "high";
+  commandsExecuted: string[];
+  warnings: string[];
+  generatedAt: string;
+}
+
 export interface IncidentContext {
   alertText?: string;
   strategyName?: string;
@@ -51,6 +73,10 @@ export interface IncidentContext {
   // Layer 1 — automatic calibration
   correctionFactor?: number | null; // strategy correction factor (1.0 = neutral)
   effectiveWinRate?: number | null; // winRate * correctionFactor (used for routing)
+  // Feature 2: pre-execution simulation plan
+  repairPlan?: RepairPlan;
+  // Feature 3: rollback info stored in context for quick access
+  rollbackInfo?: RollbackInfo;
   turns?: AgentTurn[];
   finalResponse?: string | null;
   crashed?: boolean;
@@ -216,6 +242,381 @@ export async function detectIncidentStorm(
     // Non-fatal: storm detection must never block the agent loop
     return { isStorm: false, relatedCount: 0, closestDistance: null };
   }
+}
+
+// ── Feature 2: Pre-execution simulation plan ──────────────────────────────
+//
+// Before any AWS action, the agent generates a structured repair plan that
+// lists the exact steps it will take, the estimated duration, blast radius,
+// and risk level. This is stored in context_json.repairPlan so operators can
+// review it on the dashboard and verify the agent's intent before execution.
+
+const STRATEGY_PLANS: Record<string, Omit<RepairPlan, "strategy" | "generatedBy" | "generatedAt">> = {
+  ecs_service_restart: {
+    estimatedDuration: "45–90 seconds",
+    riskLevel: "medium",
+    blastRadius: "All tasks for the target ECS service",
+    steps: [
+      "Describe current ECS service task count and health",
+      "Force a new deployment (rolling restart of tasks)",
+      "Wait for new tasks to reach RUNNING state",
+      "Drain and deregister old tasks from ALB target group",
+      "Verify ALB health checks pass on new tasks",
+    ],
+    preconditions: [
+      "ECS service must exist and be in ACTIVE state",
+      "Minimum 1 healthy task must survive the rolling restart",
+      "ALB target group health check endpoint must respond within 30 s",
+    ],
+    expectedOutcome: "Service returns to healthy state with all tasks running",
+    alternatives: ["scale_out_ecs (add capacity without restart)", "rds_cpu_throttle (if DB is root cause)"],
+  },
+  rds_cpu_throttle: {
+    estimatedDuration: "15–30 seconds",
+    riskLevel: "low",
+    blastRadius: "Single RDS instance — read-only performance during modification",
+    steps: [
+      "Check RDS instance CPU and connection metrics",
+      "Identify slow or blocking queries via pg_stat_activity",
+      "Terminate longest-running queries consuming > 80% CPU",
+      "Apply parameter group change to reduce max_connections if needed",
+      "Validate CPU returns below 70% threshold",
+    ],
+    preconditions: ["RDS instance must be in 'available' state", "DB user must have SUPERUSER privileges"],
+    expectedOutcome: "RDS CPU utilization returns below warning threshold within 30 seconds",
+    alternatives: ["lambda_concurrency_scale (offload compute)", "ecs_service_restart (reduce DB load)"],
+  },
+  lambda_concurrency_scale: {
+    estimatedDuration: "10–20 seconds",
+    riskLevel: "low",
+    blastRadius: "Target Lambda function concurrency limits only",
+    steps: [
+      "Get current reserved concurrency setting",
+      "Increase reserved concurrency by 2x (up to account limit)",
+      "Monitor throttle errors (ConcurrentExecutionLimitExceeded) for 60 s",
+      "If errors persist, check Lambda duration for downstream bottleneck",
+    ],
+    preconditions: ["Lambda function must exist", "Account concurrency limit must have headroom"],
+    expectedOutcome: "Lambda throttle rate drops to 0 within 20 seconds of scaling",
+    alternatives: ["ecs_service_restart (queue backlog drain)", "external_dependency_circuit_break"],
+  },
+  jvm_heap_restart: {
+    estimatedDuration: "60–120 seconds",
+    riskLevel: "medium",
+    blastRadius: "All JVM processes for the service (brief unavailability)",
+    steps: [
+      "Trigger heap dump for post-mortem analysis",
+      "Send SIGTERM to JVM processes (graceful shutdown)",
+      "Supervisor/ECS restarts the process with clean heap",
+      "Verify JVM heap usage drops below 70%",
+      "Confirm service health check passes",
+    ],
+    preconditions: ["Service must handle SIGTERM gracefully", "Heap dump destination must have disk space"],
+    expectedOutcome: "JVM heap resets to initial state; GC pressure eliminated",
+    alternatives: ["ecs_service_restart (container-level restart)", "rds_cpu_throttle (if OOM from DB result sets)"],
+  },
+  db_connection_pool_reset: {
+    estimatedDuration: "5–15 seconds",
+    riskLevel: "low",
+    blastRadius: "Existing DB connections for the target pool",
+    steps: [
+      "Check pg_stat_activity for idle connections exceeding pool limit",
+      "Terminate idle connections older than 5 minutes",
+      "Reset connection pool configuration (max_connections, idle_timeout)",
+      "Verify new connections can be established",
+    ],
+    preconditions: ["DB must be reachable", "Application must reconnect automatically on connection drop"],
+    expectedOutcome: "Connection pool drains to healthy level; pg_stat_activity idle count normalizes",
+    alternatives: ["rds_cpu_throttle (if connections high due to slow queries)"],
+  },
+  network_route_failover: {
+    estimatedDuration: "30–60 seconds",
+    riskLevel: "high",
+    blastRadius: "All cross-region traffic — full network path change",
+    steps: [
+      "Verify BGP peering status on both regions",
+      "Update Route 53 health check to mark primary region unhealthy",
+      "Failover DNS to secondary region (propagation: 30–60 s)",
+      "Verify secondary region is absorbing traffic",
+      "Monitor latency on failover path",
+    ],
+    preconditions: ["Secondary region must be warm and healthy", "Route 53 failover routing policy must be pre-configured"],
+    expectedOutcome: "Traffic rerouted to secondary region; cross-region latency returns to baseline",
+    alternatives: ["ecs_service_restart (if application-layer, not network)"],
+  },
+  iam_credential_rotation: {
+    estimatedDuration: "20–45 seconds",
+    riskLevel: "medium",
+    blastRadius: "All services using the affected IAM user/role",
+    steps: [
+      "Identify expired or revoked IAM credentials",
+      "Generate new access key pair for IAM user",
+      "Update Secret Manager / Parameter Store with new credentials",
+      "Trigger rolling restart of affected ECS tasks to pick up new creds",
+      "Delete old access key pair",
+    ],
+    preconditions: ["IAM user must not have reached 2-key limit", "Secrets Manager must be writable"],
+    expectedOutcome: "AccessDenied errors stop within 60 s as services rotate to new credentials",
+    alternatives: ["ecs_service_restart (if only task needs refresh)"],
+  },
+  external_dependency_circuit_break: {
+    estimatedDuration: "5–10 seconds",
+    riskLevel: "low",
+    blastRadius: "Requests to the failing external dependency only",
+    steps: [
+      "Confirm external dependency is returning errors",
+      "Open circuit breaker (reject calls, return cached/fallback response)",
+      "Enable retry queue with exponential backoff",
+      "Monitor circuit breaker state every 30 s for auto-recovery",
+    ],
+    preconditions: ["Circuit breaker library must be integrated in the service", "Fallback response must be defined"],
+    expectedOutcome: "Cascading failure stops; service returns graceful degraded mode",
+    alternatives: ["lambda_concurrency_scale (if retry storm overloads compute)"],
+  },
+  disk_cleanup: {
+    estimatedDuration: "30–120 seconds",
+    riskLevel: "low",
+    blastRadius: "Disk I/O on the target instance during cleanup",
+    steps: [
+      "Check disk usage per directory (df, du)",
+      "Identify and rotate old log files (> 7 days)",
+      "Clear temporary files and build artifacts",
+      "Trigger EBS snapshot if disk > 90% before cleanup",
+      "Verify disk usage drops below 80%",
+    ],
+    preconditions: ["Instance must be reachable via SSM Session Manager"],
+    expectedOutcome: "Disk usage returns below 80%; no data loss from production files",
+    alternatives: ["ecs_service_restart (if disk used by container overlay FS)"],
+  },
+  cloudwatch_alarm_triage: {
+    estimatedDuration: "15–30 seconds",
+    riskLevel: "low",
+    blastRadius: "CloudWatch alarm state only — no service impact",
+    steps: [
+      "Retrieve alarm history (last 24h)",
+      "Check if alarm is due to metric spike or sustained degradation",
+      "Determine if alarm threshold needs tuning (false positive)",
+      "If genuine: escalate to appropriate repair strategy",
+      "Acknowledge alarm in CloudWatch if handled",
+    ],
+    preconditions: ["CloudWatch GetMetricData access"],
+    expectedOutcome: "Alarm root cause identified; either resolved or escalated to correct strategy",
+    alternatives: ["ecs_service_restart", "rds_cpu_throttle", "lambda_concurrency_scale"],
+  },
+  default_repair: {
+    estimatedDuration: "60–180 seconds",
+    riskLevel: "medium",
+    blastRadius: "Unknown — generic repair mode, scope TBD",
+    steps: [
+      "Describe all resources mentioned in alert",
+      "Check health status of primary service",
+      "Attempt soft restart (graceful) before hard restart",
+      "Monitor for 60 s to confirm improvement",
+    ],
+    preconditions: ["Target service must be identifiable from alert text"],
+    expectedOutcome: "Service returns to healthy state; monitoring confirms incident closure",
+    alternatives: ["Trigger specific strategy once root cause is confirmed"],
+  },
+};
+
+export async function generateRepairPlan(
+  alertText: string,
+  strategyName: string,
+  serviceName: string,
+): Promise<RepairPlan> {
+  const base = STRATEGY_PLANS[strategyName] ?? STRATEGY_PLANS.default_repair!;
+  const plan: RepairPlan = {
+    strategy: strategyName,
+    ...base,
+    generatedBy: "deterministic",
+    generatedAt: new Date().toISOString(),
+  };
+
+  // Enrich expected outcome with LLM if available
+  const provider = (process.env.AI_PROVIDER ?? "bedrock").toLowerCase();
+  if (provider === "anthropic" && (process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL || process.env.ANTHROPIC_API_KEY)) {
+    try {
+      const prompt =
+        `You are a DevOps expert. For this incident on service '${serviceName}', ` +
+        `write one sentence describing the specific expected outcome of applying strategy '${strategyName}'.\n` +
+        `Incident: ${alertText.slice(0, 200)}\n` +
+        `Respond with ONLY the outcome sentence, no preamble.`;
+      let result: string | null = null;
+      if (process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL) {
+        const { anthropic } = await import("@workspace/integrations-anthropic-ai");
+        const msg = await anthropic.messages.create({
+          model: "claude-haiku-4-5", max_tokens: 150,
+          messages: [{ role: "user", content: prompt }],
+        });
+        const block = msg.content[0];
+        result = block?.type === "text" ? block.text.trim() : null;
+      } else if (process.env.ANTHROPIC_API_KEY) {
+        const { default: Anthropic } = await import("@anthropic-ai/sdk");
+        const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+        const msg = await client.messages.create({
+          model: "claude-3-5-haiku-latest", max_tokens: 150,
+          messages: [{ role: "user", content: prompt }],
+        });
+        const block = msg.content[0];
+        result = block?.type === "text" ? block.text.trim() : null;
+      }
+      if (result) { plan.expectedOutcome = result; plan.generatedBy = "llm"; }
+    } catch { /* non-fatal */ }
+  }
+
+  return plan;
+}
+
+// ── Feature 3: Rollback policy ─────────────────────────────────────────────
+//
+// After every AWS repair, Cloud-Surgeon captures the executed commands and
+// generates step-by-step rollback instructions. Stored in rollback_plans
+// (CockroachDB) + context_json.rollbackInfo (for instant dashboard display).
+
+const ROLLBACK_STEPS: Record<string, string[]> = {
+  ecs_service_restart: [
+    "Identify previous task definition: aws ecs describe-services --cluster <cluster> --services <service>",
+    "Roll back: aws ecs update-service --cluster <cluster> --service <service> --task-definition <family:N-1> --force-new-deployment",
+    "Wait for rollback deployment to stabilize (watch aws ecs describe-services)",
+    "Verify ALB health checks pass on rolled-back tasks",
+  ],
+  rds_cpu_throttle: [
+    "Restore original parameter group: aws rds modify-db-parameter-group --db-parameter-group-name <group> --parameters 'ParameterName=max_connections,ParameterValue=<original>,ApplyMethod=pending-reboot'",
+    "If reboot required: aws rds reboot-db-instance --db-instance-identifier <id>",
+    "Restart any legitimate long-running queries that were terminated",
+  ],
+  lambda_concurrency_scale: [
+    "Restore original concurrency: aws lambda put-function-concurrency --function-name <fn> --reserved-concurrent-executions <original>",
+    "Monitor throttle rate for 60 s to confirm rollback did not reintroduce issues",
+  ],
+  jvm_heap_restart: [
+    "If post-restart behaviour is wrong, roll back ECS task definition to previous image",
+    "aws ecs update-service --cluster <cluster> --service <service> --task-definition <family:N-1> --force-new-deployment",
+    "Inspect heap dump at /tmp/heapdump-*.hprof for root cause analysis",
+  ],
+  db_connection_pool_reset: [
+    "Restore original connection pool configuration in application config",
+    "aws ecs update-service --force-new-deployment to pick up config change",
+    "Reconnect application pools",
+  ],
+  network_route_failover: [
+    "Mark primary region healthy in Route 53 health check",
+    "Restore primary Route 53 weighted/failover record",
+    "aws route53 change-resource-record-sets — restore primary record",
+    "Wait for DNS TTL to propagate (60 s)",
+  ],
+  iam_credential_rotation: [
+    "If new key does not work, activate old key temporarily: aws iam update-access-key --access-key-id <old-key-id> --status Active",
+    "Update Secrets Manager back to old credentials",
+    "Trigger ECS rolling restart to pick up old credentials",
+  ],
+  external_dependency_circuit_break: [
+    "Close circuit breaker to allow traffic through again",
+    "Monitor error rate — if > 5% within 30 s, re-open circuit",
+    "Investigate external dependency status page before reopening",
+  ],
+  disk_cleanup: [
+    "No automated rollback for deleted files — restore from EBS snapshot if critical data lost",
+    "aws ec2 describe-snapshots --filters Name=volume-id,Values=<volume-id>",
+    "aws ec2 create-volume --snapshot-id <snapshot-id> --availability-zone <az>",
+  ],
+  cloudwatch_alarm_triage: [
+    "No infrastructure changes made — alarm triage is read-only",
+    "If alarm threshold was modified, restore original value in CloudWatch console",
+  ],
+  default_repair: [
+    "Restore previous service version via ECS task definition rollback",
+    "Check CloudWatch logs for errors introduced by the repair",
+    "Open incident for human review if uncertain",
+  ],
+};
+
+const ROLLBACK_RISK: Record<string, "low" | "medium" | "high"> = {
+  ecs_service_restart: "medium", rds_cpu_throttle: "low", lambda_concurrency_scale: "low",
+  jvm_heap_restart: "medium", db_connection_pool_reset: "low", network_route_failover: "high",
+  iam_credential_rotation: "high", external_dependency_circuit_break: "low",
+  disk_cleanup: "medium", cloudwatch_alarm_triage: "low", default_repair: "medium",
+};
+
+const ROLLBACK_TIMES: Record<string, string> = {
+  ecs_service_restart: "2–5 minutes", rds_cpu_throttle: "1–2 minutes",
+  lambda_concurrency_scale: "< 30 seconds", jvm_heap_restart: "2–4 minutes",
+  db_connection_pool_reset: "< 1 minute", network_route_failover: "1–3 minutes (DNS propagation)",
+  iam_credential_rotation: "2–3 minutes", external_dependency_circuit_break: "< 15 seconds",
+  disk_cleanup: "5–30 minutes (from snapshot)", cloudwatch_alarm_triage: "N/A (read-only)",
+  default_repair: "5–10 minutes",
+};
+
+async function generateAndStoreRollbackPlan(
+  incidentId: string,
+  strategyName: string,
+  toolOutput: Record<string, unknown>,
+  preRepairState: Record<string, unknown>,
+): Promise<RollbackInfo> {
+  const steps = ROLLBACK_STEPS[strategyName] ?? ROLLBACK_STEPS.default_repair!;
+  const estimatedTime = ROLLBACK_TIMES[strategyName] ?? "5–10 minutes";
+  const riskLevel = ROLLBACK_RISK[strategyName] ?? "medium";
+
+  const commandsExecuted: string[] = [];
+  if (toolOutput.action) commandsExecuted.push(`Action executed: ${toolOutput.action}`);
+  if (toolOutput.serviceName) commandsExecuted.push(`Target service: ${toolOutput.serviceName}`);
+  if (toolOutput.steps && Array.isArray(toolOutput.steps)) {
+    for (const step of (toolOutput.steps as unknown[]).slice(0, 5)) {
+      commandsExecuted.push(`• ${String(step).slice(0, 150)}`);
+    }
+  } else if (toolOutput.detail) {
+    commandsExecuted.push(`Detail: ${String(toolOutput.detail).slice(0, 200)}`);
+  }
+  if (commandsExecuted.length === 0) {
+    commandsExecuted.push(`aws_repair_service(strategy=${strategyName}, service=${preRepairState.serviceName ?? "auto-detected"})`);
+  }
+
+  const warnings: string[] = [];
+  if (riskLevel === "high") warnings.push("⚠ High-risk rollback — coordinate with on-call team before executing.");
+  if (strategyName === "disk_cleanup") warnings.push("⚠ Deleted files cannot be recovered without a snapshot.");
+  if (strategyName === "network_route_failover") warnings.push("⚠ DNS propagation takes 60 s — traffic will continue on failover path during rollback.");
+
+  const rollbackInfo: RollbackInfo = {
+    steps, estimatedTime, riskLevel, commandsExecuted, warnings,
+    generatedAt: new Date().toISOString(),
+  };
+
+  try {
+    await pool.query(
+      `INSERT INTO rollback_plans
+         (incident_id, strategy_name, pre_repair_state, executed_commands, rollback_steps, estimated_rollback_time, risk_level)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (incident_id) DO UPDATE
+         SET executed_commands = EXCLUDED.executed_commands,
+             rollback_steps    = EXCLUDED.rollback_steps`,
+      [
+        incidentId, strategyName, JSON.stringify(preRepairState),
+        commandsExecuted.join("\n"), steps.join("\n"), estimatedTime, riskLevel,
+      ],
+    );
+  } catch (err) {
+    const { logger } = await import("./logger");
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, "[Rollback] DB persist failed (non-fatal)");
+  }
+
+  return rollbackInfo;
+}
+
+/** Applied at server startup — idempotent DDL for rollback_plans table. */
+export async function createRollbackPlansTable(): Promise<void> {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS rollback_plans (
+      rollback_id              UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+      incident_id              UUID         NOT NULL UNIQUE REFERENCES incident_state(incident_id),
+      strategy_name            VARCHAR(100) NOT NULL,
+      pre_repair_state         JSONB        NOT NULL DEFAULT '{}',
+      executed_commands        TEXT         NOT NULL DEFAULT '',
+      rollback_steps           TEXT         NOT NULL DEFAULT '',
+      estimated_rollback_time  VARCHAR(50),
+      risk_level               VARCHAR(20)  NOT NULL DEFAULT 'low',
+      created_at               TIMESTAMPTZ  NOT NULL DEFAULT now()
+    )
+  `);
 }
 
 // ── Layer 1: AI-generated repair playbooks ────────────────────────────────
@@ -1109,7 +1510,31 @@ export async function runAgentLoop(
     const serviceName = detectServiceName(alertText);
     const toolInput = { serviceName, action: "describe_and_remediate" };
     const { thought, source: thoughtSource } = await invokeLLMThought(alertText, 1, context.turns[0]?.toolOutput ?? null);
+
+    // ── Feature 2: Generate pre-execution simulation plan ─────────────────
+    // Before touching AWS, the agent produces a structured plan explaining
+    // exactly what it intends to do, the blast radius, and risk level.
+    const repairPlan = await generateRepairPlan(alertText, strategyName, serviceName);
+    context.repairPlan = repairPlan;
+
+    // ── Feature 3: Capture pre-repair state for rollback ──────────────────
+    const preRepairState: Record<string, unknown> = {
+      serviceName,
+      strategy: strategyName,
+      routingMode: context.routingMode,
+      capturedAt: new Date().toISOString(),
+    };
+
     const toolOutput = await callTool("aws_repair_service", toolInput);
+
+    // ── Feature 3: Generate and persist rollback plan ─────────────────────
+    const rollbackInfo = await generateAndStoreRollbackPlan(
+      incident.incidentId,
+      strategyName,
+      toolOutput,
+      preRepairState,
+    );
+    context.rollbackInfo = rollbackInfo;
 
     await logExecution(
       incident.incidentId,

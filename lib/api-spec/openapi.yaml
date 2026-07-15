@@ -167,6 +167,48 @@ paths:
               schema:
                 $ref: "#/components/schemas/CausalChainResult"
 
+  /incidents/{incidentId}/playbook:
+    get:
+      operationId: getIncidentPlaybook
+      tags: [incidents]
+      summary: Get AI-generated repair playbook for an incident (Feature 1 — Explainable AI)
+      parameters:
+        - name: incidentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Playbook
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Playbook"
+        "404":
+          description: Playbook not found
+
+  /incidents/{incidentId}/rollback-plan:
+    get:
+      operationId: getIncidentRollbackPlan
+      tags: [incidents]
+      summary: Get rollback plan for an incident (Feature 3 — Rollback Policy)
+      parameters:
+        - name: incidentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Rollback plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RollbackPlanResult"
+        "404":
+          description: Rollback plan not found
+
   /incidents/{incidentId}/handoffs:
     get:
       operationId: getIncidentHandoffs
@@ -683,6 +725,49 @@ components:
             additionalProperties: true
         note:
           type: string
+
+    Playbook:
+      type: object
+      properties:
+        playbookId:
+          type: string
+        incidentId:
+          type: string
+        strategyName:
+          type: string
+        title:
+          type: string
+        contentMd:
+          type: string
+        generatedBy:
+          type: string
+        createdAt:
+          type: string
+      additionalProperties: true
+
+    RollbackPlanResult:
+      type: object
+      properties:
+        rollbackId:
+          type: string
+        incidentId:
+          type: string
+        strategyName:
+          type: string
+        preRepairState:
+          type: object
+          additionalProperties: true
+        executedCommands:
+          type: string
+        rollbackSteps:
+          type: string
+        estimatedRollbackTime:
+          type: ["string", "null"]
+        riskLevel:
+          type: string
+        createdAt:
+          type: string
+      additionalProperties: true
 
     Handoff:
       type: object

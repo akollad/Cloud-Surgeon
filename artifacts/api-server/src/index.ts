@@ -4,6 +4,7 @@ import { seedVectorMemory } from "./lib/seed";
 import { pool } from "@workspace/db";
 import { bedrockIsConfigured, bedrockAuthMethod } from "./lib/bedrock";
 import { createMetricSnapshotsTable } from "./lib/anomaly";
+import { createRollbackPlansTable } from "./lib/cloud-surgeon";
 import { initChangefeed } from "./lib/cdc";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -224,6 +225,14 @@ app.listen(port, async (err) => {
     await createMetricSnapshotsTable();
   } catch (err) {
     logger.warn({ err }, "[ANOMALY] metric_snapshots table creation failed (non-fatal)");
+  }
+
+  // Create rollback_plans table (Feature 3 — Rollback Policy) — idempotent DDL
+  try {
+    await createRollbackPlansTable();
+    logger.info("[BOOT] rollback_plans table ready");
+  } catch (err) {
+    logger.warn({ err }, "[ROLLBACK] rollback_plans table creation failed (non-fatal)");
   }
 
   // Start CockroachDB CDC changefeed (or polling fallback) for live audit stream
