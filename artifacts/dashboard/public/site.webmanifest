@@ -1,6 +1,6 @@
 {
-  "name": "Cloud Surgeon",
-  "short_name": "Surgeon",
+  "name": "Cloud Surgéon",
+  "short_name": "Surgéon",
   "icons": [
     {
       "src": "/web-app-manifest-192x192.png",
@@ -15,7 +15,7 @@
       "purpose": "maskable"
     }
   ],
-  "theme_color": "#ffffff",
+  "theme_color": "#fdf0f0",
   "background_color": "#ffffff",
   "display": "standalone"
 }
