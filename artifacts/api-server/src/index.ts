@@ -7,20 +7,11 @@ import { createMetricSnapshotsTable } from "./lib/anomaly";
 import { initChangefeed } from "./lib/cdc";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import os from "node:os";
+import { CCLOUD_BINARY } from "./lib/ccloud-path";
 
 const execFileAsync = promisify(execFile);
-const __dirnameIndex = path.dirname(fileURLToPath(import.meta.url));
-
-// In ECS the binary is at /usr/local/bin/ccloud (Dockerfile COPY --from=ccloud).
-// In Replit dev it lives in .tools/ccloud at workspace root (4 dirs up from dist/).
-const CCLOUD_BINARY =
-  process.env.NODE_ENV === "production"
-    ? "/usr/local/bin/ccloud"
-    : path.resolve(__dirnameIndex, "..", "..", "..", ".tools", "ccloud");
 
 /**
  * Bootstrap ccloud credentials from COCKROACH_CLOUD_API_KEY.

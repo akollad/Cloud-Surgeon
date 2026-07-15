@@ -12,3 +12,5 @@
 - [node:24-slim missing curl for ECS health check](node24-slim-curl.md) — Debian slim has no curl; ECS CMD-SHELL health check silently fails while ALB logs show 200; add apt-get install curl to runtime stage.
 - [aws.ts hard-requires static AWS keys, ignores IAM roles](aws-hard-requires-static-keys.md) — inject AWS_ACCESS_KEY_ID/SECRET even when an ECS task role exists, or repair stays SIMULATED.
 - [Cloud-Surgeon real AWS deployment layout](real-aws-deployment-cloud-surgeon.md) — live demo stack (ECR/ECS/ALB/S3/CloudFront) on the user's AWS account; DEPLOYMENT.md has current URLs.
+- [VITE_API_BASE_URL causes double /api/ prefix](vite-api-base-url-double-prefix.md) — generated client already includes /api/; setting this env var doubles the prefix.
+- [ccloud-path.ts is the single source of truth for binary path](ccloud-binary-path-centralized.md) — never redefine CCLOUD_BINARY inline; import from lib/ccloud-path.ts.
