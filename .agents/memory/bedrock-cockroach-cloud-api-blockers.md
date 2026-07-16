@@ -3,19 +3,15 @@ name: Bedrock geo-block & CockroachDB Cloud API perms
 description: Anthropic-on-Bedrock geo-restricted from Replit container; Bearer token does NOT bypass it. CockroachDB Cloud API key needs role assigned per-cluster.
 ---
 
-## Bedrock geo-block
+## Bedrock geo-block (Anthropic models only — resolved by switching to Nova Lite)
 
-Anthropic models via Amazon Bedrock return HTTP 400 "Access to Anthropic models is not allowed from unsupported countries/regions" when called from Replit's container infrastructure.
+Anthropic models via Amazon Bedrock (`anthropic.claude-*`) return HTTP 400 "Access to Anthropic models is not allowed from unsupported countries/regions" from Replit containers. This applies to us-east-1 and eu-west-1, via both SigV4 and Bearer token.
 
-- Applies to **us-east-1** AND **eu-west-1**.
-- Applies to both **SigV4** (AWS SDK) and **Bearer token** (new Bedrock API key feature). Neither auth path bypasses the geo-restriction.
-- `BEDROCK_API_KEY` is set and valid, but calls still fail.
+**Resolution**: Switch to Amazon Nova Lite (`eu.amazon.nova-lite-v1:0`). Amazon's own models are NOT geo-blocked. Nova Lite responds HTTP 200 from Replit containers using `BEDROCK_API_KEY` Bearer token auth against the `/converse` endpoint.
 
-**Workaround**: Use `AI_PROVIDER=anthropic` which routes through the Replit AI Integrations proxy (`AI_INTEGRATIONS_ANTHROPIC_API_KEY` / `AI_INTEGRATIONS_ANTHROPIC_BASE_URL`). This works from the container and gives real Claude responses.
+**Current setup**: `AI_PROVIDER=bedrock`, `bedrock.ts` uses the Converse API with Nova Lite. `ANTHROPIC_API_KEY` is no longer required.
 
-**Why:** Anthropic's content delivery policy restricts model access by the requester's IP geography, not by the auth method. Replit's container IPs are in a geo-blocked region from Anthropic's perspective.
-
-**How to apply:** Always set `AI_PROVIDER=anthropic` in the shared env vars for this project. Keep the Bedrock code in place (`bedrock.ts`) as a future-proof path for deployment environments where the geo-block doesn't apply.
+**Why:** Geo-restriction is Anthropic's policy on their own models, not a Bedrock-wide restriction.
 
 ## CockroachDB Cloud API key permissions
 

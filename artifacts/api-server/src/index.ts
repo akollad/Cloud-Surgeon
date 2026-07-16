@@ -136,8 +136,8 @@ app.listen(port, async (err) => {
   const provider = (process.env.AI_PROVIDER ?? "bedrock").toLowerCase();
   const bedrockAuth = bedrockAuthMethod();
   const bedrockStatus = bedrockIsConfigured()
-    ? `credentials set (${bedrockAuth}) — geo-blocked from container; use LIVE Anthropic fallback`
-    : "no credentials";
+    ? `Nova Lite 🟢 LIVE (${bedrockAuth}, eu-west-1)`
+    : "Nova Lite ⚠️ no credentials";
   const anthropicViaProxy = !!(
     process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY ||
     process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL
