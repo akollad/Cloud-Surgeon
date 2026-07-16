@@ -42,6 +42,28 @@ export const TriggerIncidentResponse = zod.object({
   "ragStrategyHint": zod.string().nullish(),
   "winRate": zod.number().nullish(),
   "winRateSampleSize": zod.number().optional(),
+  "correctionFactor": zod.number().nullish(),
+  "effectiveWinRate": zod.number().nullish(),
+  "repairPlan": zod.object({
+  "strategy": zod.string().optional(),
+  "estimatedDuration": zod.string().optional(),
+  "riskLevel": zod.enum(['low', 'medium', 'high']).optional(),
+  "blastRadius": zod.string().optional(),
+  "steps": zod.array(zod.string()).optional(),
+  "preconditions": zod.array(zod.string()).optional(),
+  "expectedOutcome": zod.string().optional(),
+  "alternatives": zod.array(zod.string()).optional(),
+  "generatedBy": zod.enum(['llm', 'deterministic']).optional(),
+  "generatedAt": zod.string().optional()
+}).nullish(),
+  "rollbackInfo": zod.object({
+  "steps": zod.array(zod.string()).optional(),
+  "estimatedTime": zod.string().optional(),
+  "riskLevel": zod.enum(['low', 'medium', 'high']).optional(),
+  "commandsExecuted": zod.array(zod.string()).optional(),
+  "warnings": zod.array(zod.string()).optional(),
+  "generatedAt": zod.string().optional()
+}).nullish(),
   "turns": zod.array(zod.object({
   "turn": zod.number(),
   "agent": zod.string().optional(),
@@ -77,6 +99,28 @@ export const ListIncidentsResponseItem = zod.object({
   "ragStrategyHint": zod.string().nullish(),
   "winRate": zod.number().nullish(),
   "winRateSampleSize": zod.number().optional(),
+  "correctionFactor": zod.number().nullish(),
+  "effectiveWinRate": zod.number().nullish(),
+  "repairPlan": zod.object({
+  "strategy": zod.string().optional(),
+  "estimatedDuration": zod.string().optional(),
+  "riskLevel": zod.enum(['low', 'medium', 'high']).optional(),
+  "blastRadius": zod.string().optional(),
+  "steps": zod.array(zod.string()).optional(),
+  "preconditions": zod.array(zod.string()).optional(),
+  "expectedOutcome": zod.string().optional(),
+  "alternatives": zod.array(zod.string()).optional(),
+  "generatedBy": zod.enum(['llm', 'deterministic']).optional(),
+  "generatedAt": zod.string().optional()
+}).nullish(),
+  "rollbackInfo": zod.object({
+  "steps": zod.array(zod.string()).optional(),
+  "estimatedTime": zod.string().optional(),
+  "riskLevel": zod.enum(['low', 'medium', 'high']).optional(),
+  "commandsExecuted": zod.array(zod.string()).optional(),
+  "warnings": zod.array(zod.string()).optional(),
+  "generatedAt": zod.string().optional()
+}).nullish(),
   "turns": zod.array(zod.object({
   "turn": zod.number(),
   "agent": zod.string().optional(),
@@ -117,6 +161,28 @@ export const GetIncidentResponse = zod.object({
   "ragStrategyHint": zod.string().nullish(),
   "winRate": zod.number().nullish(),
   "winRateSampleSize": zod.number().optional(),
+  "correctionFactor": zod.number().nullish(),
+  "effectiveWinRate": zod.number().nullish(),
+  "repairPlan": zod.object({
+  "strategy": zod.string().optional(),
+  "estimatedDuration": zod.string().optional(),
+  "riskLevel": zod.enum(['low', 'medium', 'high']).optional(),
+  "blastRadius": zod.string().optional(),
+  "steps": zod.array(zod.string()).optional(),
+  "preconditions": zod.array(zod.string()).optional(),
+  "expectedOutcome": zod.string().optional(),
+  "alternatives": zod.array(zod.string()).optional(),
+  "generatedBy": zod.enum(['llm', 'deterministic']).optional(),
+  "generatedAt": zod.string().optional()
+}).nullish(),
+  "rollbackInfo": zod.object({
+  "steps": zod.array(zod.string()).optional(),
+  "estimatedTime": zod.string().optional(),
+  "riskLevel": zod.enum(['low', 'medium', 'high']).optional(),
+  "commandsExecuted": zod.array(zod.string()).optional(),
+  "warnings": zod.array(zod.string()).optional(),
+  "generatedAt": zod.string().optional()
+}).nullish(),
   "turns": zod.array(zod.object({
   "turn": zod.number(),
   "agent": zod.string().optional(),
@@ -156,6 +222,28 @@ export const ApproveIncidentResponse = zod.object({
   "ragStrategyHint": zod.string().nullish(),
   "winRate": zod.number().nullish(),
   "winRateSampleSize": zod.number().optional(),
+  "correctionFactor": zod.number().nullish(),
+  "effectiveWinRate": zod.number().nullish(),
+  "repairPlan": zod.object({
+  "strategy": zod.string().optional(),
+  "estimatedDuration": zod.string().optional(),
+  "riskLevel": zod.enum(['low', 'medium', 'high']).optional(),
+  "blastRadius": zod.string().optional(),
+  "steps": zod.array(zod.string()).optional(),
+  "preconditions": zod.array(zod.string()).optional(),
+  "expectedOutcome": zod.string().optional(),
+  "alternatives": zod.array(zod.string()).optional(),
+  "generatedBy": zod.enum(['llm', 'deterministic']).optional(),
+  "generatedAt": zod.string().optional()
+}).nullish(),
+  "rollbackInfo": zod.object({
+  "steps": zod.array(zod.string()).optional(),
+  "estimatedTime": zod.string().optional(),
+  "riskLevel": zod.enum(['low', 'medium', 'high']).optional(),
+  "commandsExecuted": zod.array(zod.string()).optional(),
+  "warnings": zod.array(zod.string()).optional(),
+  "generatedAt": zod.string().optional()
+}).nullish(),
   "turns": zod.array(zod.object({
   "turn": zod.number(),
   "agent": zod.string().optional(),
@@ -195,6 +283,28 @@ export const RejectIncidentResponse = zod.object({
   "ragStrategyHint": zod.string().nullish(),
   "winRate": zod.number().nullish(),
   "winRateSampleSize": zod.number().optional(),
+  "correctionFactor": zod.number().nullish(),
+  "effectiveWinRate": zod.number().nullish(),
+  "repairPlan": zod.object({
+  "strategy": zod.string().optional(),
+  "estimatedDuration": zod.string().optional(),
+  "riskLevel": zod.enum(['low', 'medium', 'high']).optional(),
+  "blastRadius": zod.string().optional(),
+  "steps": zod.array(zod.string()).optional(),
+  "preconditions": zod.array(zod.string()).optional(),
+  "expectedOutcome": zod.string().optional(),
+  "alternatives": zod.array(zod.string()).optional(),
+  "generatedBy": zod.enum(['llm', 'deterministic']).optional(),
+  "generatedAt": zod.string().optional()
+}).nullish(),
+  "rollbackInfo": zod.object({
+  "steps": zod.array(zod.string()).optional(),
+  "estimatedTime": zod.string().optional(),
+  "riskLevel": zod.enum(['low', 'medium', 'high']).optional(),
+  "commandsExecuted": zod.array(zod.string()).optional(),
+  "warnings": zod.array(zod.string()).optional(),
+  "generatedAt": zod.string().optional()
+}).nullish(),
   "turns": zod.array(zod.object({
   "turn": zod.number(),
   "agent": zod.string().optional(),
@@ -238,6 +348,28 @@ export const CorrectIncidentResponse = zod.object({
   "ragStrategyHint": zod.string().nullish(),
   "winRate": zod.number().nullish(),
   "winRateSampleSize": zod.number().optional(),
+  "correctionFactor": zod.number().nullish(),
+  "effectiveWinRate": zod.number().nullish(),
+  "repairPlan": zod.object({
+  "strategy": zod.string().optional(),
+  "estimatedDuration": zod.string().optional(),
+  "riskLevel": zod.enum(['low', 'medium', 'high']).optional(),
+  "blastRadius": zod.string().optional(),
+  "steps": zod.array(zod.string()).optional(),
+  "preconditions": zod.array(zod.string()).optional(),
+  "expectedOutcome": zod.string().optional(),
+  "alternatives": zod.array(zod.string()).optional(),
+  "generatedBy": zod.enum(['llm', 'deterministic']).optional(),
+  "generatedAt": zod.string().optional()
+}).nullish(),
+  "rollbackInfo": zod.object({
+  "steps": zod.array(zod.string()).optional(),
+  "estimatedTime": zod.string().optional(),
+  "riskLevel": zod.enum(['low', 'medium', 'high']).optional(),
+  "commandsExecuted": zod.array(zod.string()).optional(),
+  "warnings": zod.array(zod.string()).optional(),
+  "generatedAt": zod.string().optional()
+}).nullish(),
   "turns": zod.array(zod.object({
   "turn": zod.number(),
   "agent": zod.string().optional(),

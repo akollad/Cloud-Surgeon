@@ -73,6 +73,54 @@ export const IncidentContextRoutingMode = {
   REJECTED: 'REJECTED',
 } as const;
 
+export type IncidentContextRepairPlanRiskLevel = typeof IncidentContextRepairPlanRiskLevel[keyof typeof IncidentContextRepairPlanRiskLevel];
+
+
+export const IncidentContextRepairPlanRiskLevel = {
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+} as const;
+
+export type IncidentContextRepairPlanGeneratedBy = typeof IncidentContextRepairPlanGeneratedBy[keyof typeof IncidentContextRepairPlanGeneratedBy];
+
+
+export const IncidentContextRepairPlanGeneratedBy = {
+  llm: 'llm',
+  deterministic: 'deterministic',
+} as const;
+
+export type IncidentContextRepairPlan = {
+  strategy?: string;
+  estimatedDuration?: string;
+  riskLevel?: IncidentContextRepairPlanRiskLevel;
+  blastRadius?: string;
+  steps?: string[];
+  preconditions?: string[];
+  expectedOutcome?: string;
+  alternatives?: string[];
+  generatedBy?: IncidentContextRepairPlanGeneratedBy;
+  generatedAt?: string;
+} | null;
+
+export type IncidentContextRollbackInfoRiskLevel = typeof IncidentContextRollbackInfoRiskLevel[keyof typeof IncidentContextRollbackInfoRiskLevel];
+
+
+export const IncidentContextRollbackInfoRiskLevel = {
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+} as const;
+
+export type IncidentContextRollbackInfo = {
+  steps?: string[];
+  estimatedTime?: string;
+  riskLevel?: IncidentContextRollbackInfoRiskLevel;
+  commandsExecuted?: string[];
+  warnings?: string[];
+  generatedAt?: string;
+} | null;
+
 export interface IncidentContext {
   alertText?: string;
   strategyName?: string;
@@ -85,6 +133,12 @@ export interface IncidentContext {
   /** @nullable */
   winRate?: number | null;
   winRateSampleSize?: number;
+  /** @nullable */
+  correctionFactor?: number | null;
+  /** @nullable */
+  effectiveWinRate?: number | null;
+  repairPlan?: IncidentContextRepairPlan;
+  rollbackInfo?: IncidentContextRollbackInfo;
   turns?: AgentTurn[];
   /** @nullable */
   finalResponse?: string | null;

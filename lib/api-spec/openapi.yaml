@@ -549,6 +549,67 @@ components:
           type: ["number", "null"]
         winRateSampleSize:
           type: integer
+        correctionFactor:
+          type: ["number", "null"]
+        effectiveWinRate:
+          type: ["number", "null"]
+        repairPlan:
+          type: object
+          nullable: true
+          properties:
+            strategy:
+              type: string
+            estimatedDuration:
+              type: string
+            riskLevel:
+              type: string
+              enum: [low, medium, high]
+            blastRadius:
+              type: string
+            steps:
+              type: array
+              items:
+                type: string
+            preconditions:
+              type: array
+              items:
+                type: string
+            expectedOutcome:
+              type: string
+            alternatives:
+              type: array
+              items:
+                type: string
+            generatedBy:
+              type: string
+              enum: [llm, deterministic]
+            generatedAt:
+              type: string
+          additionalProperties: false
+        rollbackInfo:
+          type: object
+          nullable: true
+          properties:
+            steps:
+              type: array
+              items:
+                type: string
+            estimatedTime:
+              type: string
+            riskLevel:
+              type: string
+              enum: [low, medium, high]
+            commandsExecuted:
+              type: array
+              items:
+                type: string
+            warnings:
+              type: array
+              items:
+                type: string
+            generatedAt:
+              type: string
+          additionalProperties: false
         turns:
           type: array
           items:

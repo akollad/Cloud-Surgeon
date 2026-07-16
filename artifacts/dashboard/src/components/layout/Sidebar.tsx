@@ -16,6 +16,12 @@ const PRESET_SCENARIOS = [
   "Expired AWS credential (S3 access from ECS)",
   "External dependency down (Stripe API)",
   "Unknown incident (exploratory scenario)",
+  // ── CockroachDB Agent Skills scenarios ─────────────────────────────────
+  "CockroachDB hot range detected — write contention on table incidents causing 3x latency spike",
+  "CockroachDB index advisor: full table scan on incident_vectors — missing index costs 2.4s per query",
+  "CockroachDB slow query detected — SELECT running 45s blocking connection pool",
+  "CockroachDB under-replicated ranges in us-east-1 — possible node failure, RF=1 detected",
+  "CDC changefeed 'incidents-to-webhook' paused — last event 15 minutes ago, lag accumulating",
 ];
 
 const PREDICTIVE_SCENARIOS = [

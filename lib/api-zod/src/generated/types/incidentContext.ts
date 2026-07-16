@@ -6,6 +6,8 @@
  * OpenAPI spec version: 0.2.0
  */
 import type { AgentTurn } from './agentTurn';
+import type { IncidentContextRepairPlan } from './incidentContextRepairPlan';
+import type { IncidentContextRollbackInfo } from './incidentContextRollbackInfo';
 import type { IncidentContextRoutingMode } from './incidentContextRoutingMode';
 
 export interface IncidentContext {
@@ -20,6 +22,12 @@ export interface IncidentContext {
   /** @nullable */
   winRate?: number | null;
   winRateSampleSize?: number;
+  /** @nullable */
+  correctionFactor?: number | null;
+  /** @nullable */
+  effectiveWinRate?: number | null;
+  repairPlan?: IncidentContextRepairPlan;
+  rollbackInfo?: IncidentContextRollbackInfo;
   turns?: AgentTurn[];
   /** @nullable */
   finalResponse?: string | null;

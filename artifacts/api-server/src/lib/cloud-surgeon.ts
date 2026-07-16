@@ -93,6 +93,13 @@ export function fingerprint(alertText: string): string {
 /** Detects the strategy to apply from the alert text. */
 export function detectStrategy(alertText: string): string {
   const t = alertText.toLowerCase();
+  // ── CockroachDB-specific patterns (checked first — more specific) ──────────
+  if (t.includes("hot range") || t.includes("hotspot") || (t.includes("cockroach") && t.includes("contention"))) return "crdb_hotspot_resolution";
+  if ((t.includes("cockroach") || t.includes("crdb")) && (t.includes("full scan") || t.includes("table scan") || t.includes("missing index") || (t.includes("index") && t.includes("recommend")))) return "crdb_index_optimization";
+  if ((t.includes("cockroach") || t.includes("crdb")) && (t.includes("slow query") || t.includes("long-running") || t.includes("long running") || t.includes("query timeout"))) return "crdb_slow_query_termination";
+  if ((t.includes("cockroach") || t.includes("crdb")) && (t.includes("under-replicated") || t.includes("replication lag") || t.includes("range unavailable"))) return "crdb_replication_recovery";
+  if (t.includes("changefeed") || (t.includes("cdc") && (t.includes("paused") || t.includes("stalled") || t.includes("failed") || t.includes("lag")))) return "crdb_changefeed_restart";
+  // ── AWS / generic patterns ──────────────────────────────────────────────────
   if (t.includes("jvm") || t.includes("heap") || t.includes("oom")) return "jvm_heap_restart";
   if (t.includes("max_connections") || t.includes("connection pool") || t.includes("pg_stat")) return "db_connection_pool_reset";
   if (t.includes("latency") && (t.includes("cross-region") || t.includes("cross_region") || t.includes("bgp"))) return "network_route_failover";
@@ -417,6 +424,108 @@ const STRATEGY_PLANS: Record<string, Omit<RepairPlan, "strategy" | "generatedBy"
     expectedOutcome: "Service returns to healthy state; monitoring confirms incident closure",
     alternatives: ["Trigger specific strategy once root cause is confirmed"],
   },
+
+  // ── CockroachDB Agent Skills strategies ───────────────────────────────────
+  // These strategies invoke the CockroachDB Agent Skills (open-source repo)
+  // via the official CockroachDB Cloud MCP endpoint instead of AWS APIs.
+  // Each skill is machine-executable and returns structured JSON for the agent.
+
+  crdb_hotspot_resolution: {
+    estimatedDuration: "30–90 seconds",
+    riskLevel: "low",
+    blastRadius: "Read-only diagnostics — no cluster state changes",
+    steps: [
+      "Query crdb_internal.cluster_contention_events via Agent Skill: crdb/performance/diagnose-hotspots",
+      "Identify top-N contention sources (table, index, cumulative wait time)",
+      "Query crdb_internal.ranges_no_leases to find oversized ranges",
+      "Invoke Agent Skill: crdb/schema/index-advisor to surface missing indexes",
+      "Generate DDL recommendations (hash-sharded index, range split point)",
+      "Schedule maintenance window for DDL application",
+    ],
+    preconditions: [
+      "COCKROACH_CLOUD_API_KEY configured and cluster accessible via MCP",
+      "Agent has SELECT on crdb_internal schema",
+    ],
+    expectedOutcome: "Hot contention ranges identified; index DDL recommendations ready to apply",
+    alternatives: ["crdb_index_optimization (schema-only fix)", "crdb_slow_query_termination (if queries are the hot source)"],
+  },
+
+  crdb_index_optimization: {
+    estimatedDuration: "15–30 seconds",
+    riskLevel: "low",
+    blastRadius: "Read-only diagnostics — DDL applied separately in maintenance window",
+    steps: [
+      "Invoke Agent Skill: crdb/schema/index-advisor",
+      "Query crdb_internal.index_recommendations for missing and redundant indexes",
+      "Collect CREATE INDEX and DROP INDEX DDL statements from recommendations",
+      "Rank recommendations by impact (full table scans first)",
+      "Generate migration script for human review",
+    ],
+    preconditions: [
+      "COCKROACH_CLOUD_API_KEY configured",
+      "At least one query has been executed (optimizer must have observed full scans)",
+    ],
+    expectedOutcome: "Index recommendations list generated; apply DDL to eliminate full-table scans",
+    alternatives: ["crdb_hotspot_resolution (if index changes cause hot spots)", "crdb_slow_query_termination (immediate relief)"],
+  },
+
+  crdb_slow_query_termination: {
+    estimatedDuration: "10–20 seconds",
+    riskLevel: "low",
+    blastRadius: "Terminated queries experience rollback — no data loss",
+    steps: [
+      "Invoke Agent Skill: crdb/operations/cancel-query (dry-run=true)",
+      "List all queries running longer than 30 seconds via crdb_internal.cluster_queries",
+      "Identify top offenders by duration and resource consumption",
+      "If approved, invoke crdb/operations/cancel-query (dry-run=false) to cancel top-3",
+      "Verify connection pool normalizes within 30 s",
+    ],
+    preconditions: [
+      "COCKROACH_CLOUD_API_KEY configured",
+      "Queries must be in flight (not already committed or rolled back)",
+    ],
+    expectedOutcome: "Long-running query pool drains; connection count normalizes within 30 s",
+    alternatives: ["crdb_index_optimization (prevent future slow queries)", "crdb_hotspot_resolution (if slowness is contention-driven)"],
+  },
+
+  crdb_replication_recovery: {
+    estimatedDuration: "60–300 seconds",
+    riskLevel: "medium",
+    blastRadius: "Cluster-level — under-replicated ranges affect read/write availability",
+    steps: [
+      "Invoke Agent Skill: crdb/observability/job-status to check background jobs",
+      "Query crdb_internal.ranges_no_leases for under-replicated ranges",
+      "Check cluster health via official CockroachDB Cloud MCP (get_cluster)",
+      "Identify whether a node is dead or decommissioning",
+      "If node is dead: trigger decommission via ccloud cluster node decommission",
+      "Monitor replica count recovery (expect full replication within 5 min of node recovery)",
+    ],
+    preconditions: [
+      "COCKROACH_CLOUD_API_KEY configured",
+      "Cluster must have at least one live node per region",
+    ],
+    expectedOutcome: "Under-replicated ranges recover to RF=3 within 5 minutes of node restore",
+    alternatives: ["crdb_hotspot_resolution (if range unavailability is load-driven, not node failure)"],
+  },
+
+  crdb_changefeed_restart: {
+    estimatedDuration: "20–45 seconds",
+    riskLevel: "low",
+    blastRadius: "Downstream consumers may see duplicate events during CDC catch-up",
+    steps: [
+      "Invoke Agent Skill: crdb/observability/job-status (filter: changefeed, status: paused/failed)",
+      "Identify paused or failed changefeeds with their job IDs",
+      "Check last_error for root cause (network partition, schema change, backfill stall)",
+      "Execute RESUME JOB <id> for each paused changefeed via crdb_query",
+      "Monitor changefeed lag metric to confirm catch-up within 60 s",
+    ],
+    preconditions: [
+      "COCKROACH_CLOUD_API_KEY configured",
+      "Changefeed sink (Kafka / webhook / S3) must be reachable from cluster",
+    ],
+    expectedOutcome: "Changefeed resumes and catches up; downstream consumers receive all missed events",
+    alternatives: ["crdb_replication_recovery (if changefeed paused due to under-replicated ranges)"],
+  },
 };
 
 export async function generateRepairPlan(
@@ -474,6 +583,32 @@ export async function generateRepairPlan(
 // (CockroachDB) + context_json.rollbackInfo (for instant dashboard display).
 
 const ROLLBACK_STEPS: Record<string, string[]> = {
+  // ── CockroachDB Agent Skills rollback steps ────────────────────────────────
+  crdb_hotspot_resolution: [
+    "No structural changes were made — hotspot diagnosis is read-only",
+    "If DDL was applied (new index): DROP INDEX CONCURRENTLY <index_name>",
+    "Monitor crdb_internal.cluster_contention_events to confirm contention did not worsen",
+  ],
+  crdb_index_optimization: [
+    "If CREATE INDEX was applied: DROP INDEX CONCURRENTLY <table>@<index_name>",
+    "If DROP INDEX was applied: recreate with original CREATE INDEX statement",
+    "Run EXPLAIN SELECT ... to confirm query plan is still efficient after rollback",
+  ],
+  crdb_slow_query_termination: [
+    "Cancelled queries roll back automatically — no action needed",
+    "Re-submit cancelled queries if they were legitimate (check application logs)",
+    "If cancellations caused application errors, restart application pods to reconnect pool",
+  ],
+  crdb_replication_recovery: [
+    "If node was decommissioned incorrectly: ccloud cluster node recommission <node-id>",
+    "Check under-replicated ranges: SELECT * FROM crdb_internal.ranges_no_leases WHERE array_length(replicas,1) < 3",
+    "Contact CockroachDB support if ranges do not recover within 10 minutes",
+  ],
+  crdb_changefeed_restart: [
+    "If changefeed resumed incorrectly: PAUSE JOB <job_id>",
+    "Downstream consumers must handle duplicate events (at-least-once delivery)",
+    "Verify sink (Kafka/webhook) deduplication logic handles replay correctly",
+  ],
   ecs_service_restart: [
     "Identify previous task definition: aws ecs describe-services --cluster <cluster> --services <service>",
     "Roll back: aws ecs update-service --cluster <cluster> --service <service> --task-definition <family:N-1> --force-new-deployment",
@@ -532,6 +667,11 @@ const ROLLBACK_STEPS: Record<string, string[]> = {
 };
 
 const ROLLBACK_RISK: Record<string, "low" | "medium" | "high"> = {
+  // CockroachDB Agent Skills
+  crdb_hotspot_resolution: "low", crdb_index_optimization: "low",
+  crdb_slow_query_termination: "low", crdb_replication_recovery: "medium",
+  crdb_changefeed_restart: "low",
+  // AWS strategies
   ecs_service_restart: "medium", rds_cpu_throttle: "low", lambda_concurrency_scale: "low",
   jvm_heap_restart: "medium", db_connection_pool_reset: "low", network_route_failover: "high",
   iam_credential_rotation: "high", external_dependency_circuit_break: "low",
@@ -539,6 +679,11 @@ const ROLLBACK_RISK: Record<string, "low" | "medium" | "high"> = {
 };
 
 const ROLLBACK_TIMES: Record<string, string> = {
+  // CockroachDB Agent Skills
+  crdb_hotspot_resolution: "N/A (read-only)", crdb_index_optimization: "< 30 seconds (DROP INDEX CONCURRENTLY)",
+  crdb_slow_query_termination: "N/A (queries auto-rollback)", crdb_replication_recovery: "5–10 minutes",
+  crdb_changefeed_restart: "< 30 seconds (PAUSE JOB)",
+  // AWS strategies
   ecs_service_restart: "2–5 minutes", rds_cpu_throttle: "1–2 minutes",
   lambda_concurrency_scale: "< 30 seconds", jvm_heap_restart: "2–4 minutes",
   db_connection_pool_reset: "< 1 minute", network_route_failover: "1–3 minutes (DNS propagation)",
@@ -1167,6 +1312,24 @@ async function callTool(
   if (toolName === "crdb_query") {
     return callMcpTool(toolName, toolInput);
   }
+  // ── CockroachDB Agent Skills (open-source repo) ────────────────────────────
+  // These five tools implement machine-executable skills from the CockroachDB
+  // Agent Skills collection (Performance, Schema, Operations, Observability).
+  if (toolName === "crdb_diagnose_hotspots") {
+    return callMcpTool(toolName, toolInput);
+  }
+  if (toolName === "crdb_index_advisor") {
+    return callMcpTool(toolName, toolInput);
+  }
+  if (toolName === "crdb_cancel_query") {
+    return callMcpTool(toolName, toolInput);
+  }
+  if (toolName === "crdb_job_status") {
+    return callMcpTool(toolName, toolInput);
+  }
+  if (toolName === "crdb_skill_repair") {
+    return callMcpTool(toolName, toolInput);
+  }
   if (toolName === "verify_resolution") {
     // Internal Auditor tool — local evaluation, not via MCP
     const repairVerified = Boolean(toolInput.repairVerified);
@@ -1508,12 +1671,11 @@ export async function runAgentLoop(
     );
 
     const serviceName = detectServiceName(alertText);
-    const toolInput = { serviceName, action: "describe_and_remediate" };
     const { thought, source: thoughtSource } = await invokeLLMThought(alertText, 1, context.turns[0]?.toolOutput ?? null);
 
     // ── Feature 2: Generate pre-execution simulation plan ─────────────────
-    // Before touching AWS, the agent produces a structured plan explaining
-    // exactly what it intends to do, the blast radius, and risk level.
+    // Before touching any infrastructure, the agent produces a structured plan
+    // explaining exactly what it intends to do, the blast radius, and risk level.
     const repairPlan = await generateRepairPlan(alertText, strategyName, serviceName);
     context.repairPlan = repairPlan;
 
@@ -1525,7 +1687,18 @@ export async function runAgentLoop(
       capturedAt: new Date().toISOString(),
     };
 
-    const toolOutput = await callTool("aws_repair_service", toolInput);
+    // ── CockroachDB Agent Skills routing ──────────────────────────────────
+    // When the detected strategy is a CRDB Agent Skill (crdb_*), invoke the
+    // CockroachDB skill orchestrator instead of the AWS repair tool.
+    // The agent skills call the official CockroachDB Cloud MCP endpoint
+    // (cockroachlabs.cloud/mcp) using crdb_internal diagnostic tables.
+    const isCrdbStrategy = strategyName.startsWith("crdb_");
+    const remediatorToolName = isCrdbStrategy ? "crdb_skill_repair" : "aws_repair_service";
+    const toolInput = isCrdbStrategy
+      ? { strategy: strategyName, serviceName }
+      : { serviceName, action: "describe_and_remediate" };
+
+    const toolOutput = await callTool(remediatorToolName, toolInput);
 
     // ── Feature 3: Generate and persist rollback plan ─────────────────────
     const rollbackInfo = await generateAndStoreRollbackPlan(
@@ -1538,7 +1711,7 @@ export async function runAgentLoop(
 
     await logExecution(
       incident.incidentId,
-      `aws_repair_service(${JSON.stringify(toolInput)})`,
+      `${remediatorToolName}(${JSON.stringify(toolInput)})`,
       JSON.stringify(toolOutput),
     );
 
@@ -1547,7 +1720,7 @@ export async function runAgentLoop(
       agent: "remediator",
       thought,
       thoughtSource,
-      toolName: "aws_repair_service",
+      toolName: remediatorToolName,
       toolInput,
       toolOutput,
     });
