@@ -77,6 +77,7 @@ router.get("/metrics/impact", async (_req, res): Promise<void> => {
     mttr_avg_seconds: string | null;
     mttr_min_seconds: string | null;
     mttr_max_seconds: string | null;
+    outlier_count: string;
     total_ru_consumed: string;
     avg_ru_per_incident: string | null;
     autonomous_count: string;
@@ -92,16 +93,25 @@ router.get("/metrics/impact", async (_req, res): Promise<void> => {
       COUNT(*) FILTER (WHERE status NOT IN (
         'RESOLVED','FAILED','PENDING_APPROVAL'))                        AS incidents_active,
 
-      -- MTTR in seconds for resolved or failed incidents with timestamps
+      -- MTTR in seconds — only incidents resolved within 30 min (1800 s).
+      -- Incidents exceeding this threshold are stuck incidents (agent crash, server
+      -- restart) whose wall-clock time includes hours of idle wait, not agent work.
+      -- They are counted separately as outlier_count for transparency.
       ROUND(AVG(EXTRACT(EPOCH FROM (resolved_at - triggered_at)))
         FILTER (WHERE status IN ('RESOLVED','FAILED')
-          AND resolved_at IS NOT NULL AND triggered_at IS NOT NULL), 2) AS mttr_avg_seconds,
+          AND resolved_at IS NOT NULL AND triggered_at IS NOT NULL
+          AND EXTRACT(EPOCH FROM (resolved_at - triggered_at)) <= 1800), 2) AS mttr_avg_seconds,
       ROUND(MIN(EXTRACT(EPOCH FROM (resolved_at - triggered_at)))
         FILTER (WHERE status IN ('RESOLVED','FAILED')
-          AND resolved_at IS NOT NULL AND triggered_at IS NOT NULL), 2) AS mttr_min_seconds,
+          AND resolved_at IS NOT NULL AND triggered_at IS NOT NULL
+          AND EXTRACT(EPOCH FROM (resolved_at - triggered_at)) <= 1800), 2) AS mttr_min_seconds,
       ROUND(MAX(EXTRACT(EPOCH FROM (resolved_at - triggered_at)))
         FILTER (WHERE status IN ('RESOLVED','FAILED')
-          AND resolved_at IS NOT NULL AND triggered_at IS NOT NULL), 2) AS mttr_max_seconds,
+          AND resolved_at IS NOT NULL AND triggered_at IS NOT NULL
+          AND EXTRACT(EPOCH FROM (resolved_at - triggered_at)) <= 1800), 2) AS mttr_max_seconds,
+      COUNT(*) FILTER (WHERE status IN ('RESOLVED','FAILED')
+          AND resolved_at IS NOT NULL AND triggered_at IS NOT NULL
+          AND EXTRACT(EPOCH FROM (resolved_at - triggered_at)) > 1800)        AS outlier_count,
 
       -- CockroachDB cost in RU
       COALESCE(SUM(ru_consumed), 0)                                    AS total_ru_consumed,
@@ -144,15 +154,18 @@ router.get("/metrics/impact", async (_req, res): Promise<void> => {
     SELECT
       context_json->>'strategyName'                                              AS strategy_name,
       COUNT(*)                                                                   AS incident_count,
-      ROUND(AVG(EXTRACT(EPOCH FROM (resolved_at - triggered_at))), 2)            AS mttr_avg_seconds,
-      ROUND(MIN(EXTRACT(EPOCH FROM (resolved_at - triggered_at))), 2)            AS mttr_min_seconds,
-      ROUND(MAX(EXTRACT(EPOCH FROM (resolved_at - triggered_at))), 2)            AS mttr_max_seconds
+      ROUND(AVG(EXTRACT(EPOCH FROM (resolved_at - triggered_at)))
+        FILTER (WHERE EXTRACT(EPOCH FROM (resolved_at - triggered_at)) <= 1800), 2) AS mttr_avg_seconds,
+      ROUND(MIN(EXTRACT(EPOCH FROM (resolved_at - triggered_at)))
+        FILTER (WHERE EXTRACT(EPOCH FROM (resolved_at - triggered_at)) <= 1800), 2) AS mttr_min_seconds,
+      ROUND(MAX(EXTRACT(EPOCH FROM (resolved_at - triggered_at)))
+        FILTER (WHERE EXTRACT(EPOCH FROM (resolved_at - triggered_at)) <= 1800), 2) AS mttr_max_seconds
     FROM incident_state
     WHERE status = 'RESOLVED'
       AND resolved_at IS NOT NULL
       AND triggered_at IS NOT NULL
     GROUP BY context_json->>'strategyName'
-    ORDER BY mttr_avg_seconds ASC
+    ORDER BY mttr_avg_seconds ASC NULLS LAST
   `);
 
   res.json({
@@ -170,8 +183,11 @@ router.get("/metrics/impact", async (_req, res): Promise<void> => {
       maxSeconds: g.mttr_max_seconds != null ? Number(g.mttr_max_seconds) : null,
       humanBaselineSeconds: HUMAN_BASELINE_MTTR_SECONDS,
       reductionPct: mttrReductionPct,
+      outlierCount: Number(g.outlier_count ?? 0),
       source:
-        "Real measurement (resolved_at − triggered_at) on RESOLVED/FAILED incidents in CockroachDB.",
+        "Real measurement (resolved_at − triggered_at) on RESOLVED/FAILED incidents. " +
+        "Incidents resolved in > 30 min are excluded as stuck-incident outliers (server crash/restart) " +
+        "and counted separately in outlierCount.",
     },
 
     // Estimated cost

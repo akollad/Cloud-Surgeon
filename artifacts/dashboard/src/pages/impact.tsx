@@ -46,6 +46,11 @@ export default function Impact() {
             <div className="text-xs text-muted-foreground mt-1">
               vs {formatMin(toMin(mttr?.humanBaselineSeconds))} human baseline
             </div>
+            {(mttr as any)?.outlierCount > 0 && (
+              <div className="text-xs text-yellow-500/70 mt-1">
+                {(mttr as any).outlierCount} stuck incident{(mttr as any).outlierCount > 1 ? "s" : ""} excluded
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -156,6 +161,9 @@ export default function Impact() {
         <Card>
           <CardHeader className="border-b border-border/50 pb-3">
             <CardTitle>MTTR by Strategy</CardTitle>
+            <p className="text-xs text-muted-foreground mt-1">
+              Incidents resolved in &gt;30 min excluded (stuck during server restarts).
+            </p>
           </CardHeader>
           <CardContent className="p-0 overflow-x-auto">
             <table className="w-full font-mono text-xs min-w-[500px]">
