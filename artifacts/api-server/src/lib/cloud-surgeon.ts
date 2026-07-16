@@ -573,7 +573,7 @@ export async function generateRepairPlan(
       `Write ONE sentence naming the specific measurable state expected within 90 seconds of a successful repair — ` +
       `a metric dropping below a threshold, a count reaching zero, or a service reaching a target health state. ` +
       `Respond with ONLY that sentence, no preamble.`;
-    const result = await invokeLLMText(outcomePrompt);
+    const result = await invokeLLMText(outcomePrompt, strategyName);
     if (result) { plan.expectedOutcome = result; plan.generatedBy = "llm"; }
   } catch { /* non-fatal */ }
 

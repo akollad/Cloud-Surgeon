@@ -27,18 +27,15 @@ function buildConverseEndpoint(modelId: string): string {
   return `https://bedrock-runtime.${REGION}.amazonaws.com/model/${encodeURIComponent(modelId)}/converse`;
 }
 
-function buildRequestBody(prompt: string): string {
-  return JSON.stringify({
-    messages: [
-      {
-        role: "user",
-        content: [{ text: prompt }],
-      },
-    ],
-    inferenceConfig: {
-      maxTokens: 250,
-    },
-  });
+function buildRequestBody(prompt: string, systemPrompt?: string): string {
+  const body: Record<string, unknown> = {
+    messages: [{ role: "user", content: [{ text: prompt }] }],
+    inferenceConfig: { maxTokens: 300 },
+  };
+  if (systemPrompt) {
+    body.system = [{ text: systemPrompt }];
+  }
+  return JSON.stringify(body);
 }
 
 // Prompt is now built in llm.ts (buildThoughtPrompt) and passed in directly.
@@ -73,7 +70,7 @@ async function invokeWithApiKey(body: string, modelId: string): Promise<string |
 
 // ── Path 2: AWS_ACCESS_KEY_ID SigV4 ──────────────────────────────────────
 
-async function invokeWithSigV4(body: string, modelId: string): Promise<string | null> {
+async function invokeWithSigV4(prompt: string, modelId: string, systemPrompt?: string): Promise<string | null> {
   if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
     return null;
   }
@@ -84,13 +81,9 @@ async function invokeWithSigV4(body: string, modelId: string): Promise<string | 
   const client = new BedrockRuntimeClient({ region: REGION });
   const command = new ConverseCommand({
     modelId,
-    messages: [
-      {
-        role: "user",
-        content: [{ text: body }], // body is already the prompt string here
-      },
-    ],
-    inferenceConfig: { maxTokens: 250 },
+    ...(systemPrompt ? { system: [{ text: systemPrompt }] } : {}),
+    messages: [{ role: "user", content: [{ text: prompt }] }],
+    inferenceConfig: { maxTokens: 300 },
   });
 
   const response = await client.send(command);
@@ -103,10 +96,10 @@ async function invokeWithSigV4(body: string, modelId: string): Promise<string | 
 async function invokeModel(
   prompt: string,
   authFn: (b: string, m: string) => Promise<string | null>,
+  systemPrompt?: string,
 ): Promise<{ result: string | null; modelId: string }> {
-  const body = buildRequestBody(prompt);
+  const body = buildRequestBody(prompt, systemPrompt);
 
-  // Try EU cross-region inference profile first.
   try {
     const result = await authFn(body, MODEL_ID_EU_PROFILE);
     if (result !== null) return { result, modelId: MODEL_ID_EU_PROFILE };
@@ -117,7 +110,6 @@ async function invokeModel(
     );
   }
 
-  // Fallback: direct on-demand model ID.
   const result = await authFn(body, MODEL_ID_DIRECT);
   return { result, modelId: MODEL_ID_DIRECT };
 }
@@ -140,20 +132,21 @@ export function bedrockAuthMethod(): "api-key" | "sigv4" | "none" {
 }
 
 /**
- * Invoke Nova Lite with a pre-built prompt string.
- * Used by invokeLLMThought (via llm.ts) and invokeLLMText.
+ * Core Nova Lite invocation — routes to API-key (Bearer/HTTP) or SigV4 (AWS SDK).
+ * systemPrompt is passed as the `system` field in the Converse API request,
+ * giving Nova Lite strategy-specific domain knowledge on every call.
  */
-async function callNovaThin(prompt: string, logLabel: string): Promise<string | null> {
+async function callNovaThin(prompt: string, logLabel: string, systemPrompt?: string): Promise<string | null> {
   const auth = bedrockAuthMethod();
   if (auth === "none") return null;
 
   const authFn =
     auth === "api-key"
       ? invokeWithApiKey
-      : async (body: string, modelId: string) => invokeWithSigV4(prompt, modelId);
+      : async (body: string, modelId: string) => invokeWithSigV4(prompt, modelId, systemPrompt);
 
   try {
-    const { result, modelId } = await invokeModel(prompt, authFn);
+    const { result, modelId } = await invokeModel(prompt, authFn, systemPrompt);
     if (result) {
       logger.info({ auth, region: REGION, modelId, label: logLabel }, "Bedrock Nova Lite response");
     }
@@ -168,15 +161,15 @@ async function callNovaThin(prompt: string, logLabel: string): Promise<string | 
 }
 
 /**
- * Per-turn reasoning sentence.  Prompt is built in llm.ts (buildThoughtPrompt).
+ * Per-turn reasoning sentence.  Prompt + system prompt built in llm.ts.
  */
-export async function invokeBedrockThought(prompt: string): Promise<string | null> {
-  return callNovaThin(prompt, "thought");
+export async function invokeBedrockThought(prompt: string, systemPrompt?: string): Promise<string | null> {
+  return callNovaThin(prompt, "thought", systemPrompt);
 }
 
 /**
- * Generic single-prompt text generation — used for plan/playbook enrichment.
+ * Generic text generation — plan/playbook enrichment.
  */
-export async function invokeBedrockText(prompt: string): Promise<string | null> {
-  return callNovaThin(prompt, "text");
+export async function invokeBedrockText(prompt: string, systemPrompt?: string): Promise<string | null> {
+  return callNovaThin(prompt, "text", systemPrompt);
 }
