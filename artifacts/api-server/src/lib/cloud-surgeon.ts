@@ -149,7 +149,11 @@ export function detectServiceName(alertText: string): string {
     if (fn) return fn[1]!;
     // Fallback: extract a hyphenated word that looks like a function name.
     const word = alertText.match(/\b([a-zA-Z0-9]+-(?:processor|handler|worker|function))\b/i);
-    return word ? word[1]! : "lambda/unknown";
+    if (word) return word[1]!;
+    // Last resort: use the configured default Lambda function so "Cascading Lambda
+    // throttling" (and similar generic alerts) target a real function instead of
+    // producing "Function not found: lambda/unknown".
+    return process.env.LAMBDA_DEFAULT_FUNCTION ?? "lambda/unknown";
   }
 
   // 3. ECS service: "ECS service <name>" or "ECS task <name>"
