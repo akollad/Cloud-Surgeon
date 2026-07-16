@@ -1,0 +1,38 @@
+
+Amazon Web Services <no-reply-aws@amazon.com>
+10:32 (il y a 2 heures)
+À moi
+
+Hello,
+
+I apologize for the delay in getting back to you on this.
+
+Thank you for the detailed report regarding your Amazon Bedrock quota values showing as 0 in the eu-west-1 and us-east-1 regions.
+
+After investigating your account, I can confirm that we have identified and addressed the underlying issue affecting your Bedrock model inference quotas. Your account settings have been updated, and the default quota values should now be available in the eu-west-1 (Ireland) region.
+
+Could you please retry accessing the Bedrock models in eu-west-1 and confirm whether the issue has been resolved on your end?
+
+Please note that if you are also experiencing the same issue in the us-east-1 region, let us know and we will follow up on that separately.
+
+Please let me know if you have any questions or if the issue persists.
+
+We value your feedback. Please share your experience by rating this and other correspondences in the AWS Support Center. You can rate a correspondence by selecting the stars in the top right corner of the correspondence.
+
+Best regards,
+Adam B.
+Amazon Web Services
+===============================================================
+Pour partager votre expérience ou nous recontacter à propos de ce cas, veuillez retourner au centre de support AWS en utilisant l'URL suivante : https://console.aws.amazon.com/support/home#/case/?displayId=178387803500313&language=fr
+
+Notez que cet e-mail a été envoyé depuis une adresse qui ne peut pas accepter les courriels. Pour répondre à ce cas, veuillez suivre le lien ci-dessus depuis votre centre de support AWS.
+
+===============================================================
+
+Ne manquez pas les messages d'AWS Support lorsque vous avez besoin d'aide ! Mettez à jour vos coordonnées :
+https://console.aws.amazon.com/billing/home#/account
+
+Si vous recevez un message d'erreur lorsque vous visitez la page d'informations de contact, rendez-vous sur :
+https://repost.aws/knowledge-center/iam-billing-access/
+
+AWS Support:
