@@ -377,7 +377,7 @@ router.get("/metrics/cluster", async (_req, res): Promise<void> => {
 //
 // Example payload:
 //   [{ "metricName": "CPUUtilization", "value": 84,
-//      "dimensions": { "ServiceName": "checkout-ecs" } }]
+//      "dimensions": { "ServiceName": "checkout" } }]
 
 router.post("/metrics/ingest", async (req, res): Promise<void> => {
   const raw = req.body;

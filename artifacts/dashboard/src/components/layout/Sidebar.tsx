@@ -48,7 +48,7 @@ export function Sidebar({ open, onClose, collapsed, onToggleCollapse }: SidebarP
 
   const [scenario, setScenario] = useState(PRESET_SCENARIOS[0]);
   const [customText, setCustomText] = useState("");
-  const [chaosMode, setChaosMode] = useState("None");
+  const [chaosMode, setChaosMode] = useState("none");
   const [cwAlarm, setCwAlarm] = useState("checkout-5xx-spike");
   const [cwReason, setCwReason] = useState("Threshold Crossed: 3 out of 3 datapoints > 10");
   const [predictiveScenario, setPredictiveScenario] = useState(PREDICTIVE_SCENARIOS[0]);
@@ -57,19 +57,19 @@ export function Sidebar({ open, onClose, collapsed, onToggleCollapse }: SidebarP
     triggerIncident.mutate({
       data: {
         alertText: customText.trim() || scenario,
-        chaosMode: chaosMode === "None" ? undefined : chaosMode,
-        simulateCrash: chaosMode === "SIGKILL crash after diagnostic",
+        chaosMode: chaosMode === "none" || chaosMode === "sigkill" ? undefined : chaosMode,
+        simulateCrash: chaosMode === "sigkill",
       },
     });
   };
 
   const handlePredictive = () => {
     const map: Record<string, object[]> = {
-      "ECS CPU spike (pre-alarm)": [{ metricName: "CPUUtilization", value: 84, dimensions: { ServiceName: "checkout-ecs" }, serviceHint: "checkout-ecs" }],
-      "RDS connections approaching limit": [{ metricName: "DatabaseConnections", value: 430, dimensions: { DBInstanceIdentifier: "catalog-db" }, serviceHint: "catalog-db" }],
+      "ECS CPU spike (pre-alarm)": [{ metricName: "CPUUtilization", value: 84, dimensions: { ServiceName: "checkout" }, serviceHint: "checkout" }],
+      "RDS connections approaching limit": [{ metricName: "DatabaseConnections", value: 430, dimensions: { ClusterName: "polite-genie" }, serviceHint: "polite-genie" }],
       "Lambda throttling pre-alarm": [{ metricName: "Throttles", value: 12, dimensions: { FunctionName: "order-processor" }, serviceHint: "order-processor" }],
-      "High ALB response time": [{ metricName: "TargetResponseTime", value: 2.8, dimensions: { LoadBalancer: "app/checkout-alb" }, serviceHint: "checkout-alb" }],
-      "Disk usage critical": [{ metricName: "FreeableStorage", value: 500000000, dimensions: { InstanceId: "i-0abc123" }, serviceHint: "worker-03" }],
+      "High ALB response time": [{ metricName: "TargetResponseTime", value: 2.8, dimensions: { ServiceName: "checkout" }, serviceHint: "checkout" }],
+      "Disk usage critical": [{ metricName: "FreeableStorage", value: 500000000, dimensions: { ServiceName: "api" }, serviceHint: "api" }],
     };
     const datapoints = map[predictiveScenario];
     if (datapoints) ingestMetrics.mutate({ data: { datapoints } } as any);
@@ -168,10 +168,10 @@ export function Sidebar({ open, onClose, collapsed, onToggleCollapse }: SidebarP
             <div className="space-y-1.5">
               <label className="text-[10px] uppercase font-mono text-muted-foreground">Chaos Engineering</label>
               <Select value={chaosMode} onChange={(e) => setChaosMode(e.target.value)}>
-                <option>None</option>
-                <option>Network latency (500ms)</option>
-                <option>DB partition (2 timeouts)</option>
-                <option>SIGKILL crash after diagnostic</option>
+                <option value="none">None</option>
+                <option value="latency">Network latency (500ms)</option>
+                <option value="partition">DB partition (2 timeouts)</option>
+                <option value="sigkill">SIGKILL crash after diagnostic</option>
               </Select>
             </div>
             <Button className="w-full" onClick={handleTrigger} disabled={triggerIncident.isPending}>
