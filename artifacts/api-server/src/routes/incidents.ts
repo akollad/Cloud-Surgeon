@@ -16,6 +16,7 @@ import {
   getIncidentHandoffs,
   getOrCreateIncident,
   recordHumanFeedback,
+  releaseIncidentClaim,
   runAgentLoop,
   type IncidentContext,
 } from "../lib/cloud-surgeon";
@@ -315,6 +316,75 @@ router.post("/incidents/:incidentId/correct", async (req, res): Promise<void> =>
   }
 
   res.json(GetIncidentResponse.parse(serializeDates(updated)));
+});
+
+// ── Manual retry ─────────────────────────────────────────────────────────
+
+/**
+ * Force-retries a stuck incident.
+ *
+ * Any incident in TRIGGERED or DIAGNOSING that got orphaned mid-loop
+ * (agent crashed without releasing its claim, or the server restarted
+ * before the loop reached a terminal state) can be unblocked here.
+ *
+ * Steps:
+ *   1. Validate the incident exists and is not already terminal.
+ *   2. Force-release any orphaned agent claim.
+ *   3. Re-run the agent loop asynchronously.
+ *   4. Return immediately so the dashboard can poll for progress.
+ */
+router.post("/incidents/:incidentId/retry", async (req, res): Promise<void> => {
+  const params = GetIncidentParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+
+  const incident = await getIncidentById(params.data.incidentId);
+  if (!incident) {
+    res.status(404).json({ error: "Incident not found" });
+    return;
+  }
+
+  const terminal = incident.status === "RESOLVED" || incident.status === "FAILED";
+  if (terminal) {
+    res.status(409).json({
+      error: `Incident is already terminal (status: '${incident.status}') — cannot retry.`,
+    });
+    return;
+  }
+
+  if (incident.status === "PENDING_APPROVAL") {
+    res.status(409).json({
+      error: "Incident is awaiting human approval — use /approve or /reject instead.",
+    });
+    return;
+  }
+
+  // Release any stale agent claim so the loop can re-enter each phase.
+  await releaseIncidentClaim(incident.incidentId);
+
+  const context = incident.contextJson as IncidentContext | null;
+  const alertText =
+    (context?.alertText as string | undefined) ??
+    "Unknown alert — retried manually";
+
+  req.log.info(
+    { incidentId: incident.incidentId, status: incident.status, alertText: alertText.slice(0, 80) },
+    "[RETRY] Force-retrying stuck incident",
+  );
+
+  // Return immediately; loop runs in background.
+  res.json({
+    status: "retrying",
+    incidentId: incident.incidentId,
+    previousStatus: incident.status,
+    alertText: alertText.slice(0, 120),
+  });
+
+  runAgentLoop(incident, alertText, false).catch((err: unknown) => {
+    req.log.error({ err, incidentId: incident.incidentId }, "[RETRY] Agent loop failed after manual retry");
+  });
 });
 
 // ── Causal chain (recursive CTE) ─────────────────────────────────────────

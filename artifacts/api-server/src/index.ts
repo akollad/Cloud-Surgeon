@@ -4,7 +4,7 @@ import { seedVectorMemory } from "./lib/seed";
 import { pool } from "@workspace/db";
 import { bedrockIsConfigured, bedrockAuthMethod } from "./lib/bedrock";
 import { createMetricSnapshotsTable } from "./lib/anomaly";
-import { createRollbackPlansTable, runAgentLoop } from "./lib/cloud-surgeon";
+import { createRollbackPlansTable, releaseIncidentClaim, runAgentLoop } from "./lib/cloud-surgeon";
 import { seedDocChunks } from "./lib/doc-rag";
 import { initChangefeed } from "./lib/cdc";
 import { execFile } from "node:child_process";
@@ -248,32 +248,46 @@ app.listen(port, async (err) => {
     logger.warn({ err }, "[CDC] initChangefeed failed (non-fatal)");
   }
 
-  // ── Startup recovery: re-queue TRIGGERED incidents that got stuck ─────────
-  // Incidents reach TRIGGERED status when the row is created but the agent
-  // loop never ran (e.g. the container crashed between INSERT and runAgentLoop).
-  // On each boot we scan for incidents older than 2 minutes that are still
-  // TRIGGERED with no claimed agent and re-run the loop for each one.
+  // ── Startup recovery: re-queue incidents stuck mid-loop ──────────────────
+  // Covers two failure modes:
+  //   1. TRIGGERED with a stale claim — server crashed between INSERT and the
+  //      first agent turn; claim was never released.
+  //   2. TRIGGERED with no claim — server crashed before the loop even started.
+  //   3. DIAGNOSING — server crashed mid-loop (between Turn 0 and Turn 1,
+  //      or while the routing decision was being computed).
+  //
+  // In all cases we force-clear the claim and re-run the loop, which is
+  // idempotent: runAgentLoop skips already-completed turns by checking
+  // context.turns.length before each phase.
   try {
     const { db, incidentStateTable } = await import("@workspace/db");
-    const { sql, and, lte, isNull } = await import("drizzle-orm");
-    const cutoff = new Date(Date.now() - 2 * 60 * 1000);
+    const { sql, and, lte } = await import("drizzle-orm");
+    // 5-minute cutoff — fresh incidents are still being processed normally.
+    const cutoff = new Date(Date.now() - 5 * 60 * 1000);
     const stuck = await db
       .select()
       .from(incidentStateTable)
       .where(
         and(
-          sql`${incidentStateTable.status} = 'TRIGGERED'`,
-          isNull(incidentStateTable.claimedByAgent),
+          sql`${incidentStateTable.status} IN ('TRIGGERED', 'DIAGNOSING')`,
           lte(incidentStateTable.triggeredAt, cutoff),
         ),
       )
       .limit(10);
 
     if (stuck.length > 0) {
-      logger.info({ count: stuck.length }, "[BOOT] Found stuck TRIGGERED incidents — re-queuing");
+      logger.info({ count: stuck.length }, "[BOOT] Found stuck incidents — force-releasing claims and re-queuing");
       for (const incident of stuck) {
+        // Force-release any orphaned agent claim before re-entering the loop.
+        // releaseIncidentClaim is a no-op if claimedByAgent is already null.
+        await releaseIncidentClaim(incident.incidentId).catch(() => { /* best-effort */ });
+
         const ctx = incident.contextJson as { alertText?: string } | null;
         const alertText = ctx?.alertText ?? "Unknown alert — reprocessing stuck incident";
+        logger.info(
+          { incidentId: incident.incidentId, status: incident.status, alertText: alertText.slice(0, 80) },
+          "[BOOT] Re-queuing stuck incident",
+        );
         setImmediate(() => {
           runAgentLoop(incident, alertText, false).catch((err: unknown) => {
             logger.error({ err, incidentId: incident.incidentId }, "[BOOT] Failed to recover stuck incident");

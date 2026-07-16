@@ -33,10 +33,14 @@ async function getClient(): Promise<Client> {
         command: process.execPath,
         args: [resolveServerEntry()],
         env: {
-          // CockroachDB Cloud diagnostic tool
+          // ── Database (required by search_docs / doc-rag and crdb_* tools) ──
+          COCKROACHDB_URL: process.env.COCKROACHDB_URL ?? "",
+          // ── Embedding provider (required by search_docs Voyage embeddings) ──
+          VOYAGE_API_KEY: process.env.VOYAGE_API_KEY ?? "",
+          // ── CockroachDB Cloud diagnostic tool ────────────────────────────
           COCKROACH_CLOUD_API_KEY: process.env.COCKROACH_CLOUD_API_KEY ?? "",
           COCKROACH_CLOUD_CLUSTER_ID: process.env.COCKROACH_CLOUD_CLUSTER_ID ?? "",
-          // AWS repair tools (ECS / RDS / Lambda)
+          // ── AWS repair tools (ECS / RDS / Lambda) ────────────────────────
           // Absent → aws.ts hasCredentials() returns false → explicit simulated fallback
           AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID ?? "",
           AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY ?? "",
@@ -49,7 +53,11 @@ async function getClient(): Promise<Client> {
       await client.connect(transport);
       logger.info("MCP client connected to cloud-surgeon-tools server");
       return client;
-    })();
+    })().catch((err: unknown) => {
+      // Reset the singleton so the next callMcpTool() attempt spawns a fresh subprocess.
+      clientPromise = null;
+      throw err;
+    });
   }
   return clientPromise;
 }
