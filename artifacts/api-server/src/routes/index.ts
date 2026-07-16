@@ -19,7 +19,7 @@ router.use(setupRouter);
 router.use(webhookRouter);
 
 // streamRouter before incidentsRouter: SSE connections and CDC webhook receiver
-// need their own auth logic (SSE: X-API-Key header; CDC: no auth from CRDB).
+// need their own auth logic (SSE: X-API-Key header; CDC: shared-secret ?token= param).
 router.use(streamRouter);
 
 // metricsRouter and chaosRouter before incidentsRouter for the same reason

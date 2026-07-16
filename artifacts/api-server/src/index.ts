@@ -55,29 +55,14 @@ async function bootstrapCcloudCredentials(): Promise<void> {
     );
     process.stdout.write(`[CCLOUD-BOOT] credentials.json written\n`);
 
-    // 2. profiles.json — fetch org info with a 5 s timeout so we never hang
-    let orgId = "b1641606-7293-4689-8f8a-ebe0efe912de";
-    let orgLabel = "org-3bf3g";
-    let orgName = "Akollad Groupe";
-    let userFullName = "Ryan Sabowa";
-    process.stdout.write(`[CCLOUD-BOOT] fetching org info...\n`);
-    try {
-      const ctrl = new AbortController();
-      const tid = setTimeout(() => ctrl.abort(), 5_000);
-      const resp = await fetch("https://cockroachlabs.cloud/api/v1/jwt-issuer/service-accounts/self", {
-        headers: { Authorization: `Bearer ${apiKey}` },
-        signal: ctrl.signal,
-      });
-      clearTimeout(tid);
-      process.stdout.write(`[CCLOUD-BOOT] fetch status=${resp.status}\n`);
-      if (resp.ok) {
-        const data = await resp.json() as { organization_id?: string; organization_label?: string; organization_name?: string; name?: string };
-        if (data.organization_id) orgId = data.organization_id;
-        if (data.organization_label) orgLabel = data.organization_label;
-        if (data.organization_name) orgName = data.organization_name;
-        if (data.name) userFullName = data.name;
-      }
-    } catch (fe) { process.stdout.write(`[CCLOUD-BOOT] fetch error: ${String(fe)}\n`); }
+    // 2. profiles.json — use known org coordinates (the CockroachDB Cloud REST API
+    // does not expose an org-info endpoint accessible with a service-account key;
+    // /api/v1/clusters returns cluster data only, not organization metadata).
+    const orgId = "b1641606-7293-4689-8f8a-ebe0efe912de";
+    const orgLabel = "org-3bf3g";
+    const orgName = "Akollad Groupe";
+    const userFullName = "Ryan Sabowa";
+    process.stdout.write(`[CCLOUD-BOOT] org=${orgLabel} — writing profiles.json\n`);
 
     fs.writeFileSync(
       path.join(dir, "profiles.json"),

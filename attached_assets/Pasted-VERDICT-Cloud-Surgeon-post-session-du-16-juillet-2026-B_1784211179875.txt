@@ -1,0 +1,71 @@
+VERDICT — Cloud-Surgeon (post-session du 16 juillet 2026) Base : 101/110. Réévaluation sur l'état exact du code audité.
+Ce que l'audit confirme aujourd'hui
+Point	État vérifié
+Nova Lite (Bedrock) comme raisonneur	✅ Confirmé — index.ts:137 default bedrock, Converse API
+search_docs enregistré comme outil MCP	✅ mcp/server.ts + bedrock.ts:028
+COCKROACHDB_URL + VOYAGE_API_KEY → subprocess MCP	✅ mcp/client.ts:37-39
+releaseIncidentClaim dans boot recovery	✅ index.ts:283
+POST /incidents/:id/retry	✅ routes/incidents.ts:336-388
+Filtre MTTR outliers (> 1800s)	✅ routes/metrics.ts:103-111
+Authentification CDC webhook	❌ Absente — webhook.ts : Zod + prompt-guard, pas de token
+DLQ / dead-letter SNS → agent	❌ Toujours absent
+CCLOUD-BOOT fetch 404 au démarrage	❌ Toujours présent
+Notation critère par critère
+1. Agentic Memory Design — 24 / 25 (inchangé)
+
+Gains réels depuis le verdict précédent : Les 22 nouveaux chunks dans doc_chunks (15 strategy skills + 6 MCP guides) sont une addition architecturale cohérente — le système ne choisit plus une stratégie uniquement par keyword matching, il peut maintenant retrouver par similarité sémantique la bonne skill face à une alerte inconnue. search_docs est appelable par l'agent pendant le repair loop, pas seulement en injection passive dans le system prompt.
+
+Ce qui coûte encore 1 point : Le -1 précédent portait sur incident_vectors et CALIBRATION_THRESHOLD = 0.15 trop serré. Ces deux points sont inchangés. La richesse de doc_chunks est bienvenue mais ne compense pas le risque démo : si le jury déclenche un incident en live sans incident_vectors peuplée, ragScore sera > 0.15 et la décision passera par keyword. Le jury verra detectionMethod: "keyword" et demandera où est la mémoire vectorielle.
+2. Technical Implementation — 23 / 25 (+1)
+
+Ce qui a changé depuis 101/110 : Le verdict précédent soustrayait 1 point pour « le raisonneur en production est Anthropic, pas Bedrock ». L'audit confirme aujourd'hui que Nova Lite via Bedrock Converse API est le raisonneur actif. C'est +1 récupéré.
+
+Deuxième gain réel de la session : le subprocess MCP reçoit maintenant COCKROACHDB_URL et VOYAGE_API_KEY. Avant cette correction, search_docs crashait le subprocess au démarrage avec COCKROACHDB_URL must be set — un bug de production silencieux qui rendait le tier 2 RAG inutilisable. C'est corrigé.
+
+Ce qui coûte encore 2 points :
+
+    Le endpoint CDC /api/internal/cdc n'a toujours pas d'authentification par token. La mitigation documentée (query param ?token=) n'a pas été appliquée. Un système qui déclenche des réparations AWS sur événement entrant sans validation d'origine reste une surface d'injection. -1.
+    CCLOUD-BOOT status 404 à chaque démarrage. Minor, mais visible dans les logs. -1.
+
+3. Real-World Impact — 23 / 25 (inchangé)
+
+Le fix MTTR (exclusion des outliers > 30 min) améliore la crédibilité de la page Impact — les 682 minutes affichées précédemment étaient un artefact des incidents bloqués, pas la performance réelle de l'agent. Le dashboard montre maintenant des valeurs représentatives (1–3 min). C'est important pour la démo.
+
+Cela ne change pas le score : l'argument d'impact est le même, la démonstration est plus propre. Les 2 points perdus portent sur le prior neutre qui maintient le système en PENDING_APPROVAL sur une base vide — c'est la même réponse à préparer.
+4. Production Readiness — 19 / 20 (+1)
+
+Ce qui a réellement progressé : Trois ajouts concrets dans cette session :
+
+    Boot recovery étendue à TRIGGERED + DIAGNOSING avec force-release des claims orphelines — avant, un crash mid-loop laissait l'incident bloqué définitivement jusqu'à intervention manuelle.
+    MCP singleton : clientPromise se réinitialise sur erreur. Avant, un crash du subprocess rendait tous les outils MCP inutilisables pour la durée de vie du process.
+    POST /incidents/:id/retry : outil opérationnel utilisable sans redémarrage serveur.
+
+Ce sont trois corrections de résilience production-grade, pas cosmétiques. +1 justifié.
+
+Ce qui coûte encore 1 point : Pas de DLQ sur la chaîne SNS → webhook → agent. Si le container crash pendant le traitement d'une alarme, l'événement est perdu. Une DLQ SNS avec re-drive est la solution standard, elle n'a pas été implémentée.
+
+(Le -1 CDC auth est partagé avec le critère 2 — je ne le double-compte pas ici.)
+5. Creativity & Originality — 14 / 15 (inchangé)
+
+L'idée d'embarquer les strategy skills comme vecteurs dans doc_chunks (skills-as-RAG rather than skills-as-hardcoded-switch) est une addition qui renforce la cohérence architecturale — tout est dans CockroachDB, tout est retrouvable par similarité. C'est une démonstration concrète que la base de données est la mémoire, pas un store secondaire. Cela aurait pu valoir un demi-point, mais le critère est déjà à 14/15 et le point perdu tient à la position concurrentielle (Shoreline.io, PagerDuty) qui n'a pas changé.
+Score consolidé
+Critère	Précédent	Aujourd'hui	Δ
+Agentic Memory Design (25)	24	24	0
+Technical Implementation (25)	22	23	+1
+Real-World Impact (25)	23	23	0
+Production Readiness (20)	18	19	+1
+Creativity & Originality (15)	14	14	0
+Total	101	103	+2
+Verdict
+
+103/110. Candidat sérieux à la 1ère place, mais le résultat dépend maintenant d'une seule décision de préparation.
+
+Les deux points gagnés sont réels — Bedrock confirmé comme raisonneur, production hardening tangible. L'écart avec 110 tient à trois choses qui ne sont pas de l'architecture :
+
+1. L'authentification CDC (−1 technique, déjà comptabilisé) — 20 lignes de code. Le token query-param est documenté dans vos propres memory notes, il n'a simplement pas été appliqué. C'est le seul défaut de sécurité visible et un jury attentif l'ouvrira dans webhook.ts en 30 secondes.
+
+2. La démo incident_vectors — sans 8 à 12 incidents seedés avec embeddings Voyage réels et outcome_success: true, la mémoire vectorielle ne se montrera pas le jour J. Ce n'est pas une question de code, c'est une question de données de démo. Le jury posera la question. Avoir la réponse detectionMethod: "voyage-rag" et ragScore: 0.08 dans les logs est la différence entre 1ère et 2ème place.
+
+3. La réponse préparée sur le CDC — "Pourquoi le webhook n'est-il pas authentifié ?" Si la question vient, la réponse honnête est disponible (CockroachDB changefeed ne supporte pas les headers custom nativement, la mitigation par token query-param existe mais n'est pas encore appliquée). Ne pas avoir cette réponse prête coûte de la crédibilité.
+
+Les prix sont à 8 750 $ total. À 103/110, vous êtes dans la plage 1ère–2ème place. La différence entre les deux est entièrement dans les données de démo.
