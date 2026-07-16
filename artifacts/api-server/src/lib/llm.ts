@@ -32,6 +32,7 @@ const BASE_SYSTEM = `You are Cloud-Surgeon, an autonomous DevOps agent with deep
 AWS infrastructure (ECS, RDS, Lambda, CloudWatch, IAM) and CockroachDB operations.
 
 Rules you always follow:
+- ALWAYS respond in French only. Never mix French and English in the same sentence. Technical identifiers (metric names, field names, AWS/CockroachDB API values, strategy names, JSON keys) remain in their original form, but all natural-language explanation and reasoning must be in French.
 - Cite specific metric names, field names, or observable states — never use generic language.
 - One sentence per response, no preamble, no meta-commentary about format.
 - If the repair output contains a field named "success", cite its value explicitly.
@@ -236,47 +237,47 @@ export function buildThoughtPrompt(
 
   if (turnIndex === 0) {
     return (
-      `Alert: "${alertText}". ` +
-      (strategy ? `Detected failure mode: ${strategy}. ` : "") +
-      `In one sentence, state the exact metric or cluster signal you will read first ` +
-      `and why verifying it before acting prevents amplifying the incident.`
+      `Alerte : "${alertText}". ` +
+      (strategy ? `Mode de panne détecté : ${strategy}. ` : "") +
+      `En une phrase en français, indique l'exact métrique ou signal cluster que tu vas lire en premier ` +
+      `et explique pourquoi le vérifier avant d'agir évite d'amplifier l'incident.`
     );
   }
 
   if (turnIndex === 1) {
-    const diag = priorToolOutput ? JSON.stringify(priorToolOutput).slice(0, 500) : "unavailable";
+    const diag = priorToolOutput ? JSON.stringify(priorToolOutput).slice(0, 500) : "indisponible";
     return (
-      `Diagnostic result: ${diag}. ` +
-      `Alert: "${alertText}". ` +
-      (strategy ? `Repair strategy selected: "${strategy}". ` : "") +
-      (service  ? `Target service: "${service}". ` : "") +
-      `In one sentence, cite the specific field or metric in the diagnostic output that directly justifies ` +
-      `choosing this strategy over any alternative.`
+      `Résultat du diagnostic : ${diag}. ` +
+      `Alerte : "${alertText}". ` +
+      (strategy ? `Stratégie de réparation sélectionnée : "${strategy}". ` : "") +
+      (service  ? `Service cible : "${service}". ` : "") +
+      `En une phrase en français, cite le champ ou la métrique précis dans le résultat du diagnostic qui justifie ` +
+      `directement le choix de cette stratégie plutôt que toute alternative.`
     );
   }
 
   // Turn 2 — auditor
-  const result  = priorToolOutput ? JSON.stringify(priorToolOutput).slice(0, 500) : "unavailable";
-  const outcome = meta?.repairSuccess === true ? "SUCCESS" : meta?.repairSuccess === false ? "FAILURE" : "unknown";
+  const result  = priorToolOutput ? JSON.stringify(priorToolOutput).slice(0, 500) : "indisponible";
+  const outcome = meta?.repairSuccess === true ? "SUCCÈS" : meta?.repairSuccess === false ? "ÉCHEC" : "inconnu";
   return (
-    `Repair output: ${result}. ` +
-    (strategy ? `Strategy applied: "${strategy}". ` : "") +
-    `Declared outcome: ${outcome}. ` +
-    `In one sentence, cite the specific field or metric in the output that confirms this outcome ` +
-    `and state whether the service requires continued monitoring or the incident is fully closed.`
+    `Résultat de la réparation : ${result}. ` +
+    (strategy ? `Stratégie appliquée : "${strategy}". ` : "") +
+    `Résultat déclaré : ${outcome}. ` +
+    `En une phrase en français, cite le champ ou la métrique précis dans le résultat qui confirme ce résultat ` +
+    `et indique si le service nécessite une surveillance continue ou si l'incident est totalement clôturé.`
   );
 }
 
 // ── Fallback thoughts (all providers failed) ──────────────────────────────
 
 const FALLBACK_THOUGHTS: Record<number, string> = {
-  0: "Checking cluster health and recent deployment history before recommending any corrective action.",
-  1: "Diagnostic data confirms degradation. Selecting the highest-confidence repair strategy from memory.",
-  2: "Verifying repair outcome against success criteria and closing the incident record.",
+  0: "Vérification de l'état du cluster et de l'historique des déploiements récents avant toute action corrective.",
+  1: "Les données de diagnostic confirment la dégradation — sélection de la stratégie de réparation la plus fiable en mémoire.",
+  2: "Vérification du résultat de la réparation par rapport aux critères de succès et clôture de l'incident.",
 };
 
 function fallbackThought(turnIndex: number): string {
-  return FALLBACK_THOUGHTS[turnIndex] ?? "Analyzing incident data and determining next action.";
+  return FALLBACK_THOUGHTS[turnIndex] ?? "Analyse des données d'incident et détermination de la prochaine action.";
 }
 
 // ── Anthropic path ─────────────────────────────────────────────────────────
