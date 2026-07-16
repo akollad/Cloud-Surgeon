@@ -695,7 +695,10 @@ const DOC_URL_MAP: Array<{ keywords: RegExp[]; url: string; label: string }> = [
   },
 ];
 
-const DOC_CONFIDENCE_THRESHOLD = 0.40; // cosine distance; lower = more similar
+// Cosine distance threshold — lower = more similar (0 = identical, 1 = orthogonal).
+// 0.55 captures precise doc matches (< 0.40) and clearly relevant skill chunks (0.40–0.54).
+// Chunks at 0.55+ are too generic to add signal and are left to Tier 2 web-fetch or MCP tool use.
+const DOC_CONFIDENCE_THRESHOLD = 0.55;
 
 async function fetchDocUrl(url: string, label: string): Promise<string | null> {
   try {
