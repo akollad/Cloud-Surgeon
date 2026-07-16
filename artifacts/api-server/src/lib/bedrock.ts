@@ -41,24 +41,8 @@ function buildRequestBody(prompt: string): string {
   });
 }
 
-function buildPrompt(
-  alertText: string,
-  turnIndex: number,
-  priorToolOutput: Record<string, unknown> | null,
-): string {
-  if (turnIndex === 0) {
-    return (
-      `You are Cloud-Surgeon, an autonomous DevOps agent. ` +
-      `Alert: "${alertText}". ` +
-      `In one sentence, explain why you will check cluster/service state before taking any corrective action.`
-    );
-  }
-  return (
-    `You are Cloud-Surgeon, an autonomous DevOps agent. ` +
-    `Diagnostic result: ${JSON.stringify(priorToolOutput)}. ` +
-    `In one sentence, explain your reasoning for the repair action you are about to apply.`
-  );
-}
+// Prompt is now built in llm.ts (buildThoughtPrompt) and passed in directly.
+// This keeps all prompt logic in one place.
 
 // ── Path 1: BEDROCK_API_KEY Bearer token ──────────────────────────────────
 
@@ -155,19 +139,14 @@ export function bedrockAuthMethod(): "api-key" | "sigv4" | "none" {
   return "none";
 }
 
-export async function invokeBedrockThought(
-  alertText: string,
-  turnIndex: number,
-  priorToolOutput: Record<string, unknown> | null,
-): Promise<string | null> {
+/**
+ * Invoke Nova Lite with a pre-built prompt string.
+ * Used by invokeLLMThought (via llm.ts) and invokeLLMText.
+ */
+async function callNovaThin(prompt: string, logLabel: string): Promise<string | null> {
   const auth = bedrockAuthMethod();
   if (auth === "none") return null;
 
-  const prompt = buildPrompt(alertText, turnIndex, priorToolOutput);
-
-  // SigV4 path uses the ConverseCommand directly (not raw HTTP), so we pass the
-  // prompt string and let invokeWithSigV4 build its own payload.
-  // API-key path uses raw HTTP fetch with buildRequestBody(prompt).
   const authFn =
     auth === "api-key"
       ? invokeWithApiKey
@@ -176,17 +155,28 @@ export async function invokeBedrockThought(
   try {
     const { result, modelId } = await invokeModel(prompt, authFn);
     if (result) {
-      logger.info(
-        { turnIndex, auth, region: REGION, modelId },
-        "Bedrock Nova Lite thought generated",
-      );
+      logger.info({ auth, region: REGION, modelId, label: logLabel }, "Bedrock Nova Lite response");
     }
     return result;
   } catch (err) {
     logger.warn(
-      { err: err instanceof Error ? err.message : String(err), turnIndex, region: REGION, auth },
-      "Bedrock Nova Lite invocation failed — falling back to simulated thought",
+      { err: err instanceof Error ? err.message : String(err), region: REGION, auth, label: logLabel },
+      "Bedrock Nova Lite invocation failed",
     );
     return null;
   }
+}
+
+/**
+ * Per-turn reasoning sentence.  Prompt is built in llm.ts (buildThoughtPrompt).
+ */
+export async function invokeBedrockThought(prompt: string): Promise<string | null> {
+  return callNovaThin(prompt, "thought");
+}
+
+/**
+ * Generic single-prompt text generation — used for plan/playbook enrichment.
+ */
+export async function invokeBedrockText(prompt: string): Promise<string | null> {
+  return callNovaThin(prompt, "text");
 }

@@ -1,19 +1,15 @@
 /**
- * Provider-agnostic LLM layer for agent reasoning ("thoughts").
+ * Provider-agnostic LLM layer.
  *
- * AI_PROVIDER=anthropic  → Anthropic Claude via Replit AI Integrations (dev).
- *                           @workspace/integrations-anthropic-ai is loaded lazily
- *                           with a dynamic import — only when this path is active.
- *                           Bedrock-mode startup never loads Anthropic env vars.
+ * Exports:
+ *  - invokeLLMThought()  — per-agent-turn reasoning sentence (diagnostician / remediator / auditor)
+ *  - invokeLLMText()     — generic single prompt → string (used for expectedOutcome enrichment, etc.)
  *
- * AI_PROVIDER=bedrock    → Amazon Bedrock Claude via AWS SDK (production default).
- *                           No dependency on Anthropic env vars at any point.
- *
- * Returns a unified { thought, source } shape. Falls back to a deterministic
- * simulated thought only when every live provider fails — and always logs why.
+ * AI_PROVIDER=anthropic  → Anthropic Claude via Replit AI Integrations or direct API key.
+ * AI_PROVIDER=bedrock    → Amazon Nova Lite via Bedrock Converse API (default, geo-unrestricted).
  */
 
-import { invokeBedrockThought } from "./bedrock";
+import { invokeBedrockThought, invokeBedrockText } from "./bedrock";
 import { logger } from "./logger";
 
 // ── Fallback thought templates (used only when all providers fail) ─────────
@@ -28,70 +24,78 @@ function fallbackThought(turnIndex: number): string {
   return FALLBACK_THOUGHTS[turnIndex] ?? "Analyzing incident data and determining next action.";
 }
 
+// ── Optional metadata forwarded to prompts ────────────────────────────────
+
+export interface LLMThoughtMeta {
+  strategyName?: string;
+  serviceName?: string;
+  repairSuccess?: boolean;
+}
+
 // ── Prompt builder ─────────────────────────────────────────────────────────
 
-function buildPrompt(
+export function buildThoughtPrompt(
   alertText: string,
   turnIndex: number,
   priorToolOutput: Record<string, unknown> | null,
+  meta?: LLMThoughtMeta,
 ): string {
+  const strategy = meta?.strategyName;
+  const service  = meta?.serviceName;
+
   if (turnIndex === 0) {
     return (
-      `You are an autonomous cloud-infrastructure DevOps agent (Cloud-Surgeon). ` +
-      `An infrastructure alert has just fired: "${alertText}". ` +
-      `In exactly one sentence, explain your reasoning for checking cluster and service status ` +
-      `before taking any corrective action. Be specific about what signal you are looking for.`
+      `You are Cloud-Surgeon, an autonomous DevOps agent responding to a live infrastructure alert. ` +
+      `Alert: "${alertText}". ` +
+      (strategy ? `Likely failure mode: ${strategy}. ` : "") +
+      `In one sentence, state the exact metric or cluster signal you will read first ` +
+      `and why verifying it before acting prevents amplifying the incident.`
     );
   }
+
   if (turnIndex === 1) {
+    const diag = priorToolOutput ? JSON.stringify(priorToolOutput).slice(0, 400) : "unavailable";
     return (
-      `You are an autonomous cloud-infrastructure DevOps agent (Cloud-Surgeon). ` +
-      `Diagnostic result: ${JSON.stringify(priorToolOutput)}. ` +
-      `In exactly one sentence, explain your reasoning for the repair strategy you are about ` +
-      `to apply and why it is the most appropriate action given the diagnostic data above.`
+      `You are Cloud-Surgeon. Diagnostic result: ${diag}. ` +
+      `Alert: "${alertText}". ` +
+      (strategy ? `Repair strategy selected: "${strategy}". ` : "") +
+      (service  ? `Target service: "${service}". ` : "") +
+      `In one sentence, cite the specific finding in the diagnostic output that directly justifies ` +
+      `this strategy over any alternative approach.`
     );
   }
+
+  // Turn 2 — auditor
+  const result = priorToolOutput ? JSON.stringify(priorToolOutput).slice(0, 400) : "unavailable";
+  const outcome = meta?.repairSuccess === true ? "SUCCESS" : meta?.repairSuccess === false ? "FAILURE" : "unknown";
   return (
-    `You are an autonomous cloud-infrastructure DevOps agent (Cloud-Surgeon). ` +
-    `Repair result: ${JSON.stringify(priorToolOutput)}. ` +
-    `In exactly one sentence, summarize whether the repair succeeded, what evidence supports ` +
-    `your conclusion, and whether any follow-up action is required.`
+    `You are Cloud-Surgeon. Repair output: ${result}. ` +
+    (strategy ? `Strategy applied: "${strategy}". ` : "") +
+    `Declared outcome: ${outcome}. ` +
+    `In one sentence, identify the specific field or metric in the output that confirms this outcome ` +
+    `and state whether the service requires continued monitoring or the incident is fully closed.`
   );
 }
 
 // ── Anthropic path — lazy dynamic import ──────────────────────────────────
-// The module is only imported when AI_PROVIDER=anthropic is active.
-// This prevents the Anthropic client's startup validation from running
-// in Bedrock/production mode where the integration env vars are absent.
 
-async function callAnthropicLLM(
-  alertText: string,
-  turnIndex: number,
-  priorToolOutput: Record<string, unknown> | null,
-): Promise<string | null> {
-  const prompt = buildPrompt(alertText, turnIndex, priorToolOutput);
-
-  // Prefer the Replit AI Integrations proxy when it is provisioned.
+async function callAnthropicLLM(prompt: string): Promise<string | null> {
   if (process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL) {
     try {
       const { anthropic } = await import("@workspace/integrations-anthropic-ai");
       const message = await anthropic.messages.create({
-        model: "claude-haiku-4-5", // via Replit AI Integrations proxy
+        model: "claude-haiku-4-5",
         max_tokens: 300,
         messages: [{ role: "user", content: prompt }],
       });
       const block = message.content[0];
       return (block?.type === "text" ? block.text.trim() : null) ?? null;
     } catch (err) {
-      logger.warn(
-        { err: err instanceof Error ? err.message : String(err), turnIndex },
-        "Anthropic (AI Integrations) invocation failed — falling back to simulated",
-      );
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Anthropic (AI Integrations) failed");
       return null;
     }
   }
 
-  // Fall back to the user's own Anthropic API key when the proxy isn't provisioned.
   if (process.env.ANTHROPIC_API_KEY) {
     try {
       const { default: Anthropic } = await import("@anthropic-ai/sdk");
@@ -104,17 +108,12 @@ async function callAnthropicLLM(
       const block = message.content[0];
       return (block?.type === "text" ? block.text.trim() : null) ?? null;
     } catch (err) {
-      logger.warn(
-        { err: err instanceof Error ? err.message : String(err), turnIndex },
-        "Anthropic (direct API key) invocation failed — falling back to simulated",
-      );
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Anthropic (direct API key) failed");
       return null;
     }
   }
 
-  logger.warn(
-    "AI_PROVIDER=anthropic but neither AI_INTEGRATIONS_ANTHROPIC_BASE_URL nor ANTHROPIC_API_KEY is set — falling back to simulated",
-  );
+  logger.warn("AI_PROVIDER=anthropic but no API key set — falling back to simulated");
   return null;
 }
 
@@ -127,16 +126,22 @@ export interface LLMThought {
   source: ThoughtSource;
 }
 
+/**
+ * Per-turn reasoning sentence for the agent loop.
+ * Accepts optional meta (strategyName, serviceName, repairSuccess) to produce
+ * richer, more specific prompts.
+ */
 export async function invokeLLMThought(
   alertText: string,
   turnIndex: number,
   priorToolOutput: Record<string, unknown> | null,
+  meta?: LLMThoughtMeta,
 ): Promise<LLMThought> {
   const provider = (process.env.AI_PROVIDER ?? "bedrock").toLowerCase();
+  const prompt = buildThoughtPrompt(alertText, turnIndex, priorToolOutput, meta);
 
-  // ── Anthropic path (dev) ──────────────────────────────────────────────────
   if (provider === "anthropic") {
-    const text = await callAnthropicLLM(alertText, turnIndex, priorToolOutput);
+    const text = await callAnthropicLLM(prompt);
     if (text) {
       logger.info({ turnIndex, provider: "anthropic" }, "LLM thought generated");
       return { thought: text, source: "anthropic" };
@@ -144,13 +149,26 @@ export async function invokeLLMThought(
     return { thought: fallbackThought(turnIndex), source: "simulated" };
   }
 
-  // ── Bedrock path (production default) ────────────────────────────────────
-  // No Anthropic env vars are read on this path.
-  const bedrockThought = await invokeBedrockThought(alertText, turnIndex, priorToolOutput);
+  // Bedrock (Nova Lite) path
+  const bedrockThought = await invokeBedrockThought(prompt);
   if (bedrockThought) {
     return { thought: bedrockThought, source: "bedrock" };
   }
 
-  // ── Final fallback ────────────────────────────────────────────────────────
   return { thought: fallbackThought(turnIndex), source: "simulated" };
+}
+
+/**
+ * Generic single-prompt LLM call — used for plan enrichment, playbook generation,
+ * and any one-off text generation that isn't tied to the agent turn loop.
+ * Works with any configured provider.
+ */
+export async function invokeLLMText(prompt: string): Promise<string | null> {
+  const provider = (process.env.AI_PROVIDER ?? "bedrock").toLowerCase();
+
+  if (provider === "anthropic") {
+    return callAnthropicLLM(prompt);
+  }
+
+  return invokeBedrockText(prompt);
 }

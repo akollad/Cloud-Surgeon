@@ -11,7 +11,7 @@ import {
   type IncidentState,
 } from "@workspace/db";
 import { callMcpTool } from "../mcp/client";
-import { invokeLLMThought } from "./llm";
+import { invokeLLMThought, invokeLLMText } from "./llm";
 import { generateEmbedding } from "./embeddings";
 import { type ChaosConfig, ChaosPartitionError, injectChaos, sleep as chaosSleep } from "./chaos";
 
@@ -565,37 +565,17 @@ export async function generateRepairPlan(
     generatedAt: new Date().toISOString(),
   };
 
-  // Enrich expected outcome with LLM if available
-  const provider = (process.env.AI_PROVIDER ?? "bedrock").toLowerCase();
-  if (provider === "anthropic" && (process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL || process.env.ANTHROPIC_API_KEY)) {
-    try {
-      const prompt =
-        `You are a DevOps expert. For this incident on service '${serviceName}', ` +
-        `write one sentence describing the specific expected outcome of applying strategy '${strategyName}'.\n` +
-        `Incident: ${alertText.slice(0, 200)}\n` +
-        `Respond with ONLY the outcome sentence, no preamble.`;
-      let result: string | null = null;
-      if (process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL) {
-        const { anthropic } = await import("@workspace/integrations-anthropic-ai");
-        const msg = await anthropic.messages.create({
-          model: "claude-haiku-4-5", max_tokens: 150,
-          messages: [{ role: "user", content: prompt }],
-        });
-        const block = msg.content[0];
-        result = block?.type === "text" ? block.text.trim() : null;
-      } else if (process.env.ANTHROPIC_API_KEY) {
-        const { default: Anthropic } = await import("@anthropic-ai/sdk");
-        const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-        const msg = await client.messages.create({
-          model: "claude-3-5-haiku-latest", max_tokens: 150,
-          messages: [{ role: "user", content: prompt }],
-        });
-        const block = msg.content[0];
-        result = block?.type === "text" ? block.text.trim() : null;
-      }
-      if (result) { plan.expectedOutcome = result; plan.generatedBy = "llm"; }
-    } catch { /* non-fatal */ }
-  }
+  // Enrich expected outcome with LLM — works with any configured provider (Nova Lite or Anthropic)
+  try {
+    const outcomePrompt =
+      `You are a DevOps expert. Service '${serviceName}' triggered: "${alertText.slice(0, 200)}". ` +
+      `Repair strategy: ${strategyName}. ` +
+      `Write ONE sentence naming the specific measurable state expected within 90 seconds of a successful repair — ` +
+      `a metric dropping below a threshold, a count reaching zero, or a service reaching a target health state. ` +
+      `Respond with ONLY that sentence, no preamble.`;
+    const result = await invokeLLMText(outcomePrompt);
+    if (result) { plan.expectedOutcome = result; plan.generatedBy = "llm"; }
+  } catch { /* non-fatal */ }
 
   return plan;
 }
@@ -1577,7 +1557,7 @@ export async function runAgentLoop(
       ? {}
       : { action: "cluster:status" };
 
-    const { thought, source: thoughtSource } = await invokeLLMThought(alertText, 0, null);
+    const { thought, source: thoughtSource } = await invokeLLMThought(alertText, 0, null, { strategyName });
     const toolOutput = await callTool(diagToolName, toolInput);
 
     await logExecution(
@@ -1612,7 +1592,9 @@ export async function runAgentLoop(
   // LAYER 2 — Routing decision (between Diagnostician and Remediator)
   // ════════════════════════════════════════════════════════════
   if (context.turns.length === 1 && !context.routingDecisionComputed) {
-    const { embedding } = await generateEmbedding(alertText);
+    // Enrich the embedding text with strategy context so Voyage finds
+    // semantically similar incidents, not just textually similar ones.
+    const { embedding } = await generateEmbedding(`${alertText} | strategy:${strategyName}`);
     const ragHit = await findSimilarIncident(embedding);
     // Win-rate is computed on the DETECTED strategy (not the RAG hit strategy):
     // the detected strategy is the agent's decision; the RAG hit is used as a
@@ -1695,7 +1677,7 @@ export async function runAgentLoop(
     );
 
     const serviceName = detectServiceName(alertText);
-    const { thought, source: thoughtSource } = await invokeLLMThought(alertText, 1, context.turns[0]?.toolOutput ?? null);
+    const { thought, source: thoughtSource } = await invokeLLMThought(alertText, 1, context.turns[0]?.toolOutput ?? null, { strategyName, serviceName });
 
     // ── Feature 2: Generate pre-execution simulation plan ─────────────────
     // Before touching any infrastructure, the agent produces a structured plan
@@ -1774,7 +1756,7 @@ export async function runAgentLoop(
       repairVerified: repairSuccess,
       strategyUsed: strategyName,
     };
-    const { thought, source: thoughtSource } = await invokeLLMThought(alertText, 2, repairOutput ?? null);
+    const { thought, source: thoughtSource } = await invokeLLMThought(alertText, 2, repairOutput ?? null, { strategyName, repairSuccess });
     const toolOutput = await callTool("verify_resolution", toolInput);
 
     await logExecution(
@@ -1811,7 +1793,8 @@ export async function runAgentLoop(
     await releaseIncidentClaim(incident.incidentId);
 
     // Feed Layer 1 with the actual result of this incident
-    const { embedding: resolvedEmbedding } = await generateEmbedding(alertText);
+    // Store with the same enriched text used at routing time for consistent similarity.
+    const { embedding: resolvedEmbedding } = await generateEmbedding(`${alertText} | strategy:${strategyName}`);
     await indexResolvedIncident(
       incident.incidentId,
       alertText,
