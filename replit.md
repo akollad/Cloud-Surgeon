@@ -24,18 +24,28 @@ The API is at `/api/` (proxied through the dashboard's Vite dev server).
 
 ## Required Secrets
 
-| Secret | Purpose |
-|---|---|
-| `COCKROACHDB_URL` | CockroachDB Serverless connection string |
-| `ANTHROPIC_API_KEY` | Claude API key for the agent loop |
+| Secret | Purpose | Status |
+|---|---|---|
+| `COCKROACHDB_URL` | CockroachDB Serverless connection string | ✅ set |
+| `BEDROCK_API_KEY` | AWS Bedrock API key (bdak-… format) | ✅ set |
+| `VOYAGE_API_KEY` | Voyage AI key for semantic RAG embeddings | ✅ set |
+| `SESSION_SECRET` | Cookie signing secret | ✅ set |
+
+Optional secrets (enable live AWS tool calls):
+- `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` — without these, AWS tools run in SIMULATED mode
+- `COCKROACH_CLOUD_API_KEY` — for CockroachDB Cloud cluster management via ccloud CLI
+- `COCKROACH_CLOUD_CLUSTER_ID` — cluster UUID from CockroachDB Cloud console
 
 ## Pre-configured Env Vars (shared)
 
 - `CLOUD_SURGEON_API_KEY` — API key for all `/api/*` endpoints
-- `AI_PROVIDER=anthropic` — LLM provider selection
+- `AI_PROVIDER=bedrock` — LLM provider (AWS Bedrock Nova Lite)
+- `BEDROCK_REGION=eu-west-1` — Bedrock region
 - `AWS_REGION=us-east-1` — AWS region for ECS/RDS/Lambda calls
 - `VITE_API_KEY` — Dashboard API key (matches `CLOUD_SURGEON_API_KEY`)
 - `VITE_API_BASE_URL` — leave unset; the generated client already includes `/api/` in every path
+- `ECS_DEFAULT_CLUSTER=cloud-surgeon` — ECS cluster name
+- `ECS_DEFAULT_SERVICE=api` — ECS service name
 
 ## Key API Endpoints
 
