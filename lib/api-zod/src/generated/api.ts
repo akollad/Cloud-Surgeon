@@ -25,7 +25,7 @@ export const triggerIncidentBodySimulateCrashDefault = false;
 export const TriggerIncidentBody = zod.object({
   "alertText": zod.string().min(1),
   "simulateCrash": zod.boolean().default(triggerIncidentBodySimulateCrashDefault),
-  "chaosMode": zod.string().optional()
+  "chaosMode": zod.string().nullish()
 })
 
 export const TriggerIncidentResponse = zod.object({
