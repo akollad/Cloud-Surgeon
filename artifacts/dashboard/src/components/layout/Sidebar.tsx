@@ -6,7 +6,7 @@ import { Server, Activity, AlertTriangle, Zap, Terminal, X, ChevronLeft, Chevron
 import { cn } from "@/lib/utils";
 
 const PRESET_SCENARIOS = [
-  "Payment service 5xx spike (ECS)",
+  "ECS service checkout: payment 5xx spike",
   "Primary DB CPU saturation (RDS)",
   "Cascading Lambda throttling",
   "Worker node disk full",

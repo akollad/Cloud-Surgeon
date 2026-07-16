@@ -50,7 +50,7 @@ export default function JudgeGuide() {
               </div>
             </CardHeader>
             <CardContent className="text-sm text-muted-foreground leading-relaxed pt-0">
-              <p className="mb-2"><strong>Trigger:</strong> Select "Payment service 5xx spike (ECS)".</p>
+              <p className="mb-2"><strong>Trigger:</strong> Select "ECS service checkout: payment 5xx spike".</p>
               <p><strong>Flow:</strong> The agent recognizes this exact signature from memory with a high win-rate. It instantly restarts the ECS tasks, validates the fix, and closes the incident. No human needed. Check the <span className="text-primary">/live</span> tab to watch the execution.</p>
             </CardContent>
           </Card>
