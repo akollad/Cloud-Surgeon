@@ -1,0 +1,46 @@
+🪳 Hackathon CockroachDB × AWS :
+CockroachDB et AWS invitent les développeurs, les ingénieurs et les concepteurs d'IA à créer la prochaine génération d'applications d'agents. Exploitez les capacités d'IA distribuée de CockroachDB, son serveur MCP entièrement géré, son interface de ligne de commande ccloud compatible avec les agents, son dépôt de compétences d'agents open source, ses intégrations LangChain et ses plugins Claude/Cursor (le tout sur AWS) pour créer des agents d'IA dotés d'une mémoire persistante de qualité professionnelle.
+
+Pourquoi la mémoire agentique ? Pourquoi maintenant ?
+Les agents d'IA passent rapidement du stade expérimental à des flux de travail de production réels : écriture de code, exécution de pipelines, diagnostic d'incidents et gestion d'un trafic applicatif supérieur à celui de n'importe quel humain. Mais voici le problème : ces agents ont besoin d'une mémoire ininterrompue.
+
+Un agent dont la mémoire est indisponible ne se dégrade pas progressivement, il s'arrête. Les bases de données traditionnelles étaient optimisées pour des opérations de lecture et d'écriture à l'échelle humaine. Les systèmes multi-agents sont différents : ils se déploient de manière autonome, écrivent en continu et nécessitent une mémoire persistante, indépendamment des régions, des pannes et de l'échelle (sans perte de données ni interruption de maintenance).
+
+CockroachDB a été conçu précisément à cet effet. Il s'agit du système de référence pour la mémoire des agents : distribué à l'échelle mondiale, toujours disponible, compatible avec PostgreSQL et désormais intégré nativement à la chaîne d'outils des agents via MCP, le cloud et un écosystème de compétences open source.
+
+Ce hackathon est votre invitation à bâtir sur ces fondations.
+
+Exigences
+Le défi
+Créez une application agentique utilisant CockroachDB comme couche de mémoire persistante, déployée sur AWS.
+
+Votre agent doit pouvoir stocker, récupérer et exploiter les données en mémoire, qu'il s'agisse de l'historique des conversations, du contexte utilisateur, de l'état des tâches, des embeddings ou de données transactionnelles structurées. Les meilleures solutions démontreront que la mémoire n'est pas une simple fonctionnalité, mais bien ce qui rend un agent opérationnel en production.
+
+Toutes les soumissions doivent utiliser au moins deux des outils CockroachDB suivants :
+
+Serveur MCP géré dans le cloud CockroachDB — Connectez vos agents d'IA directement aux clusters CockroachDB grâce à un simple extrait de configuration depuis la console cloud. Compatible nativement avec Claude Code, Cursor et VS Code. Sécurité garantie : mode lecture seule, journalisation complète des audits, aucun proxy personnalisé requis. Point de terminaison : https://cockroachlabs.cloud/mcp
+Indexation vectorielle distribuée CockroachDB : stockez et interrogez des représentations vectorielles à grande échelle grâce à la prise en charge des vecteurs et à l’indexation distribuée de CockroachDB. La recherche et l’extraction sémantiques restent rapides malgré la croissance de vos données : aucun stockage vectoriel séparé à maintenir, aucune réindexation fastidieuse et aucune incohérence entre vos données vectorielles et votre base de données opérationnelle. Idéal pour les pipelines RAG, la mémoire d’agent à long terme et les applications de recherche sémantique.
+Interface de ligne de commande ccloud (prête pour les agents) : offrez à votre agent un accès direct et sécurisé à l’ensemble du plan de contrôle de CockroachDB Cloud. Provisionnez des clusters, gérez les sauvegardes, configurez le réseau et surveillez les journaux d’audit, le tout depuis le terminal. Conçue pour l’IA, elle propose des modèles nom-verbe cohérents, une sortie JSON pour chaque commande et un contrôle d’accès basé sur les rôles (RBAC) précis au niveau des comptes de service.
+Dépôt de compétences d'agent CockroachDB (Open Source) — Une collection open source de compétences d'agent exécutables par machine, soigneusement sélectionnées et intégrant l'expertise CockroachDB. Ces compétences couvrent l'intégration, la conception de requêtes et de schémas, les opérations, les performances, la sécurité et l'observabilité. Elles sont compatibles avec Claude, Cursor, LangChain et tout client compatible MCP.
+Toutes les soumissions doivent également utiliser au moins un service AWS :
+
+Amazon Bedrock (modèles de base, bases de connaissances ou agents)
+AWS Lambda (exécution d'agent sans serveur)
+Amazon ECS / EKS (charges de travail d'agents conteneurisées)
+Amazon S3 (stockage d'artefacts ou de documents)
+Amazon SageMaker (entraînement ou inférence de modèles)
+Agents Amazon Bedrock (flux de travail multi-étapes)
+Tout autre service AWS qui alimente l'environnement de votre agent
+ 
+
+Que soumettre
+
+Veuillez fournir l'URL de votre dépôt de code source ouvert et public pour évaluation et tests.
+Le dépôt doit contenir tout le code source nécessaire, une documentation README claire, toutes les dépendances requises, des exemples de configurations ou d'ensembles de données le cas échéant, ainsi que les instructions d'installation et d'exécution nécessaires au bon fonctionnement du projet. 
+Le dépôt doit être public et open source, et inclure un fichier de licence open source (nous recommandons MIT ou Apache 2.0). Cette licence doit être facilement identifiable et visible en haut de la page du dépôt (dans la section « À propos »).  
+Fournissez une URL vers votre application de démonstration fonctionnelle.
+Veuillez inclure une vidéo (de moins de 3 minutes) illustrant votre soumission et le fonctionnement de la couche mémoire de CockroachDB . Les vidéos doivent être mises en ligne sur YouTube ou Vimeo et rendues publiques.
+Identifiez les outils CockroachDB que vous avez utilisés (serveur MCP, interface de ligne de commande ccloud, indexation vectorielle distribuée, compétences de l'agent) et comment — qu'a fait concrètement l'agent avec eux ?
+Identifiez les outils AWS Services que vous avez utilisés (Amazon Bedrock, AWS Lambda, Amazon S3, etc.) et comment.
+Facultatif : Incluez un schéma d’architecture montrant comment CockroachDB, les services AWS et votre agent interagissent.
+Facultatif : Donnez votre avis sur les outils ou fonctionnalités d’IA de CockroachDB.
