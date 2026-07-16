@@ -352,15 +352,23 @@ server.registerTool(
       combined.includes("database") ||
       combined.includes("connection pool")
     ) {
-      // No RDS in this deployment (CockroachDB Serverless is the DB).
-      // Check the ECS service health instead — the DB issue may be in the app layer.
-      const { cluster, service } = extractEcsParams(serviceName);
+      // No RDS configured — do NOT attempt an ECS lookup with the DB service name.
+      // Mixing an ECS "not found" error with the crdb guidance creates contradictory
+      // output that causes the LLM to follow the wrong branch (the ECS hint instead
+      // of crdb_cluster_health). Return a single, unambiguous directive.
       result = {
-        ...(await repairEcsService(cluster, service)),
-        note:
-          "This deployment uses CockroachDB Serverless (no RDS). " +
-          "ECS service health checked instead. " +
-          "Use crdb_cluster_health for database diagnostics.",
+        success: false,
+        simulated: false,
+        service: "crdb",
+        actionTaken: "ROUTING_DECISION",
+        error:
+          `No RDS instance is configured in this deployment (database is CockroachDB Serverless). ` +
+          `'${serviceName}' is not an ECS service — do NOT check ECS for this alert. ` +
+          `You MUST call the 'crdb_cluster_health' tool to diagnose this database incident. ` +
+          `Do not call aws_repair_service again for this alert.`,
+        recommendation:
+          "Call crdb_cluster_health immediately. Do not fall back to ECS.",
+        approvalRequired: false,
       };
     } else {
       // ECS, EC2, disk, IAM, generic — target the service extracted from the alert.
