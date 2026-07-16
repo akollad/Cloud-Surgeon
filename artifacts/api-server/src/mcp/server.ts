@@ -407,7 +407,12 @@ server.registerTool(
     inputSchema: {},
   },
   async () => {
-    const result = await crdbMcp.clusterHealth();
+    const result = await crdbMcp.clusterHealth() as Record<string, unknown>;
+    // Inject success flag so the Auditor's repairOutput?.success check works.
+    // Without it, Boolean(undefined) → false → FAIL even when the cluster is healthy.
+    if (!Object.hasOwn(result, "success")) {
+      result.success = !result.error && !!result.cluster;
+    }
     return { content: [{ type: "text", text: JSON.stringify(result) }] };
   },
 );

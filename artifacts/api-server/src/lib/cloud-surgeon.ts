@@ -1780,6 +1780,17 @@ export async function runAgentLoop(
     // (cockroachlabs.cloud/mcp) using crdb_internal diagnostic tables.
     const isCrdbStrategy = strategyName.startsWith("crdb_");
 
+    // When the strategy targets a relational DB (rds_cpu_throttle,
+    // db_connection_pool_reset) but NO RDS is configured, the Remediator must
+    // call crdb_cluster_health directly — NOT aws_repair_service with an
+    // rds:* action. Without this guard, the Remediator loops back into the
+    // "no RDS" branch of aws_repair_service, which only repeats the same
+    // "call crdb_cluster_health" message without ever acting on it.
+    const hasRds = Boolean(process.env.RDS_INSTANCE_IDENTIFIER);
+    const isDbStrategy =
+      strategyName === "rds_cpu_throttle" || strategyName === "db_connection_pool_reset";
+    const usesCrdbFallback = isDbStrategy && !hasRds;
+
     // For AWS tools, pass a type-prefixed action so aws_repair_service can route
     // correctly even when the service name alone doesn't contain "lambda" / "rds".
     // Without the prefix, "order-processor" wouldn't match any keyword and would
@@ -1787,13 +1798,18 @@ export async function runAgentLoop(
     const remediatorAction =
       strategyName === "lambda_concurrency_scale"
         ? "lambda:describe_and_remediate"
-        : strategyName === "rds_cpu_throttle" || strategyName === "db_connection_pool_reset"
+        : isDbStrategy && hasRds
           ? "rds:describe_and_remediate"
           : "ecs:describe_and_remediate";
 
-    const remediatorToolName = isCrdbStrategy ? "crdb_skill_repair" : "aws_repair_service";
-    const toolInput = isCrdbStrategy
-      ? { strategy: strategyName, serviceName }
+    const remediatorToolName =
+      isCrdbStrategy ? "crdb_skill_repair"
+      : usesCrdbFallback ? "crdb_cluster_health"
+      : "aws_repair_service";
+
+    const toolInput =
+      isCrdbStrategy ? { strategy: strategyName, serviceName }
+      : usesCrdbFallback ? {}   // crdb_cluster_health takes no arguments
       : { serviceName, action: remediatorAction };
 
     const toolOutput = await callTool(remediatorToolName, toolInput);
