@@ -5,6 +5,7 @@ import { pool } from "@workspace/db";
 import { bedrockIsConfigured, bedrockAuthMethod } from "./lib/bedrock";
 import { createMetricSnapshotsTable } from "./lib/anomaly";
 import { createRollbackPlansTable, runAgentLoop } from "./lib/cloud-surgeon";
+import { seedDocChunks } from "./lib/doc-rag";
 import { initChangefeed } from "./lib/cdc";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -207,6 +208,11 @@ app.listen(port, async (err) => {
     logger.warn("[BOOT] Bedrock unconfigured — set BEDROCK_API_KEY or AWS credentials; thoughts will be simulated");
   }
   // ──────────────────────────────────────────────────────────────────────
+
+  // Seed documentation RAG chunks (AWS + CockroachDB docs, idempotent)
+  seedDocChunks().catch((err) =>
+    logger.warn({ err }, "[DocRAG] seedDocChunks failed (non-fatal)"),
+  );
 
   // Initialize vector memory at startup (idempotent)
   try {

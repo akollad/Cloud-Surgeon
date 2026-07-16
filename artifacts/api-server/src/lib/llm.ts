@@ -14,6 +14,7 @@
  */
 
 import { invokeBedrockThought, invokeBedrockText } from "./bedrock";
+import { findRelevantDocChunks, formatDocChunksForPrompt } from "./doc-rag";
 import { logger } from "./logger";
 
 // ── Strategy skills — domain knowledge injected as system prompt ───────────
@@ -341,13 +342,20 @@ export async function invokeLLMThought(
   meta?: LLMThoughtMeta,
 ): Promise<LLMThought> {
   const provider = (process.env.AI_PROVIDER ?? "bedrock").toLowerCase();
-  const prompt       = buildThoughtPrompt(alertText, turnIndex, priorToolOutput, meta);
-  const systemPrompt = buildSystemPrompt(meta?.strategyName);
+  const prompt   = buildThoughtPrompt(alertText, turnIndex, priorToolOutput, meta);
+
+  // Retrieve relevant documentation chunks and append to the system prompt.
+  // This is Tier 1 RAG — static knowledge from doc_chunks (AWS + CockroachDB docs).
+  // Nova Lite can also call search_docs() at inference time (Tier 2 tool use).
+  const docQuery = `${alertText} ${meta?.strategyName ?? ""}`.trim();
+  const docChunks = await findRelevantDocChunks(docQuery, 2).catch(() => []);
+  const docContext = formatDocChunksForPrompt(docChunks);
+  const systemPrompt = buildSystemPrompt(meta?.strategyName) + docContext;
 
   if (provider === "anthropic") {
     const text = await callAnthropicLLM(prompt, systemPrompt);
     if (text) {
-      logger.info({ turnIndex, provider: "anthropic" }, "LLM thought generated");
+      logger.info({ turnIndex, provider: "anthropic", docChunks: docChunks.length }, "LLM thought generated");
       return { thought: text, source: "anthropic" };
     }
     return { thought: fallbackThought(turnIndex), source: "simulated" };
@@ -369,8 +377,10 @@ export async function invokeLLMText(
   prompt: string,
   strategyName?: string,
 ): Promise<string | null> {
-  const provider     = (process.env.AI_PROVIDER ?? "bedrock").toLowerCase();
-  const systemPrompt = buildSystemPrompt(strategyName);
+  const provider  = (process.env.AI_PROVIDER ?? "bedrock").toLowerCase();
+  const docChunks = await findRelevantDocChunks(prompt.slice(0, 200), 1).catch(() => []);
+  const docContext  = formatDocChunksForPrompt(docChunks);
+  const systemPrompt = buildSystemPrompt(strategyName) + docContext;
 
   if (provider === "anthropic") {
     return callAnthropicLLM(prompt, systemPrompt);
