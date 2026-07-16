@@ -1,0 +1,30 @@
+Jul 13, 14:38:08	76ea5ee4	execute_ccloud_command({"action":"cluster:status"})	
+{"success":false,"action":"cluster:status","live":false,"error":"COCKROACH_CLOUD_API_KEY or COCKROACH_CLOUD_CLUSTER_ID not configured"}
+Jul 12, 23:16:43	e814a509	verify_resolution({"incidentId":"e814a509-92ca-42eb-80d0-3a5ec58d75c2","repairVerified":false,"strategyUsed":"db_connection_pool_reset"})	
+{"verified":false,"verdict":"FAIL","auditTime":"2026-07-12T22:16:43.801Z","strategyUsed":"db_connection_pool_reset","message":"Repair output indicates failure. Escalation recommended."}
+Jul 12, 23:16:40	e814a509	aws_repair_service({"serviceName":"rds-instance","action":"describe_and_remediate"})	
+{"success":false,"simulated":false,"service":"rds","actionTaken":"AWS_API_CALL","error":"DBInstance rds-instance not found."}
+Jul 12, 19:51:29	52e50e20	verify_resolution({"incidentId":"52e50e20-edb6-4132-b5d9-12193c225d21","repairVerified":false,"strategyUsed":"rds_cpu_throttle"})	
+{"verified":false,"verdict":"FAIL","auditTime":"2026-07-12T18:51:29.460Z","strategyUsed":"rds_cpu_throttle","message":"Repair output indicates failure. Escalation recommended."}
+Jul 12, 19:51:27	52e50e20	aws_repair_service({"serviceName":"rds-instance","action":"describe_and_remediate"})	
+{"success":false,"simulated":false,"service":"rds","actionTaken":"AWS_API_CALL","error":"DBInstance rds-instance not found."}
+Jul 12, 19:51:23	52e50e20	crdb_cluster_health({})	
+{"source":"cockroachdb-cloud-mcp","cluster":{"id":"2d0790c4-bd7c-4735-a5c3-01bcc69568f4","name":"polite-genie","cockroach_version":"v25.4.10","cloud_provider":"AWS","state":"CREATED","plan":"BASIC","regions":[{"name":"ap-south-1","node_count":0}],"created_at":"2026-07-11T10:53:53Z","updated_at":"2026-07-11T10:53:55Z"},"activeConnections":0,"runningQueriesRaw":{"rows":[]},"fetchedAt":"2026-07-12T18:51:23.026Z"}
+Jul 12, 19:51:17	f2ec7f1b	verify_resolution({"incidentId":"f2ec7f1b-ef35-442b-9a29-02a2c8f890cb","repairVerified":false,"strategyUsed":"ecs_service_restart"})	
+{"verified":false,"verdict":"FAIL","auditTime":"2026-07-12T18:51:16.932Z","strategyUsed":"ecs_service_restart","message":"Repair output indicates failure. Escalation recommended."}
+Jul 12, 19:51:14	f2ec7f1b	aws_repair_service({"serviceName":"ecs-service","action":"describe_and_remediate"})	
+{"success":false,"simulated":false,"service":"ecs","actionTaken":"AWS_API_CALL","error":"Cluster not found."}
+Jul 12, 19:51:10	f2ec7f1b	execute_ccloud_command({"action":"cluster:status"})	
+{"success":true,"action":"cluster:status","live":true,"clusterId":"2d0790c4-bd7c-4735-a5c3-01bcc69568f4","clusterName":"polite-genie","state":"CREATED","plan":"BASIC","cloudProvider":"AWS","cockroachVersion":"v25.4.10","upgradeStatus":"FINALIZED","operationStatus":"UNSPECIFIED","primaryRegion":"ap-south-1","regionCount":1,"createdAt":"2026-07-11T10:53:53.954740Z","updatedAt":"2026-07-11T10:53:55.662322Z","summary":"Cluster 'polite-genie' (BASIC) — state: CREATED, region: ap-south-1, version: v25.4.10","ccloudEquivalent":"ccloud cluster get 2d0790c4-bd7c-4735-a5c3-01bcc69568f4 -o json"}
+Jul 12, 19:49:22	4c73b2aa	verify_resolution({"incidentId":"4c73b2aa-300e-4f88-be38-707a4b3688e0","repairVerified":false,"strategyUsed":"ecs_service_restart"})	
+{"verified":false,"verdict":"FAIL","auditTime":"2026-07-12T18:49:22.792Z","strategyUsed":"ecs_service_restart","message":"Repair output indicates failure. Escalation recommended."}
+Jul 12, 19:49:20	4c73b2aa	aws_repair_service({"serviceName":"ecs-service","action":"describe_and_remediate"})	
+{"success":false,"simulated":false,"service":"ecs","actionTaken":"AWS_API_CALL","error":"Cluster not found."}
+Jul 12, 19:49:15	4c73b2aa	execute_ccloud_command({"action":"cluster:status"})	
+{"success":true,"action":"cluster:status","live":true,"clusterId":"2d0790c4-bd7c-4735-a5c3-01bcc69568f4","clusterName":"polite-genie","state":"CREATED","plan":"BASIC","cloudProvider":"AWS","cockroachVersion":"v25.4.10","upgradeStatus":"FINALIZED","operationStatus":"UNSPECIFIED","primaryRegion":"ap-south-1","regionCount":1,"createdAt":"2026-07-11T10:53:53.954740Z","updatedAt":"2026-07-11T10:53:55.662322Z","summary":"Cluster 'polite-genie' (BASIC) — state: CREATED, region: ap-south-1, version: v25.4.10","ccloudEquivalent":"ccloud cluster get 2d0790c4-bd7c-4735-a5c3-01bcc69568f4 -o json"}
+Jul 12, 19:46:48	e814a509	crdb_cluster_health({})	
+{"source":"cockroachdb-cloud-mcp","cluster":{"id":"2d0790c4-bd7c-4735-a5c3-01bcc69568f4","name":"polite-genie","cockroach_version":"v25.4.10","cloud_provider":"AWS","state":"CREATED","plan":"BASIC","regions":[{"name":"ap-south-1","node_count":0}],"created_at":"2026-07-11T10:53:53Z","updated_at":"2026-07-11T10:53:55Z"},"activeConnections":0,"runningQueriesRaw":{"rows":[]},"fetchedAt":"2026-07-12T18:46:48.079Z"}
+Jul 12, 18:41:12	6ff5df1a	verify_resolution({"incidentId":"6ff5df1a-3373-44b5-9c99-4150a7c58d46","repairVerified":false,"strategyUsed":"rds_cpu_throttle"})	
+{"verified":false,"verdict":"FAIL","auditTime":"2026-07-12T17:41:12.444Z","strategyUsed":"rds_cpu_throttle","message":"Repair output indicates failure. Escalation recommended."}
+Jul 12, 18:41:10	6ff5df1a	aws_repair_service({"serviceName":"ec2-instance","action":"describe_and_remediate"})	
+{"success":false,"simulated":false,"service":"ecs","actionTaken":"AWS_API_CALL","error":"Cluster not found."}
