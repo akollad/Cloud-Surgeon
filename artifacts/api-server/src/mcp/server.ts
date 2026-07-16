@@ -239,11 +239,14 @@ function extractEcsParams(serviceName: string): { cluster: string; service: stri
   // Accept "cluster/service" format (preferred — always pass the real cluster).
   const parts = serviceName.split("/");
   if (parts.length === 2) return { cluster: parts[0]!, service: parts[1]! };
-  // Default to the real ECS cluster/service rather than the generic "prod-cluster".
-  return {
-    cluster: process.env.ECS_DEFAULT_CLUSTER ?? "cloud-surgeon",
-    service: process.env.ECS_DEFAULT_SERVICE ?? "api",
-  };
+  // Single service name provided by detectServiceName — use IT with the default cluster.
+  // Never silently replace a real extracted name with ECS_DEFAULT_SERVICE.
+  const trimmed = serviceName.trim();
+  const defaultCluster = process.env.ECS_DEFAULT_CLUSTER ?? "cloud-surgeon";
+  if (trimmed && trimmed !== "unknown" && trimmed !== "") {
+    return { cluster: defaultCluster, service: trimmed };
+  }
+  return { cluster: defaultCluster, service: process.env.ECS_DEFAULT_SERVICE ?? "api" };
 }
 
 const server = new McpServer({ name: "cloud-surgeon-tools", version: "1.0.0" });
@@ -306,6 +309,7 @@ server.registerTool(
     },
   },
   async ({ serviceName, action }) => {
+    const actionLower = action.toLowerCase();
     const combined = (serviceName + " " + action).toLowerCase();
 
     // Determine whether this deployment uses RDS. When COCKROACHDB_URL is set
@@ -315,7 +319,10 @@ server.registerTool(
 
     let result;
 
+    // Explicit "lambda:" prefix in action takes precedence — avoids keyword-miss
+    // when the function name (e.g. "order-processor") doesn't contain "lambda".
     if (
+      actionLower.startsWith("lambda:") ||
       combined.includes("lambda") ||
       combined.includes("function") ||
       combined.includes("payment-processor") ||
@@ -323,15 +330,15 @@ server.registerTool(
     ) {
       result = await repairLambdaConcurrency(serviceName);
     } else if (
-      (combined.includes("rds") ||
-        combined.includes("db") ||
+      // Explicit "rds:" prefix or classic keywords — only when RDS is configured.
+      (actionLower.startsWith("rds:") ||
+        combined.includes("rds") ||
         combined.includes("postgres") ||
         combined.includes("mysql") ||
         combined.includes("catalog") ||
         combined.includes("database")) &&
       hasRds
     ) {
-      // Real RDS repair — only when an RDS instance is configured.
       result = await repairRdsConnections(process.env.RDS_INSTANCE_IDENTIFIER!);
     } else if (
       combined.includes("rds") ||
@@ -349,7 +356,9 @@ server.registerTool(
           "Use crdb_cluster_health for database diagnostics.",
       };
     } else {
-      // ECS, EC2, disk, generic — all target the configured ECS service.
+      // ECS, EC2, disk, IAM, generic — target the service extracted from the alert.
+      // extractEcsParams now preserves the real service name instead of defaulting
+      // to ECS_DEFAULT_SERVICE, so "checkout" stays "checkout".
       const { cluster, service } = extractEcsParams(serviceName);
       result = await repairEcsService(cluster, service);
     }

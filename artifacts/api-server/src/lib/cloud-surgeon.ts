@@ -126,26 +126,58 @@ export function detectStrategy(alertText: string): string {
  * service so at minimum the ECS task health is checked.
  */
 export function detectServiceName(alertText: string): string {
-  // Honour explicit single-quoted names in the alert text (e.g. 'prod-api').
-  const m = alertText.match(/'([^']+)'/);
-  if (m) return m[1];
-
   const ecsCluster = process.env.ECS_DEFAULT_CLUSTER ?? "cloud-surgeon";
   const ecsService = process.env.ECS_DEFAULT_SERVICE ?? "api";
   const ecsRef = `${ecsCluster}/${ecsService}`;
-
   const t = alertText.toLowerCase();
 
-  // Lambda is the only AWS service that exists separately from ECS in most
-  // deployments — keep it as a direct function name when explicitly mentioned.
-  if (t.includes("lambda") || t.includes("concurrentexecution")) {
-    // Extract a function name from the alert if present (e.g. "payment-processor")
-    const fnMatch = alertText.match(/(?:lambda|function)[:\s]+([a-zA-Z0-9_-]+)/i);
-    return fnMatch ? fnMatch[1] : ecsRef;
+  // 1. Explicit single-quoted name wins — highest specificity.
+  //    e.g. "ECS service 'checkout-api' unhealthy" → "checkout-api"
+  const quoted = alertText.match(/'([^']+)'/);
+  if (quoted) {
+    const name = quoted[1]!;
+    // If it looks like a function name (no slash), keep as-is for Lambda routing.
+    if (t.includes("lambda") || t.includes("function")) return name;
+    // Otherwise qualify with ECS cluster so extractEcsParams splits correctly.
+    return name.includes("/") ? name : `${ecsCluster}/${name}`;
   }
 
-  // Everything else — ECS service, EC2 (Fargate tasks), RDS (no RDS in this
-  // infra — CockroachDB is the DB), disk, generic — all target the real ECS service.
+  // 2. Lambda / serverless — return the function name so aws_repair_service
+  //    routes to Lambda instead of ECS.
+  if (t.includes("lambda") || t.includes("concurrentexecution")) {
+    const fn = alertText.match(/(?:lambda\s+function|function)[:\s']+([a-zA-Z0-9_-]+)/i);
+    if (fn) return fn[1]!;
+    // Fallback: extract a hyphenated word that looks like a function name.
+    const word = alertText.match(/\b([a-zA-Z0-9]+-(?:processor|handler|worker|function))\b/i);
+    return word ? word[1]! : "lambda/unknown";
+  }
+
+  // 3. ECS service: "ECS service <name>" or "ECS task <name>"
+  //    e.g. "ECS service checkout unhealthy" → "cloud-surgeon/checkout"
+  const ecsMatch = alertText.match(/ECS\s+(?:service|task)\s+(?:')?([a-zA-Z0-9_-]+)(?:')?/i);
+  if (ecsMatch && ecsMatch[1]!.toLowerCase() !== "is" && ecsMatch[1]!.toLowerCase() !== "the") {
+    return `${ecsCluster}/${ecsMatch[1]!}`;
+  }
+
+  // 4. RDS instance identifier — return bare name so aws_repair_service
+  //    can use RDS_INSTANCE_IDENTIFIER or the extracted name.
+  const rdsMatch = alertText.match(/RDS\s+(?:primary\s+)?(?:instance|db)\s+(?:')?([a-zA-Z0-9_-]+)(?:')?/i);
+  if (rdsMatch) return rdsMatch[1]!;
+
+  // 5. Compound hyphenated service names (e.g. "recommendation-service", "order-processor")
+  //    that appear before a verb — a reasonable heuristic for un-quoted names.
+  const compoundMatch = alertText.match(/\b([a-zA-Z][a-zA-Z0-9]*-[a-zA-Z0-9][a-zA-Z0-9_-]*)\b/);
+  if (compoundMatch) {
+    const candidate = compoundMatch[1]!;
+    // Skip generic words that are not service names.
+    const skip = ["5xx-spike", "cpu-utilization", "max-connections", "idle-in-transaction"];
+    if (!skip.some((s) => candidate.toLowerCase().includes(s))) {
+      if (t.includes("lambda") || t.includes("function")) return candidate;
+      return `${ecsCluster}/${candidate}`;
+    }
+  }
+
+  // 6. Fallback to the configured ECS service.
   return ecsRef;
 }
 
@@ -1555,13 +1587,51 @@ export async function runAgentLoop(
       "Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API",
     );
 
-    // DB-related alerts → use the official CockroachDB Cloud MCP for diagnosis.
-    // All other alerts → use the local ccloud API tool (cluster:status).
-    const useOfficialCrdbMcp = isDbRelatedAlert(alertText);
-    const diagToolName = useOfficialCrdbMcp ? "crdb_cluster_health" : "execute_ccloud_command";
-    const toolInput = useOfficialCrdbMcp
-      ? {}
-      : { action: "cluster:status" };
+    // Strategy-aware diagnostic tool selection:
+    //   crdb_* strategies / cockroach-specific alerts → CockroachDB cluster health
+    //   RDS strategies / rds-specific alerts          → aws_repair_service (RDS describe)
+    //   Lambda strategies                             → aws_repair_service (Lambda describe)
+    //   ECS / disk / IAM / network strategies         → aws_repair_service (ECS describe)
+    //   External dependency / unknown                 → ccloud cluster:status (no direct AWS target)
+    const alertLower = alertText.toLowerCase();
+    const isCrdbDiag =
+      strategyName.startsWith("crdb_") ||
+      alertLower.includes("cockroach") ||
+      alertLower.includes("crdb") ||
+      alertLower.includes("hot range") ||
+      alertLower.includes("changefeed") ||
+      alertLower.includes("under-replicated");
+    const isRdsDiag =
+      !isCrdbDiag &&
+      (strategyName === "rds_cpu_throttle" ||
+        alertLower.includes("rds") ||
+        (alertLower.includes("database") && !alertLower.includes("connection pool")));
+    const isLambdaDiag = strategyName === "lambda_concurrency_scale";
+    const isExternalDiag = strategyName === "external_dependency_circuit_break";
+
+    // Resolve service name early so both PHASE 0 and PHASE 1 target the same resource.
+    const diagServiceName = detectServiceName(alertText);
+
+    let diagToolName: string;
+    let toolInput: Record<string, unknown>;
+    if (isCrdbDiag) {
+      diagToolName = "crdb_cluster_health";
+      toolInput = {};
+    } else if (isRdsDiag) {
+      diagToolName = "aws_repair_service";
+      toolInput = { serviceName: diagServiceName, action: "rds:diagnose" };
+    } else if (isExternalDiag) {
+      // No direct AWS tool for third-party APIs — check CockroachDB state as a baseline.
+      diagToolName = "execute_ccloud_command";
+      toolInput = { action: "cluster:status" };
+    } else if (isLambdaDiag) {
+      diagToolName = "aws_repair_service";
+      toolInput = { serviceName: diagServiceName, action: "lambda:diagnose" };
+    } else {
+      // ECS, disk, IAM, network, JVM, generic — diagnose the actual AWS service.
+      diagToolName = "aws_repair_service";
+      toolInput = { serviceName: diagServiceName, action: "ecs:diagnose" };
+    }
 
     const { thought, source: thoughtSource } = await invokeLLMThought(alertText, 0, null, { strategyName });
     const toolOutput = await callTool(diagToolName, toolInput);
@@ -1705,10 +1775,22 @@ export async function runAgentLoop(
     // The agent skills call the official CockroachDB Cloud MCP endpoint
     // (cockroachlabs.cloud/mcp) using crdb_internal diagnostic tables.
     const isCrdbStrategy = strategyName.startsWith("crdb_");
+
+    // For AWS tools, pass a type-prefixed action so aws_repair_service can route
+    // correctly even when the service name alone doesn't contain "lambda" / "rds".
+    // Without the prefix, "order-processor" wouldn't match any keyword and would
+    // fall through to the ECS branch instead of Lambda.
+    const remediatorAction =
+      strategyName === "lambda_concurrency_scale"
+        ? "lambda:describe_and_remediate"
+        : strategyName === "rds_cpu_throttle" || strategyName === "db_connection_pool_reset"
+          ? "rds:describe_and_remediate"
+          : "ecs:describe_and_remediate";
+
     const remediatorToolName = isCrdbStrategy ? "crdb_skill_repair" : "aws_repair_service";
     const toolInput = isCrdbStrategy
       ? { strategy: strategyName, serviceName }
-      : { serviceName, action: "describe_and_remediate" };
+      : { serviceName, action: remediatorAction };
 
     const toolOutput = await callTool(remediatorToolName, toolInput);
 
