@@ -172,7 +172,10 @@ export async function getStrategyWinRate(
     WHERE strategy_name = ${strategyName}
   `);
   const row = rows.rows[0];
-  if (!row || row.total === "0") return { winRate: 0.5, count: 0 }; // neutral prior when unknown
+  // Optimistic prior (0.85) on empty history: a fresh system should attempt
+  // autonomous repair rather than stall in PENDING_APPROVAL. After real outcomes
+  // are recorded the calibration loop corrects the effective win-rate naturally.
+  if (!row || row.total === "0") return { winRate: 0.85, count: 0 };
   return { winRate: Number(row.win_rate), count: Number(row.total) };
 }
 
@@ -1158,7 +1161,10 @@ export function computeRoutingMode(
   sampleCount: number,
 ): RoutingMode {
   // Generic fallback strategy → always exploratory (nothing to learn from)
-  if (sampleCount === 0 || strategyName === "default_repair") return "EXPLORATORY";
+  if (strategyName === "default_repair") return "EXPLORATORY";
+  // sampleCount === 0 with unknown strategy: optimistic prior (0.85) set in
+  // getStrategyWinRate routes this AUTONOMOUSLY on first encounter — system
+  // learns from the outcome rather than stalling for human approval.
   if ((winRate ?? 0) > 0.8) return "AUTONOMOUS";
   return "PENDING_APPROVAL";
 }

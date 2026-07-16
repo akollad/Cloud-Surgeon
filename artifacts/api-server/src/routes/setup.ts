@@ -21,6 +21,9 @@ import { spawn } from "node:child_process";
 import { apiKeyAuth } from "../middleware/apiKeyAuth";
 import { logger } from "../lib/logger";
 import { CCLOUD_BINARY } from "../lib/ccloud-path";
+import { seedVectorMemory } from "../lib/seed";
+import { SQSClient, CreateQueueCommand, GetQueueAttributesCommand, GetQueueUrlCommand } from "@aws-sdk/client-sqs";
+import { SNSClient, ListSubscriptionsByTopicCommand, SetSubscriptionAttributesCommand } from "@aws-sdk/client-sns";
 
 const router = Router();
 
@@ -246,6 +249,124 @@ router.get("/setup/ccloud-status", apiKeyAuth, async (_req, res): Promise<void> 
 
   result.activeSession = !!activeSession;
   res.json(result);
+});
+
+/**
+ * POST /api/setup/seed
+ * Force-re-seeds incident_vectors with real Voyage embeddings.
+ * Safe to call multiple times — deletes stale seeds first, then re-inserts.
+ */
+router.post("/setup/seed", apiKeyAuth, async (_req, res): Promise<void> => {
+  try {
+    logger.info("[SEED] Force-seeding incident_vectors with Voyage embeddings...");
+    const result = await seedVectorMemory(true);
+    logger.info({ result }, "[SEED] Seed complete");
+    res.json({ ok: true, ...result });
+  } catch (err: unknown) {
+    logger.error({ err }, "[SEED] Seed failed");
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+/**
+ * POST /api/setup/dlq
+ * Automates SNS → SQS Dead-Letter Queue setup:
+ *   1. Creates (or reuses) the SQS DLQ queue
+ *   2. Attaches a RedrivePolicy to the SNS subscription
+ *   3. Sets an exponential retry DeliveryPolicy (3 retries, 5 s → 60 s)
+ *
+ * Requires AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY + AWS_REGION.
+ * SNS topic ARN must be provided in body or SNS_TOPIC_ARN env var.
+ */
+router.post("/setup/dlq", apiKeyAuth, async (req, res): Promise<void> => {
+  const region = process.env.AWS_REGION ?? "us-east-1";
+  const topicArn = (req.body as Record<string, unknown>)?.topicArn as string | undefined
+    ?? process.env.SNS_TOPIC_ARN
+    ?? "arn:aws:sns:us-east-1:153983052396:cloud-surgeon-alerts";
+
+  const sqs = new SQSClient({ region });
+  const sns = new SNSClient({ region });
+  const queueName = "cloud-surgeon-sns-dlq";
+
+  try {
+    // 1. Create the DLQ (idempotent — SQS returns existing queue URL if name matches)
+    logger.info({ queueName }, "[DLQ] Creating SQS queue...");
+    await sqs.send(new CreateQueueCommand({
+      QueueName: queueName,
+      Attributes: {
+        MessageRetentionPeriod: "1209600", // 14 days
+        VisibilityTimeout: "300",
+      },
+    }));
+
+    const urlResp = await sqs.send(new GetQueueUrlCommand({ QueueName: queueName }));
+    const queueUrl = urlResp.QueueUrl!;
+    logger.info({ queueUrl }, "[DLQ] Queue URL retrieved");
+
+    const attrResp = await sqs.send(new GetQueueAttributesCommand({
+      QueueUrl: queueUrl,
+      AttributeNames: ["QueueArn"],
+    }));
+    const dlqArn = attrResp.Attributes?.QueueArn!;
+    logger.info({ dlqArn }, "[DLQ] DLQ ARN resolved");
+
+    // 2. List subscriptions for this topic to find the webhook subscription ARN
+    const subResp = await sns.send(new ListSubscriptionsByTopicCommand({ TopicArn: topicArn }));
+    const subscriptions = subResp.Subscriptions ?? [];
+    // Find the HTTPS subscription (the webhook)
+    const httpsSub = subscriptions.find(s => s.Protocol === "https" && s.SubscriptionArn && s.SubscriptionArn !== "PendingConfirmation");
+
+    if (!httpsSub?.SubscriptionArn) {
+      res.status(409).json({
+        ok: false,
+        dlqArn,
+        queueUrl,
+        error: "No confirmed HTTPS subscription found on the topic. Subscribe first via POST /api/webhook/cloudwatch URL, then retry.",
+        subscriptionsFound: subscriptions.map(s => ({ protocol: s.Protocol, arn: s.SubscriptionArn })),
+      });
+      return;
+    }
+
+    const subscriptionArn = httpsSub.SubscriptionArn;
+    logger.info({ subscriptionArn }, "[DLQ] Found HTTPS subscription");
+
+    // 3. Attach DLQ as redrive policy
+    await sns.send(new SetSubscriptionAttributesCommand({
+      SubscriptionArn: subscriptionArn,
+      AttributeName: "RedrivePolicy",
+      AttributeValue: JSON.stringify({ deadLetterTargetArn: dlqArn }),
+    }));
+
+    // 4. Set exponential retry delivery policy (3 retries, 5 s → 60 s backoff)
+    await sns.send(new SetSubscriptionAttributesCommand({
+      SubscriptionArn: subscriptionArn,
+      AttributeName: "DeliveryPolicy",
+      AttributeValue: JSON.stringify({
+        healthyRetryPolicy: {
+          numRetries: 3,
+          minDelayTarget: 5,
+          maxDelayTarget: 60,
+          numNoDelayRetries: 0,
+          numMinDelayRetries: 1,
+          numMaxDelayRetries: 1,
+          backoffFunction: "exponential",
+        },
+      }),
+    }));
+
+    logger.info({ subscriptionArn, dlqArn }, "[DLQ] Setup complete ✅");
+    res.json({
+      ok: true,
+      dlqArn,
+      queueUrl,
+      subscriptionArn,
+      topicArn,
+      message: "DLQ attached to SNS subscription with 3-retry exponential backoff (5 s → 60 s). Failed notifications will land in the DLQ for manual re-drive.",
+    });
+  } catch (err: unknown) {
+    logger.error({ err }, "[DLQ] Setup failed");
+    res.status(500).json({ ok: false, error: String(err) });
+  }
 });
 
 export default router;
