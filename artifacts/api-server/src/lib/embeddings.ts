@@ -1,23 +1,21 @@
 /**
  * Provider-agnostic embedding layer — priority order:
  *
- * 1. Amazon Titan Text Embeddings V2 (1024 dims) via Bedrock.
+ * 1. Voyage AI voyage-3 (1024 dims) — semantic embeddings via VOYAGE_API_KEY.
+ *    Best quality; works from Replit containers without geo-restriction.
+ *    NOTE: use voyage-3 (1024 dims), NOT voyage-3-lite (512 dims — incompatible
+ *    with the VECTOR(1024) column in incident_vectors).
+ *
+ * 2. Amazon Titan Text Embeddings V2 (1024 dims) via Bedrock.
  *    Requires AWS credentials. Geo-blocked from Replit container;
  *    available in production deployments in Bedrock-enabled regions.
  *
- * 2. Infra-domain keyword embedding (built-in, zero external deps).
+ * 3. Infra-domain keyword embedding (built-in, zero external deps).
  *    Maps known infra signal words (CPU, memory, connection, throttle,
  *    latency, disk, OOM, 5xx, ECS, RDS, Lambda…) to stable dimension
  *    bands in the 1024-dim space, then fills remaining dims with a
  *    deterministic hash. Similar alerts land close together; different
  *    alert types are well-separated. No API key required.
- *
- * Why not Voyage AI?  voyage-3-lite requires VOYAGE_API_KEY — not
- *   available in this environment.
- * Why not OpenAI embeddings?  The Replit AI Integration proxy does not
- *   support POST /embeddings (returns 400 "Endpoint not supported").
- * Why not Titan always?  Bedrock is geo-blocked from Replit's container.
- *   Titan is kept in priority 1 so production deployments use it automatically.
  */
 
 import {
@@ -27,7 +25,44 @@ import {
 import { createHash } from "node:crypto";
 import { logger } from "./logger";
 
-// ── 1. Amazon Bedrock Titan Text Embeddings V2 ────────────────────────────
+// ── 1. Voyage AI voyage-3 (1024 dims) ────────────────────────────────────
+
+async function invokeVoyageEmbedding(text: string): Promise<number[] | null> {
+  const apiKey = process.env.VOYAGE_API_KEY;
+  if (!apiKey) return null;
+
+  try {
+    const res = await fetch("https://api.voyageai.com/v1/embeddings", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({ input: [text.trim()], model: "voyage-3" }),
+    });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => "(no body)");
+      throw new Error(`Voyage AI ${res.status} ${res.statusText} — ${body.slice(0, 200)}`);
+    }
+
+    const payload = (await res.json()) as {
+      data?: Array<{ embedding?: number[] }>;
+    };
+    const embedding = payload.data?.[0]?.embedding;
+    if (embedding && embedding.length === 1024) return embedding;
+    logger.warn({ dims: embedding?.length }, "Voyage AI returned unexpected dims — skipping");
+    return null;
+  } catch (err) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      "Voyage AI embedding failed — falling back to Titan/keyword",
+    );
+    return null;
+  }
+}
+
+// ── 2. Amazon Bedrock Titan Text Embeddings V2 ────────────────────────────
 
 let _bedrockClient: BedrockRuntimeClient | null = null;
 let _titanAvailable: boolean | null = null; // null = untested
@@ -150,15 +185,22 @@ function keywordEmbedding(text: string): number[] {
 // ── Public API ────────────────────────────────────────────────────────────
 
 export async function generateEmbedding(text: string): Promise<{ embedding: number[]; provider: string }> {
-  // Priority 1: Bedrock Titan (real semantic embeddings; geo-blocked in Replit container)
+  // Priority 1: Voyage AI voyage-3 — real semantic embeddings, works from Replit container
+  const voyageVec = await invokeVoyageEmbedding(text);
+  if (voyageVec) {
+    logger.info({ provider: "voyage-3", dims: voyageVec.length }, "Real embedding generated");
+    return { embedding: voyageVec, provider: "voyage-3" };
+  }
+
+  // Priority 2: Bedrock Titan (real semantic embeddings; geo-blocked in Replit container,
+  // but available in production ECS deployments)
   const titanVec = await invokeTitanEmbedding(text);
   if (titanVec) {
     logger.info({ provider: "bedrock-titan-v2", dims: titanVec.length }, "Real embedding generated");
     return { embedding: titanVec, provider: "bedrock-titan" };
   }
 
-  // Priority 2: keyword-aware infra-domain embedding (built-in, zero deps)
-  // Similar alert types cluster together; cosine ANN index gives meaningful results.
+  // Priority 3: keyword-aware infra-domain embedding (built-in, zero deps)
   const kwVec = keywordEmbedding(text);
   logger.debug({ provider: "keyword-infra", dims: kwVec.length }, "Keyword embedding generated");
   return { embedding: kwVec, provider: "keyword-infra" };
