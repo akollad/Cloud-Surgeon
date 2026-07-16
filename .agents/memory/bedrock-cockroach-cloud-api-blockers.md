@@ -1,17 +1,13 @@
 ---
-name: Bedrock geo-block & CockroachDB Cloud API perms
-description: Anthropic-on-Bedrock geo-restricted from Replit container; Bearer token does NOT bypass it. CockroachDB Cloud API key needs role assigned per-cluster.
+name: Bedrock Nova Lite & CockroachDB Cloud API perms
+description: Bedrock Nova Lite works fine from Replit containers. Earlier geo-restriction (Anthropic-on-Bedrock) is no longer applicable. CockroachDB Cloud API key needs role assigned per-cluster.
 ---
 
-## Bedrock geo-block (Anthropic models only — resolved by switching to Nova Lite)
+## Bedrock from Replit containers
 
-Anthropic models via Amazon Bedrock (`anthropic.claude-*`) return HTTP 400 "Access to Anthropic models is not allowed from unsupported countries/regions" from Replit containers. This applies to us-east-1 and eu-west-1, via both SigV4 and Bearer token.
+Amazon Bedrock Nova Lite (`eu.amazon.nova-lite-v1:0`) works without geo-restriction from Replit containers using `BEDROCK_API_KEY` Bearer token auth. `AI_PROVIDER=bedrock` + `BEDROCK_REGION=eu-west-1` is the correct setup.
 
-**Resolution**: Switch to Amazon Nova Lite (`eu.amazon.nova-lite-v1:0`). Amazon's own models are NOT geo-blocked. Nova Lite responds HTTP 200 from Replit containers using `BEDROCK_API_KEY` Bearer token auth against the `/converse` endpoint.
-
-**Current setup**: `AI_PROVIDER=bedrock`, `bedrock.ts` uses the Converse API with Nova Lite. `ANTHROPIC_API_KEY` is no longer required.
-
-**Why:** Geo-restriction is Anthropic's policy on their own models, not a Bedrock-wide restriction.
+**Note:** An earlier session recorded that Anthropic-on-Bedrock (`anthropic.claude-*`) was geo-restricted. The user confirmed in July 2026 that this restriction is no longer in effect. Do not switch away from Bedrock based on stale geo-block assumptions.
 
 ## CockroachDB Cloud API key permissions
 

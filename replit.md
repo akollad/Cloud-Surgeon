@@ -27,7 +27,7 @@ The API is at `/api/` (proxied through the dashboard's Vite dev server).
 | Secret | Purpose | Status |
 |---|---|---|
 | `COCKROACHDB_URL` | CockroachDB Serverless connection string | ✅ set |
-| `ANTHROPIC_API_KEY` | Anthropic API key for Claude | ✅ set |
+| `BEDROCK_API_KEY` | AWS Bedrock API key | ✅ set |
 | `SESSION_SECRET` | Cookie signing secret | ✅ set |
 
 Optional secrets (enable live AWS tool calls):
@@ -38,7 +38,8 @@ Optional secrets (enable live AWS tool calls):
 ## Pre-configured Env Vars (shared)
 
 - `CLOUD_SURGEON_API_KEY` — API key for all `/api/*` endpoints
-- `AI_PROVIDER=anthropic` — LLM provider (direct Anthropic API; Bedrock is geo-restricted in Replit)
+- `AI_PROVIDER=bedrock` — LLM provider (AWS Bedrock Nova Lite)
+- `BEDROCK_REGION=eu-west-1` — Bedrock region
 - `AWS_REGION=us-east-1` — AWS region for ECS/RDS/Lambda calls
 - `VITE_API_KEY` — Dashboard API key (matches `CLOUD_SURGEON_API_KEY`)
 - `VITE_API_BASE_URL` — leave unset; the generated client already includes `/api/` in every path

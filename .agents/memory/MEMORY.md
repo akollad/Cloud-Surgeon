@@ -5,7 +5,7 @@
 - [Incident storm detection architecture](incident-storm-detection.md) — CockroachDB vector similarity + timestamp window detects cascades; stormDetected in context_json forces PENDING_APPROVAL routing.
 - [IAM CloudWatch Resource star justified](iam-cloudwatch-star.md) — GetMetricData and DescribeAlarms cannot be scoped to resource ARNs; this is an AWS API limitation, not a configuration gap.
 - [CockroachDB Serverless connection quirks](cockroachdb-serverless-connection.md) — psql needs `&sslrootcert=system`; use hand-written SQL instead of `drizzle-kit push` for CockroachDB DDL.
-- [Bedrock geo-block & CockroachDB Cloud API perms](bedrock-cockroach-cloud-api-blockers.md) — Anthropic-on-Bedrock geo-restricted from this container; CockroachDB Cloud API key needs a role assigned per-cluster in console.
+- [Bedrock Nova Lite & CockroachDB Cloud API perms](bedrock-cockroach-cloud-api-blockers.md) — Bedrock Nova Lite works from Replit (geo-restriction confirmed lifted July 2026); Cloud API key needs per-cluster role.
 - [Orphaned artifact.toml still drives routing](orphaned-artifact-toml-routing.md) — imported projects can have artifact.toml the proxy honors even when listArtifacts() shows nothing; match its previewPath/port exactly.
 - [AI Integrations Anthropic upgrade fallback](ai-integrations-anthropic-upgrade-fallback.md) — proxy setup may need an account upgrade users decline; keep a direct-API-key SDK fallback, always labeled honestly.
 - [esbuild external @aws-sdk packages need node_modules at runtime](esbuild-external-aws-sdk-runtime.md) — dist-only Docker image crashes with ERR_MODULE_NOT_FOUND; copy node_modules too.

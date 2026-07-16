@@ -63,7 +63,7 @@ channel = "stable-25_05"
 
 [userenv.shared]
 CLOUD_SURGEON_API_KEY = "3f7a84c782ac9e5114dee48372cd2b42fa25a63e1137f9c3"
-AI_PROVIDER = "anthropic"
+AI_PROVIDER = "bedrock"
 BEDROCK_REGION = "eu-west-1"
 AWS_REGION = "us-east-1"
 VITE_API_KEY = "3f7a84c782ac9e5114dee48372cd2b42fa25a63e1137f9c3"
