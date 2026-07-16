@@ -275,6 +275,263 @@ Tuning: increase autovacuum_vacuum_scale_factor (default 0.2 = 20% of table) for
 ALTER TABLE <t> SET (autovacuum_vacuum_scale_factor = 0.01);
 Note: VACUUM FULL reclaims disk space but requires exclusive lock — use only in maintenance window.`,
   },
+  // ── Cloud-Surgeon strategy skills ────────────────────────────────────────
+  // Each skill is embedded so the agent can retrieve the right strategy
+  // by similarity to the incoming alert text, instead of relying only on
+  // hardcoded keyword matching. Source: "cloud-surgeon-skill".
+  {
+    source: "cloud-surgeon-skill",
+    title: "Skill: ecs_service_restart — ECS task crash, deployment failure, 5xx spike",
+    content: `Strategy: ecs_service_restart
+Alert signals: ECS tasks crashing, 5xx error spike, container exit, deployment stuck, unhealthy tasks, ALB health check failing, high HTTP 5XX count.
+When to choose: any alert involving ECS task lifecycle or deployment stability.
+MCP tool: aws_repair_service(serviceName, "describe_and_remediate")
+Key diagnostic fields: runningCount, pendingCount, desiredCount, deploymentStatus (COMPLETED/FAILED/IN_PROGRESS), events[].message, stoppedReason, containers[].exitCode.
+Repair: force new ECS deployment — rolling restart replacing tasks one at a time.
+Success: runningCount == desiredCount, pendingCount == 0, deploymentStatus = "COMPLETED", HealthyHostCount == desiredCount.
+Common root causes: bad Docker image tag (CannotPullContainerError), OOM kill (exit code 137), missing dependency at startup, failed ELB health check path.
+Blast radius: low — rolling restart keeps minimum healthy count throughout.`,
+  },
+  {
+    source: "cloud-surgeon-skill",
+    title: "Skill: rds_cpu_throttle — RDS high CPU, slow queries, autovacuum storm",
+    content: `Strategy: rds_cpu_throttle
+Alert signals: RDS CPUUtilization > 80%, high ReadLatency, autovacuum storm, slow query count rising, WriteIOPS spike without load increase.
+When to choose: database CPU alarm; do NOT use if DatabaseConnections is also high (use db_connection_pool_reset instead).
+MCP tool: aws_repair_service with RDS instance identifier.
+Key CloudWatch metrics: CPUUtilization, DatabaseConnections, ReadIOPS, WriteIOPS, FreeableMemory, ReadLatency.
+Autovacuum signal: high WriteIOPS with moderate CPU, autovacuum_count rising in pg_stat_user_tables.
+Repair: add per-query throttle via Parameter Group to reduce CPU pressure.
+Success: CPUUtilization drops below 70% within 90 s, ReadLatency normalises below 20 ms.
+Common root causes: unindexed query causing full table scan, autovacuum reclaiming dead tuples, connection pressure.`,
+  },
+  {
+    source: "cloud-surgeon-skill",
+    title: "Skill: db_connection_pool_reset — connection pool exhaustion, too many clients",
+    content: `Strategy: db_connection_pool_reset
+Alert signals: "too many clients", DatabaseConnections at or near max_connections, connection pool exhausted, application connection timeout.
+When to choose: DatabaseConnections >= 80% of max_connections limit (100 for db.t3.micro, 200 for db.t3.medium).
+MCP tool: crdb_cluster_health or aws_repair_service for connection state.
+Key fields: DatabaseConnections (current), max_connections (limit), idle_count, wait_event_type (Lock=contention, Client=app waiting).
+Repair: terminate idle connections older than 30 s, flush the pool, trigger application reconnect.
+Success: DatabaseConnections drops below 80% of max_connections within 60 s, CPUUtilization returns to baseline.
+Root cause: connection leak — application not releasing pool connections (missing pool.release(), context manager not closed, long idle transactions).`,
+  },
+  {
+    source: "cloud-surgeon-skill",
+    title: "Skill: lambda_concurrency_scale — Lambda throttling, iterator age rising, 429 errors",
+    content: `Strategy: lambda_concurrency_scale
+Alert signals: Lambda Throttles metric > 0, TooManyRequestsException (429), IteratorAge rising for Kinesis/SQS, function invocations dropping.
+When to choose: any Lambda throttling alert; confirms when ConcurrentExecutions hits reserved or account limit (default 1000/region).
+MCP tool: aws_repair_service with Lambda function name.
+Key CloudWatch metrics: ConcurrentExecutions, Throttles, Duration, Errors, IteratorAge (stream triggers).
+Repair: scale reserved concurrency up; effect takes < 10 seconds, no cold starts for existing warm instances.
+Success: Throttles metric drops to 0, IteratorAge trend decreasing, Errors return to pre-incident baseline.
+Watch for cascade: Lambda scaling may increase RDS DatabaseConnections — always monitor together.`,
+  },
+  {
+    source: "cloud-surgeon-skill",
+    title: "Skill: jvm_heap_restart — OOM kill, JVM heap exhaustion, exit code 137",
+    content: `Strategy: jvm_heap_restart
+Alert signals: ECS task exit code 137 (OOM SIGKILL), JVM OutOfMemoryError in logs, MemoryUtilization near 100%, Full GC frequency spiking.
+When to choose: task exits with stoppedReason containing "OutOfMemoryError" or exitCode=137.
+MCP tool: aws_repair_service targeting the ECS service.
+Key signals: MemoryUtilization (ECS task level), JVM HeapMemoryUsage (via CloudWatch agent/JMX), GcPauseMilliseconds, stoppedReason.
+Repair: restart the ECS task; JVM reallocates heap from Xms on startup; Full GC normalises within 2–3 minutes.
+Success: MemoryUtilization below 80% for 2 consecutive minutes, GC pause < 500 ms, no stoppedReason in new task.
+Escalate if: MemoryUtilization immediately spikes again — task definition Xmx is undersized, require task definition update.`,
+  },
+  {
+    source: "cloud-surgeon-skill",
+    title: "Skill: iam_credential_rotation — AccessDenied, expired credentials, STS token expired",
+    content: `Strategy: iam_credential_rotation
+Alert signals: AccessDenied errors in CloudTrail, credential expiry (> 1 year old keys), STS session token expired (max 12 h), sudden permission failure.
+When to choose: IAM AccessDenied in CloudTrail, NoCredentialProviders error, sudden auth failure after working previously.
+MCP tool: aws_repair_service with IAM action context.
+Key CloudTrail fields: errorCode (AccessDenied vs NoCredentialProviders), eventName (the failing API call), userIdentity.arn, requestParameters.
+Rotation steps: create new key → update Secrets Manager → force ECS deployment → verify CloudTrail errors stop → delete old key after 24 h.
+Success: AccessDenied errors in CloudTrail stop within 60 s of new credentials propagating, applications reconnect.
+Blast radius: medium — service unavailable during credential gap; keep old key active until new one confirmed working.`,
+  },
+  {
+    source: "cloud-surgeon-skill",
+    title: "Skill: network_route_failover — cross-region latency spike, BGP instability, Route53 failover",
+    content: `Strategy: network_route_failover
+Alert signals: cross-region latency > 100 ms, BGP route instability, primary region ALB HealthyHostCount dropping, TargetResponseTime spike.
+When to choose: multi-region deployments with Route53 health-check failover; single-region issues use ecs_service_restart instead.
+MCP tool: aws_repair_service targeting the ALB/Route53 resource.
+Key CloudWatch metrics (BOTH regions): TargetResponseTime, HTTPCode_Target_5XX_Count, HealthyHostCount.
+Repair: update Route53 weighted routing to shift traffic to secondary region; DNS propagation takes up to 60 s (TTL).
+Success: TargetResponseTime on secondary matches pre-incident baseline, 0 failed ALB health checks.
+Warning: 60 s DNS propagation blast window — old traffic continues on primary during TTL.`,
+  },
+  {
+    source: "cloud-surgeon-skill",
+    title: "Skill: external_dependency_circuit_break — upstream 5xx, circuit open, third-party timeout",
+    content: `Strategy: external_dependency_circuit_break
+Alert signals: external API calls failing at > 50% error rate, circuit breaker open state, upstream 5xx errors, cascading timeouts.
+When to choose: errors are sourced from an external dependency (payment gateway, notification service, upstream API) not from internal infra.
+Circuit breaker states: CLOSED (normal), OPEN (requests blocked), HALF_OPEN (one probe allowed).
+Opens when: error rate > threshold (typically 50%) for N consecutive requests (5–10).
+Key signals: ErrorRate, FailedRequests count, CircuitState in health endpoint, upstream 5xx rate.
+Half-open probe: one request allowed through — if succeeds, circuit closes; if fails, stays OPEN.
+Success: CircuitState transitions to CLOSED, ErrorRate below threshold for 60 s, upstream 5xx back to baseline.`,
+  },
+  {
+    source: "cloud-surgeon-skill",
+    title: "Skill: disk_cleanup — ECS disk full, container overlay FS exhaustion, high inode count",
+    content: `Strategy: disk_cleanup
+Alert signals: disk usage > 85%, EcsTaskDiskUsage alarm, container logs filling disk, EBS volume full, write I/O errors.
+When to choose: ECS container disk full; confirm with EBSByteBalance% CloudWatch metric.
+Safe cleanup targets: /tmp (always safe), Docker logs older than 24 h, stopped container layers, orphaned volumes.
+Key metrics: EBSByteBalance% (credit-based instances), disk usage %, inode usage % (high count = many small files).
+WARNING: deleted files are unrecoverable without EBS snapshot — verify snapshot exists before cleanup.
+Success: disk usage drops below 75%, I/O wait (ioWait CloudWatch metric) normalises below 5%.
+Prevent recurrence: add log rotation (logrotate), limit Docker log size via max-size option in log driver config.`,
+  },
+  {
+    source: "cloud-surgeon-skill",
+    title: "Skill: cloudwatch_alarm_triage — unknown alarm, read-only diagnosis, route to correct strategy",
+    content: `Strategy: cloudwatch_alarm_triage
+Alert signals: generic CloudWatch alarm with unknown root cause; alarm state not mapped to a specific strategy.
+When to choose: alarm text does not match ECS/RDS/Lambda/IAM patterns; treat as exploratory — read-only, no infra changes.
+Key CloudWatch fields: StateValue (OK/ALARM/INSUFFICIENT_DATA), StateReason (human-readable explanation), MetricName, Namespace, Dimensions, Threshold.
+INSUFFICIENT_DATA: resource may be stopped or deleted — no data points in evaluation period.
+Transient alarm: StateValue flipped back to OK before triage — spike, not sustained; monitor only.
+Output: identifies root metric and threshold, routes to the correct named strategy for repair.
+Success: root cause identified with enough confidence to pick a specific repair strategy.`,
+  },
+  {
+    source: "cloud-surgeon-skill",
+    title: "Skill: crdb_hotspot_resolution — CockroachDB hot range, transaction contention, write skew",
+    content: `Strategy: crdb_hotspot_resolution
+Alert signals: CockroachDB high contention events, hot range alert, transaction retry errors, high write latency on a single table.
+When to choose: crdb_internal.cluster_contention_events shows > 95% of reads/writes hitting one range.
+MCP tool: crdb_diagnose_hotspots (detects hot ranges), crdb_skill_repair(strategy="crdb_hotspot_resolution").
+Root causes: auto-incremented primary keys (all inserts hit the same range end), hot secondary index, monotonically increasing timestamps.
+Diagnostic SQL: SELECT range_id, lease_holder FROM [SHOW RANGES FROM TABLE <t>].
+Repair: ALTER TABLE ... SCATTER (redistributes leases); DDL change to UUID/ULID primary key for long-term fix.
+Success: contention events drop to 0 in crdb_internal.cluster_contention_events within 2 minutes.`,
+  },
+  {
+    source: "cloud-surgeon-skill",
+    title: "Skill: crdb_index_optimization — CockroachDB full scan, slow queries, missing index",
+    content: `Strategy: crdb_index_optimization
+Alert signals: CockroachDB high read latency, EXPLAIN shows "full scan", crdb_internal.index_recommendations has pending items, query optimizer warnings.
+When to choose: slow CockroachDB queries caused by missing or redundant indexes; confirmed by crdb_internal.node_statement_statistics.
+MCP tool: crdb_index_advisor (surfaces missing/redundant indexes with DDL), crdb_skill_repair(strategy="crdb_index_optimization").
+Key fields: full_scan (bool), total_elapsed_time, recommended_ddl (ready-to-execute CREATE INDEX statement).
+Repair: CREATE INDEX CONCURRENTLY ON <table> (<column>); — non-blocking, no table lock during backfill.
+Success: full_scan = false in EXPLAIN, query elapsed time drops > 50%, index_recommendations cleared.
+Verify: ANALYZE <table>; after index creation to update statistics.`,
+  },
+  {
+    source: "cloud-surgeon-skill",
+    title: "Skill: crdb_slow_query_termination — CockroachDB long-running query, lock contention, connection saturation",
+    content: `Strategy: crdb_slow_query_termination
+Alert signals: CockroachDB long-running transactions blocking other queries, lock wait timeout, connection pool saturation caused by slow queries.
+When to choose: pg_stat_activity shows queries running > 30 s with wait_event_type = Lock.
+MCP tool: crdb_list_slow_queries (list candidates), crdb_cancel_query (cancel with dryRun=true first), crdb_skill_repair(strategy="crdb_slow_query_termination").
+Key fields: query_id, elapsed_time, wait_event_type (Lock=contention, Client=app waiting), application_name.
+Repair: CANCEL QUERY '<query_id>' — rolls back the transaction immediately, low blast radius.
+Success: slow queries gone from pg_stat_activity, DatabaseConnections normalises, transaction throughput recovers.
+Safe procedure: always dry-run first (dryRun=true) to list candidates before cancelling.`,
+  },
+  {
+    source: "cloud-surgeon-skill",
+    title: "Skill: crdb_replication_recovery — CockroachDB under-replicated ranges, node down, disk full",
+    content: `Strategy: crdb_replication_recovery
+Alert signals: under_replicated_ranges metric > 0, CockroachDB node down alert, replication lag, cluster node liveness failure.
+When to choose: crdb_internal.ranges shows array_length(replicas, 1) < 3 (below replication factor).
+MCP tool: crdb_cluster_health (cluster state), crdb_query on crdb_internal.ranges_no_leases, crdb_skill_repair(strategy="crdb_replication_recovery").
+Causes: node down (check crdb_internal.gossip_liveness), disk full on a node (crdb_internal.kv_store_status), network partition.
+Recovery is automatic when node rejoins or new node is added; manual trigger: ALTER TABLE <t> CONFIGURE ZONE USING num_replicas = 3.
+Success: under_replicated_ranges = 0, all ranges show 3 live replicas — expected within 5 min of node restore.`,
+  },
+  {
+    source: "cloud-surgeon-skill",
+    title: "Skill: crdb_changefeed_restart — CockroachDB CDC paused, changefeed failed, webhook sink error",
+    content: `Strategy: crdb_changefeed_restart
+Alert signals: CockroachDB changefeed paused or failed, CDC lag rising, downstream consumers not receiving events, high_water_timestamp not advancing.
+When to choose: SHOW CHANGEFEED JOBS shows status = "paused" or "failed".
+MCP tool: crdb_job_status(jobType="changefeed"), crdb_query for RESUME JOB, crdb_skill_repair(strategy="crdb_changefeed_restart").
+Common causes: network error to sink (transient — RESUME JOB usually fixes), schema change without ON UPDATE ADD COLUMN, backfill stall.
+Key fields: job_id, status, error (last error), high_water_timestamp (lag = now() - high_water_timestamp).
+Repair: RESUME JOB <job_id>; monitor lag_seconds — should trend toward 0.
+Success: status = "running", lag_seconds approaching 0, downstream consumers receiving events again.`,
+  },
+
+  // ── MCP tool usage guides ─────────────────────────────────────────────────
+  // Help the agent know which MCP tool to call for each diagnostic need.
+  {
+    source: "cloud-surgeon-mcp",
+    title: "MCP tool: crdb_diagnose_hotspots — when and how to detect CockroachDB hot ranges",
+    content: `Tool: crdb_diagnose_hotspots (CockroachDB Agent Skill — Performance)
+Call when: alert involves high CockroachDB write/read latency, contention events, transaction retries.
+What it returns: top-N tables/indexes with contention_events count, cumulative_contention_time, hottest_key, largest ranges by size_mb.
+Input: topN (default 10), database (default defaultdb).
+Interpretation: high contention_events on one table = hot range; cumulative_contention_time > 1s = significant impact.
+Follow-up actions: if hot range found → ALTER TABLE ... SCATTER or DDL key change; check crdb_index_advisor for related index opportunities.
+Skill ID: crdb/performance/diagnose-hotspots`,
+  },
+  {
+    source: "cloud-surgeon-mcp",
+    title: "MCP tool: crdb_index_advisor — surface missing and redundant CockroachDB indexes",
+    content: `Tool: crdb_index_advisor (CockroachDB Agent Skill — Schema Design)
+Call when: slow CockroachDB queries, full table scans in EXPLAIN output, high read amplification.
+What it returns: CockroachDB optimizer recommendations — type (index_replacement or drop_unused_index), object_name, index_name, recommended_ddl (CREATE/DROP INDEX statement ready to execute).
+Input: database (default defaultdb), type filter (index_replacement / drop_unused_index / all).
+How to apply: execute recommended_ddl in a transaction during low-traffic hours; DROP INDEX requires CONCURRENTLY in CockroachDB 23.1+.
+Verify after: ANALYZE <table>; + EXPLAIN to confirm full scan eliminated.
+Skill ID: crdb/schema/index-advisor`,
+  },
+  {
+    source: "cloud-surgeon-mcp",
+    title: "MCP tool: crdb_cancel_query — safely cancel long-running CockroachDB queries",
+    content: `Tool: crdb_cancel_query (CockroachDB Agent Skill — Operations)
+Call when: long-running CockroachDB queries blocking writes, connection saturation from idle-in-transaction sessions.
+What it returns: list of queries running longer than thresholdSeconds, their query_id, running_seconds, query_preview, username.
+Input: thresholdSeconds (default 30), dryRun (default true — safe), database.
+Safe procedure: always call with dryRun=true first to review candidates; set dryRun=false to cancel top-3.
+What cancel does: crdb_internal.cancel_query() rolls back the transaction — no structural changes, low blast radius.
+Only targets SELECT/UPDATE/DELETE — never DDL (safe to run autonomously).
+Skill ID: crdb/operations/cancel-query`,
+  },
+  {
+    source: "cloud-surgeon-mcp",
+    title: "MCP tool: crdb_job_status — CockroachDB changefeed, backup, and schema change health",
+    content: `Tool: crdb_job_status (CockroachDB Agent Skill — Observability)
+Call when: CDC stall, backup failure, schema change timeout, changefeed lag alert.
+What it returns: list of jobs with job_id, job_type, status (paused/failed/running), description, last_error, fraction_completed.
+Input: jobType (changefeed/backup/schema_change/all), statusFilter (paused/failed/running/all).
+Follow-up for paused changefeed: RESUME JOB <job_id>; then monitor lag.
+Follow-up for failed backup: re-run BACKUP INTO statement.
+Skill ID: crdb/observability/job-status`,
+  },
+  {
+    source: "cloud-surgeon-mcp",
+    title: "MCP tool: execute_ccloud_command — CockroachDB Cloud cluster management and inspection",
+    content: `Tool: execute_ccloud_command
+Call when: need cluster-level information (version, state, backups, SQL users, connection hostname).
+What it returns: cluster detail from CockroachDB Cloud API; cliMode field = "ccloud_binary" (ECS prod) or "rest" (dev fallback).
+Supported actions: cluster:status (default), cluster:list, cluster:sql-users, cluster:backups, cluster:version, cluster:sql-dns.
+Each response includes ccloudEquivalent — the exact CLI command that produced the data.
+Requires: COCKROACH_CLOUD_API_KEY and COCKROACH_CLOUD_CLUSTER_ID environment variables.`,
+  },
+  {
+    source: "cloud-surgeon-mcp",
+    title: "MCP tool: aws_repair_service — ECS force-deploy, RDS connection reset, Lambda concurrency scale",
+    content: `Tool: aws_repair_service
+Call when: AWS infrastructure repair is needed — ECS task crash, RDS connection exhaustion, Lambda throttling.
+Service routing (inferred from serviceName + action string):
+- Contains "lambda" or "function" → Lambda concurrency scale-up
+- Contains "rds", "db", "postgres" and RDS_INSTANCE_IDENTIFIER is set → RDS connection reset
+- Contains "rds"/"database" but no RDS (CockroachDB deployment) → ECS health check instead
+- Default: ECS force new deployment
+Input: serviceName (e.g. "cloud-surgeon/api" for ECS, DB instance ID for RDS, function name for Lambda), action ("describe_and_remediate").
+Falls back to SIMULATED mode when AWS_ACCESS_KEY_ID is absent — always labelled in output.`,
+  },
+
   {
     source: "aws-ecs",
     title: "ECS ALB health check configuration and HealthyHostCount",

@@ -12,6 +12,7 @@ import {
   repairLambdaConcurrency,
   logAwsToolMode,
 } from "../lib/aws";
+import { searchDocs } from "../lib/doc-rag";
 
 // ----------------------------------------------------------------------------
 // MCP server (Model Context Protocol) exposing the two tools Cloud-Surgeon
@@ -809,6 +810,58 @@ server.registerTool(
     }
 
     return { content: [{ type: "text", text: JSON.stringify(report) }] };
+  },
+);
+
+// ── search_docs — vector + web-fetch knowledge retrieval ──────────────────
+//
+// Exposes the full Tier 1 (doc_chunks cosine search) + Tier 2 (live web
+// fetch fallback) pipeline as an MCP tool so the agent can call it during
+// the main repair loop — not only inside Bedrock's internal tool-use turn.
+//
+// When to call: agent detects it lacks specific field names, API response
+// formats, metric definitions, or operational procedures for the alert at hand.
+// Nova Lite already calls this autonomously via Bedrock Converse tool use;
+// exposing it here makes it available to any MCP client including the
+// Cloud-Surgeon repair orchestrator itself.
+
+server.registerTool(
+  "search_docs",
+  {
+    title: "Search docs and skills (vector similarity + live web fallback)",
+    description:
+      "Searches the embedded knowledge base (doc_chunks) for official AWS and CockroachDB " +
+      "documentation, Cloud-Surgeon strategy skills, and MCP tool guides using Voyage-3 " +
+      "vector cosine similarity. Falls back to a live web fetch from curated documentation " +
+      "URLs when vector confidence is low (distance > 0.40). " +
+      "Call this when you need: precise CloudWatch metric names, ECS/RDS/Lambda API field names, " +
+      "CockroachDB diagnostic SQL, which repair strategy or MCP tool to use for a given alert, " +
+      "or any operational procedure not present in your training data. " +
+      "Returns the most relevant documentation text for the query.",
+    inputSchema: {
+      query: z
+        .string()
+        .describe(
+          "Natural language query describing what to look up. " +
+          "Examples: 'ECS DescribeServices rolloutState field values', " +
+          "'which strategy to use for Lambda throttling', " +
+          "'CockroachDB how to detect hot ranges', " +
+          "'RDS max_connections formula for db.t3.medium'.",
+        ),
+    },
+  },
+  async ({ query }) => {
+    try {
+      const result = await searchDocs(query);
+      return { content: [{ type: "text", text: result }] };
+    } catch (err) {
+      return {
+        content: [{
+          type: "text",
+          text: `search_docs error: ${err instanceof Error ? err.message : String(err)}`,
+        }],
+      };
+    }
   },
 );
 

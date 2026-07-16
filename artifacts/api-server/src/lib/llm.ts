@@ -348,7 +348,7 @@ export async function invokeLLMThought(
   // This is Tier 1 RAG — static knowledge from doc_chunks (AWS + CockroachDB docs).
   // Nova Lite can also call search_docs() at inference time (Tier 2 tool use).
   const docQuery = `${alertText} ${meta?.strategyName ?? ""}`.trim();
-  const docChunks = await findRelevantDocChunks(docQuery, 2).catch(() => []);
+  const docChunks = await findRelevantDocChunks(docQuery, 3).catch(() => []);
   const docContext = formatDocChunksForPrompt(docChunks);
   const systemPrompt = buildSystemPrompt(meta?.strategyName) + docContext;
 
