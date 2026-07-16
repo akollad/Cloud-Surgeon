@@ -1,0 +1,29 @@
+{"success":false,"simulated":false,"service":"ecs","actionTaken":"DESCRIBE_SERVICES","error":"Service 'checkout' not found in cluster 'cloud-surgeon'. Use serviceName=\"cloud-surgeon/api\" to target the correct service.","availableServices":["api"],"hint":"Use serviceName=\"cloud-surgeon/api\" to target the correct service."}
+Jul 16, 15:44:36	6a595d8c	aws_repair_service({"serviceName":"orders-db","action":"rds:diagnose"})	
+{"success":false,"simulated":false,"service":"ecs","actionTaken":"DESCRIBE_SERVICES","error":"Service 'orders-db' not found in cluster 'cloud-surgeon'. Use serviceName=\"cloud-surgeon/api\" to target the correct service.","availableServices":["api"],"hint":"Use serviceName=\"cloud-surgeon/api\" to target the correct service.","note":"This deployment uses CockroachDB Serverless (no RDS). ECS service health checked instead. Use crdb_cluster_health for database diagnostics."}
+Jul 16, 15:44:29	861b7619	verify_resolution({"incidentId":"861b7619-effd-4f92-8082-866c2f031889","repairVerified":false,"strategyUsed":"lambda_concurrency_scale"})	
+{"verified":false,"verdict":"FAIL","auditTime":"2026-07-16T14:44:29.588Z","strategyUsed":"lambda_concurrency_scale","message":"Repair output indicates failure. Escalation recommended."}
+Jul 16, 15:44:26	861b7619	aws_repair_service({"serviceName":"order-processor","action":"lambda:describe_and_remediate"})	
+{"success":false,"simulated":false,"service":"lambda","actionTaken":"AWS_API_CALL","error":"Function not found: arn:aws:lambda:us-east-1:153983052396:function:order-processor"}
+Jul 16, 15:44:23	ff84a456	verify_resolution({"incidentId":"ff84a456-a0df-454d-b801-32bebcabee93","repairVerified":false,"strategyUsed":"ecs_service_restart"})	
+{"verified":false,"verdict":"FAIL","auditTime":"2026-07-16T14:44:22.919Z","strategyUsed":"ecs_service_restart","message":"Repair output indicates failure. Escalation recommended."}
+Jul 16, 15:44:20	861b7619	aws_repair_service({"serviceName":"order-processor","action":"lambda:diagnose"})	
+{"success":false,"simulated":false,"service":"lambda","actionTaken":"AWS_API_CALL","error":"Function not found: arn:aws:lambda:us-east-1:153983052396:function:order-processor"}
+Jul 16, 15:44:20	ff84a456	aws_repair_service({"serviceName":"cloud-surgeon/checkout","action":"ecs:describe_and_remediate"})	
+{"success":false,"simulated":false,"service":"ecs","actionTaken":"DESCRIBE_SERVICES","error":"Service 'checkout' not found in cluster 'cloud-surgeon'. Use serviceName=\"cloud-surgeon/api\" to target the correct service.","availableServices":["api"],"hint":"Use serviceName=\"cloud-surgeon/api\" to target the correct service."}
+Jul 16, 15:44:11	5e4ba680	verify_resolution({"incidentId":"5e4ba680-6e9b-497f-af1d-3f7e71b99bb9","repairVerified":false,"strategyUsed":"rds_cpu_throttle"})	
+{"verified":false,"verdict":"FAIL","auditTime":"2026-07-16T14:44:11.808Z","strategyUsed":"rds_cpu_throttle","message":"Repair output indicates failure. Escalation recommended."}
+Jul 16, 15:44:08	5e4ba680	aws_repair_service({"serviceName":"orders-db","action":"rds:describe_and_remediate"})	
+{"success":false,"simulated":false,"service":"ecs","actionTaken":"DESCRIBE_SERVICES","error":"Service 'orders-db' not found in cluster 'cloud-surgeon'. Use serviceName=\"cloud-surgeon/api\" to target the correct service.","availableServices":["api"],"hint":"Use serviceName=\"cloud-surgeon/api\" to target the correct service.","note":"This deployment uses CockroachDB Serverless (no RDS). ECS service health checked instead. Use crdb_cluster_health for database diagnostics."}
+Jul 16, 15:41:18	5e4ba680	crdb_cluster_health({})	
+{"source":"cockroachdb-cloud-mcp","cluster":{"id":"2d0790c4-bd7c-4735-a5c3-01bcc69568f4","name":"polite-genie","cockroach_version":"v26.2.1","cloud_provider":"AWS","state":"CREATED","plan":"BASIC","regions":[{"name":"ap-south-1","node_count":0}],"created_at":"2026-07-11T10:53:53Z","updated_at":"2026-07-14T09:14:34Z"},"activeConnections":0,"runningQueriesRaw":{"rows":[]},"fetchedAt":"2026-07-16T14:41:18.278Z"}
+Jul 16, 15:41:05	e6b075a1	verify_resolution({"incidentId":"e6b075a1-5da2-4f3e-8a6c-073b976b4ef1","repairVerified":false,"strategyUsed":"lambda_concurrency_scale"})	
+{"verified":false,"verdict":"FAIL","auditTime":"2026-07-16T14:41:05.397Z","strategyUsed":"lambda_concurrency_scale","message":"Repair output indicates failure. Escalation recommended."}
+Jul 16, 15:41:02	e6b075a1	aws_repair_service({"serviceName":"order-processor","action":"describe_and_remediate"})	
+{"success":false,"simulated":false,"service":"ecs","actionTaken":"DESCRIBE_SERVICES","error":"Service 'order-processor' not found in cluster 'cloud-surgeon'. Use serviceName=\"cloud-surgeon/api\" to target the correct service.","availableServices":["api"],"hint":"Use serviceName=\"cloud-surgeon/api\" to target the correct service."}
+Jul 16, 15:40:56	e6b075a1	aws_repair_service({"serviceName":"order-processor","action":"lambda:diagnose"})	
+{"success":false,"simulated":false,"service":"lambda","actionTaken":"AWS_API_CALL","error":"Function not found: arn:aws:lambda:us-east-1:153983052396:function:order-processor"}
+Jul 16, 15:40:14	ff84a456	aws_repair_service({"serviceName":"cloud-surgeon/checkout","action":"ecs:diagnose"})	
+{"success":false,"simulated":false,"service":"ecs","actionTaken":"DESCRIBE_SERVICES","error":"Service 'checkout' not found in cluster 'cloud-surgeon'. Use serviceName=\"cloud-surgeon/api\" to target the correct service.","availableServices":["api"],"hint":"Use serviceName=\"cloud-surgeon/api\" to target the correct service."}
+Jul 16, 15:34:02	b67c6776	verify_resolution({"incidentId":"b67c6776-7551-4a73-afb9-177911bbf405","repairVerified":true,"strategyUsed":"external_dependency_circuit_break"})	
+{"verified":true,"verdict":"PASS","auditTime":"2026-07-16T14:34:02.402Z","strategyUsed":"external_dependency_circuit_break","message":"Repair output indicates success. Incident can be closed."

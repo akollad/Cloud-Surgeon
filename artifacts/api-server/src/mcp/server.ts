@@ -10,6 +10,7 @@ import {
   repairEcsService,
   repairRdsConnections,
   repairLambdaConcurrency,
+  describeLambdaFunction,
   logAwsToolMode,
 } from "../lib/aws";
 import { searchDocs } from "../lib/doc-rag";
@@ -328,7 +329,13 @@ server.registerTool(
       combined.includes("payment-processor") ||
       combined.includes("concurrency")
     ) {
-      result = await repairLambdaConcurrency(serviceName);
+      // Diagnostician (PHASE 0) uses lambda:diagnose → read-only describe.
+      // Remediator (PHASE 1) uses lambda:describe_and_remediate → scale concurrency.
+      if (actionLower === "lambda:diagnose" || actionLower === "lambda:describe") {
+        result = await describeLambdaFunction(serviceName);
+      } else {
+        result = await repairLambdaConcurrency(serviceName);
+      }
     } else if (
       // Explicit "rds:" prefix or classic keywords — only when RDS is configured.
       (actionLower.startsWith("rds:") ||

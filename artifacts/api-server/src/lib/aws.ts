@@ -24,6 +24,8 @@ import {
   LambdaClient,
   GetFunctionConcurrencyCommand,
   PutFunctionConcurrencyCommand,
+  GetFunctionCommand,
+  GetAccountSettingsCommand,
 } from "@aws-sdk/client-lambda";
 import {
   CloudWatchClient,
@@ -292,6 +294,62 @@ export async function repairRdsConnections(
  * Reads the current reserved concurrency for a Lambda function and scales
  * it up by 50% when throttling is detected.
  */
+/**
+ * Read-only Lambda describe — used by the Diagnostician (PHASE 0).
+ * Never modifies infrastructure.
+ */
+export async function describeLambdaFunction(
+  functionName: string,
+): Promise<AwsToolResult> {
+  if (!hasCredentials()) return noCredentialsResult("lambda");
+
+  const client = new LambdaClient({ region: region() });
+
+  try {
+    const [fnRes, concRes, accountRes] = await Promise.all([
+      client.send(new GetFunctionCommand({ FunctionName: functionName })),
+      client.send(new GetFunctionConcurrencyCommand({ FunctionName: functionName })),
+      client.send(new GetAccountSettingsCommand({})),
+    ]);
+
+    const reserved = concRes.ReservedConcurrentExecutions;
+    const accountLimit = accountRes.AccountLimit?.ConcurrentExecutions ?? 1000;
+    const unreserved = accountRes.AccountLimit?.UnreservedConcurrentExecutions ?? accountLimit;
+    const state = fnRes.Configuration?.State ?? "Unknown";
+    const runtime = fnRes.Configuration?.Runtime ?? "unknown";
+    const memoryMB = fnRes.Configuration?.MemorySize ?? 0;
+
+    return {
+      success: true,
+      simulated: false,
+      service: "lambda",
+      actionTaken: "DESCRIBE_FUNCTION",
+      data: {
+        functionName,
+        state,
+        runtime,
+        memoryMB,
+        reservedConcurrency: reserved ?? "none (uses shared pool)",
+        accountConcurrencyLimit: accountLimit,
+        unreservedConcurrency: unreserved,
+      },
+      recommendation:
+        reserved === undefined
+          ? `Lambda '${functionName}' (${state}) uses the shared concurrency pool (account limit: ${accountLimit}). If throttling is occurring, the account-level limit may need an AWS Support increase.`
+          : `Lambda '${functionName}' (${state}) has reserved concurrency: ${reserved}. Account limit: ${accountLimit}, unreserved available: ${unreserved}.`,
+      approvalRequired: false,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      simulated: false,
+      service: "lambda",
+      actionTaken: "DESCRIBE_FUNCTION",
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 export async function repairLambdaConcurrency(
   functionName: string,
 ): Promise<AwsToolResult> {
@@ -300,14 +358,44 @@ export async function repairLambdaConcurrency(
   const client = new LambdaClient({ region: region() });
 
   try {
-    // 1. Get current concurrency setting
-    const get = await client.send(
-      new GetFunctionConcurrencyCommand({ FunctionName: functionName }),
-    );
-    const current = get.ReservedConcurrentExecutions ?? 1000;
-    const scaled = Math.ceil(current * 1.5);
+    // 1. Get current concurrency setting + account limits
+    const [concRes, accountRes] = await Promise.all([
+      client.send(new GetFunctionConcurrencyCommand({ FunctionName: functionName })),
+      client.send(new GetAccountSettingsCommand({})),
+    ]);
 
-    // 2. Apply the new limit
+    const reserved = concRes.ReservedConcurrentExecutions;
+    const accountLimit = accountRes.AccountLimit?.ConcurrentExecutions ?? 1000;
+    const unreserved = accountRes.AccountLimit?.UnreservedConcurrentExecutions ?? accountLimit;
+
+    // 2. No reserved concurrency configured — function uses the shared pool.
+    //    Setting reserved concurrency would REDUCE the shared pool, making things worse.
+    //    Report the current state as the "repair" outcome.
+    if (reserved === undefined) {
+      return {
+        success: true,
+        simulated: false,
+        service: "lambda",
+        actionTaken: "DESCRIBE_FUNCTION_CONCURRENCY",
+        data: {
+          functionName,
+          reservedConcurrency: "none (uses shared pool)",
+          accountConcurrencyLimit: accountLimit,
+          unreservedConcurrency: unreserved,
+        },
+        recommendation:
+          `Lambda '${functionName}' has no reserved concurrency cap — it competes on the shared account pool ` +
+          `(limit: ${accountLimit}, unreserved: ${unreserved}). ` +
+          `No concurrency action needed: the function is unrestricted. ` +
+          `If throttling persists at account level, request a quota increase via AWS Support.`,
+        approvalRequired: false,
+      };
+    }
+
+    // 3. Reserved concurrency IS set to a specific value — scale it up by 1.5×,
+    //    capped at the available unreserved capacity.
+    const scaled = Math.min(Math.ceil(reserved * 1.5), Math.max(reserved, unreserved));
+
     await client.send(
       new PutFunctionConcurrencyCommand({
         FunctionName: functionName,
@@ -322,11 +410,11 @@ export async function repairLambdaConcurrency(
       actionTaken: "PUT_FUNCTION_CONCURRENCY",
       data: {
         functionName,
-        previousReservedConcurrency: current,
+        previousReservedConcurrency: reserved,
         newReservedConcurrency: scaled,
         scaleFactor: 1.5,
       },
-      recommendation: `Lambda '${functionName}' concurrency scaled from ${current} → ${scaled} reserved executions. Throttling should resolve within 60 seconds.`,
+      recommendation: `Lambda '${functionName}' concurrency scaled from ${reserved} → ${scaled} reserved executions. Throttling should resolve within 60 seconds.`,
       approvalRequired: false,
     };
   } catch (err) {
