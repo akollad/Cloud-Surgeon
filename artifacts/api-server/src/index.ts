@@ -4,7 +4,7 @@ import { seedVectorMemory } from "./lib/seed";
 import { pool } from "@workspace/db";
 import { bedrockIsConfigured, bedrockAuthMethod } from "./lib/bedrock";
 import { createMetricSnapshotsTable } from "./lib/anomaly";
-import { createRollbackPlansTable } from "./lib/cloud-surgeon";
+import { createRollbackPlansTable, runAgentLoop } from "./lib/cloud-surgeon";
 import { initChangefeed } from "./lib/cdc";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -240,5 +240,42 @@ app.listen(port, async (err) => {
     await initChangefeed();
   } catch (err) {
     logger.warn({ err }, "[CDC] initChangefeed failed (non-fatal)");
+  }
+
+  // ── Startup recovery: re-queue TRIGGERED incidents that got stuck ─────────
+  // Incidents reach TRIGGERED status when the row is created but the agent
+  // loop never ran (e.g. the container crashed between INSERT and runAgentLoop).
+  // On each boot we scan for incidents older than 2 minutes that are still
+  // TRIGGERED with no claimed agent and re-run the loop for each one.
+  try {
+    const { db, incidentStateTable } = await import("@workspace/db");
+    const { sql, and, lte, isNull } = await import("drizzle-orm");
+    const cutoff = new Date(Date.now() - 2 * 60 * 1000);
+    const stuck = await db
+      .select()
+      .from(incidentStateTable)
+      .where(
+        and(
+          sql`${incidentStateTable.status} = 'TRIGGERED'`,
+          isNull(incidentStateTable.claimedByAgent),
+          lte(incidentStateTable.triggeredAt, cutoff),
+        ),
+      )
+      .limit(10);
+
+    if (stuck.length > 0) {
+      logger.info({ count: stuck.length }, "[BOOT] Found stuck TRIGGERED incidents — re-queuing");
+      for (const incident of stuck) {
+        const ctx = incident.contextJson as { alertText?: string } | null;
+        const alertText = ctx?.alertText ?? "Unknown alert — reprocessing stuck incident";
+        setImmediate(() => {
+          runAgentLoop(incident, alertText, false).catch((err: unknown) => {
+            logger.error({ err, incidentId: incident.incidentId }, "[BOOT] Failed to recover stuck incident");
+          });
+        });
+      }
+    }
+  } catch (err) {
+    logger.warn({ err }, "[BOOT] Stuck-incident recovery scan failed (non-fatal)");
   }
 });

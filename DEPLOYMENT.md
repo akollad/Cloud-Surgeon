@@ -23,7 +23,7 @@
 Last verified (July 15 2026): `[BOOT] AI: anthropic 🟢 LIVE (direct API key) | AWS tools: 🟢 LIVE (region: us-east-1) | DB: connected | CDC: [CDC] Existing CockroachDB changefeed reused — streaming to webhook`.
 Demo dashboard password: `cloudsurgeon-demo`.
 
-**Task definition revision 6** (current): adds `curl` to runtime stage (required for ECS container health check — `node:24-slim` does not include it), adds `COCKROACH_API_KEY` and `CDC_WEBHOOK_SECRET` secrets.
+**Task definition revision 11** (current): adds `ECS_DEFAULT_SERVICE=api` env var so `aws_repair_service` routes to the real ECS service (`cloud-surgeon/api`) instead of generic placeholders. Updates deprecated `claude-3-5-haiku-latest` → `claude-haiku-4-5`. Previous revisions: rev 10 added `ECS_DEFAULT_CLUSTER=cloud-surgeon`; rev 6 added `curl` to runtime stage.
 
 **Live AWS repair note**: `src/lib/aws.ts` explicitly requires `AWS_ACCESS_KEY_ID` +
 `AWS_SECRET_ACCESS_KEY` as environment variables to enter LIVE mode — the ECS task role alone
@@ -346,7 +346,8 @@ Task definition (current revision: **4**):
       { "name": "NODE_ENV",             "value": "production" },
       { "name": "AI_PROVIDER",          "value": "anthropic" },
       { "name": "AWS_REGION",           "value": "us-east-1" },
-      { "name": "ECS_DEFAULT_CLUSTER",  "value": "prod-cluster" },
+      { "name": "ECS_DEFAULT_CLUSTER",  "value": "cloud-surgeon" },
+      { "name": "ECS_DEFAULT_SERVICE",  "value": "api" },
       { "name": "CALIBRATION_THRESHOLD","value": "0.15" },
       {
         "name":  "CDC_WEBHOOK_URL",

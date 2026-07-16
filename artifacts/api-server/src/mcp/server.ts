@@ -235,10 +235,14 @@ async function callCockroachCloudApi(action: string): Promise<Record<string, unk
 // pass generic names like "checkout" or "payment-processor".
 
 function extractEcsParams(serviceName: string): { cluster: string; service: string } {
-  // Accept "cluster/service" format or default to a prod-cluster convention
+  // Accept "cluster/service" format (preferred — always pass the real cluster).
   const parts = serviceName.split("/");
   if (parts.length === 2) return { cluster: parts[0]!, service: parts[1]! };
-  return { cluster: process.env.ECS_DEFAULT_CLUSTER ?? "prod-cluster", service: serviceName };
+  // Default to the real ECS cluster/service rather than the generic "prod-cluster".
+  return {
+    cluster: process.env.ECS_DEFAULT_CLUSTER ?? "cloud-surgeon",
+    service: process.env.ECS_DEFAULT_SERVICE ?? "api",
+  };
 }
 
 const server = new McpServer({ name: "cloud-surgeon-tools", version: "1.0.0" });
@@ -303,29 +307,48 @@ server.registerTool(
   async ({ serviceName, action }) => {
     const combined = (serviceName + " " + action).toLowerCase();
 
+    // Determine whether this deployment uses RDS. When COCKROACHDB_URL is set
+    // (i.e. CockroachDB Serverless is the database) there is no RDS instance —
+    // routing an alert there would always fail with "DBInstance not found".
+    const hasRds = Boolean(process.env.RDS_INSTANCE_IDENTIFIER);
+
     let result;
 
-    if (combined.includes("ecs") || combined.includes("checkout") || combined.includes("task")) {
-      const { cluster, service } = extractEcsParams(serviceName);
-      result = await repairEcsService(cluster, service);
-    } else if (
-      combined.includes("rds") ||
-      combined.includes("db") ||
-      combined.includes("postgres") ||
-      combined.includes("mysql") ||
-      combined.includes("catalog") ||
-      combined.includes("database")
-    ) {
-      result = await repairRdsConnections(serviceName);
-    } else if (
+    if (
       combined.includes("lambda") ||
       combined.includes("function") ||
       combined.includes("payment-processor") ||
       combined.includes("concurrency")
     ) {
       result = await repairLambdaConcurrency(serviceName);
+    } else if (
+      (combined.includes("rds") ||
+        combined.includes("db") ||
+        combined.includes("postgres") ||
+        combined.includes("mysql") ||
+        combined.includes("catalog") ||
+        combined.includes("database")) &&
+      hasRds
+    ) {
+      // Real RDS repair — only when an RDS instance is configured.
+      result = await repairRdsConnections(process.env.RDS_INSTANCE_IDENTIFIER!);
+    } else if (
+      combined.includes("rds") ||
+      combined.includes("database") ||
+      combined.includes("connection pool")
+    ) {
+      // No RDS in this deployment (CockroachDB Serverless is the DB).
+      // Check the ECS service health instead — the DB issue may be in the app layer.
+      const { cluster, service } = extractEcsParams(serviceName);
+      result = {
+        ...(await repairEcsService(cluster, service)),
+        note:
+          "This deployment uses CockroachDB Serverless (no RDS). " +
+          "ECS service health checked instead. " +
+          "Use crdb_cluster_health for database diagnostics.",
+      };
     } else {
-      // Generic fallback: try ECS first, accept whatever comes back
+      // ECS, EC2, disk, generic — all target the configured ECS service.
       const { cluster, service } = extractEcsParams(serviceName);
       result = await repairEcsService(cluster, service);
     }

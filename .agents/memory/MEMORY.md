@@ -15,3 +15,4 @@
 - [VITE_API_BASE_URL causes double /api/ prefix](vite-api-base-url-double-prefix.md) — generated client already includes /api/; setting this env var doubles the prefix.
 - [ccloud-path.ts is the single source of truth for binary path](ccloud-binary-path-centralized.md) — never redefine CCLOUD_BINARY inline; import from lib/ccloud-path.ts.
 - [Orval strips contextJson extra fields](orval-contextjson-strip.md) — z.object() strips unknown keys; add all fields to IncidentContext in openapi.yaml + re-run codegen to surface them in API response.
+- [ECS service name detection](ecs-service-name-detection.md) — detectServiceName() must return "cloud-surgeon/api"; generic fallbacks cause AWS 404s; startup recovery re-queues stuck TRIGGERED incidents.

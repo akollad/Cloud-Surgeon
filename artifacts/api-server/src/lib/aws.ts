@@ -13,6 +13,7 @@ import {
   ECSClient,
   DescribeServicesCommand,
   UpdateServiceCommand,
+  ListServicesCommand,
 } from "@aws-sdk/client-ecs";
 import {
   RDSClient,
@@ -85,12 +86,31 @@ export async function repairEcsService(
     );
     const svc = describe.services?.[0];
     if (!svc) {
+      // List available services so the agent (and operator) knows the right name.
+      let availableServices: string[] = [];
+      try {
+        const listResult = await client.send(new ListServicesCommand({ cluster }));
+        // ARNs look like "arn:aws:ecs:…/cluster/service" — extract just the service name.
+        availableServices = (listResult.serviceArns ?? []).map(
+          (arn) => arn.split("/").pop() ?? arn,
+        );
+      } catch {
+        /* best-effort — ignore list errors */
+      }
+      const hint =
+        availableServices.length === 1
+          ? `Use serviceName="${cluster}/${availableServices[0]}" to target the correct service.`
+          : availableServices.length > 1
+            ? `Available services: ${availableServices.join(", ")}.`
+            : `Cluster '${cluster}' exists but service '${serviceName}' was not found.`;
       return {
         success: false,
         simulated: false,
         service: "ecs",
         actionTaken: "DESCRIBE_SERVICES",
-        error: `Service '${serviceName}' not found in cluster '${cluster}'`,
+        error: `Service '${serviceName}' not found in cluster '${cluster}'. ${hint}`,
+        availableServices,
+        hint,
       };
     }
 

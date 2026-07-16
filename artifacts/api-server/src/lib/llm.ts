@@ -76,7 +76,7 @@ async function callAnthropicLLM(
     try {
       const { anthropic } = await import("@workspace/integrations-anthropic-ai");
       const message = await anthropic.messages.create({
-        model: "claude-haiku-4-5",
+        model: "claude-haiku-4-5", // via Replit AI Integrations proxy
         max_tokens: 300,
         messages: [{ role: "user", content: prompt }],
       });
@@ -97,7 +97,7 @@ async function callAnthropicLLM(
       const { default: Anthropic } = await import("@anthropic-ai/sdk");
       const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
       const message = await client.messages.create({
-        model: "claude-3-5-haiku-latest",
+        model: "claude-haiku-4-5",
         max_tokens: 300,
         messages: [{ role: "user", content: prompt }],
       });

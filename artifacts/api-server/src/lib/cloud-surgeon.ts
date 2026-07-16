@@ -113,16 +113,40 @@ export function detectStrategy(alertText: string): string {
   return "default_repair";
 }
 
-/** Extracts a readable service name from the alert text. */
+/** Extracts a readable service name from the alert text.
+ *
+ * Returns a service reference the aws_repair_service MCP tool can target.
+ * For ECS-routed alerts the format is "cluster/service" (e.g. "cloud-surgeon/api").
+ * ECS_DEFAULT_CLUSTER / ECS_DEFAULT_SERVICE control the real service names so
+ * this function never returns generic placeholders like "ecs-service" that would
+ * cause "Cluster not found" / "Service not found" AWS errors.
+ *
+ * RDS and EC2 are NOT part of this infra (CockroachDB Serverless is the DB;
+ * compute runs on Fargate). Alerts mentioning them are routed to the real ECS
+ * service so at minimum the ECS task health is checked.
+ */
 export function detectServiceName(alertText: string): string {
+  // Honour explicit single-quoted names in the alert text (e.g. 'prod-api').
   const m = alertText.match(/'([^']+)'/);
   if (m) return m[1];
+
+  const ecsCluster = process.env.ECS_DEFAULT_CLUSTER ?? "cloud-surgeon";
+  const ecsService = process.env.ECS_DEFAULT_SERVICE ?? "api";
+  const ecsRef = `${ecsCluster}/${ecsService}`;
+
   const t = alertText.toLowerCase();
-  if (t.includes("ecs")) return "ecs-service";
-  if (t.includes("rds")) return "rds-instance";
-  if (t.includes("lambda")) return "lambda-function";
-  if (t.includes("ec2")) return "ec2-instance";
-  return "auto-detected-service";
+
+  // Lambda is the only AWS service that exists separately from ECS in most
+  // deployments — keep it as a direct function name when explicitly mentioned.
+  if (t.includes("lambda") || t.includes("concurrentexecution")) {
+    // Extract a function name from the alert if present (e.g. "payment-processor")
+    const fnMatch = alertText.match(/(?:lambda|function)[:\s]+([a-zA-Z0-9_-]+)/i);
+    return fnMatch ? fnMatch[1] : ecsRef;
+  }
+
+  // Everything else — ECS service, EC2 (Fargate tasks), RDS (no RDS in this
+  // infra — CockroachDB is the DB), disk, generic — all target the real ECS service.
+  return ecsRef;
 }
 
 /**
