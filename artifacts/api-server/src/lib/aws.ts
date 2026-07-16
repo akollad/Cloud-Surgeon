@@ -99,18 +99,26 @@ export async function repairEcsService(
       } catch {
         /* best-effort — ignore list errors */
       }
+      // Report available services as information only — do NOT prescribe switching to
+      // a different service. Redirecting the agent to an unrelated service would produce
+      // a false-positive resolution: a healthy "api" service tells us nothing about an
+      // unhealthy "checkout" service. The agent must escalate (PENDING_APPROVAL) when
+      // the reported service cannot be found.
+      const available =
+        availableServices.length > 0
+          ? `Services present in cluster '${cluster}': [${availableServices.join(", ")}].`
+          : `Cluster '${cluster}' has no discoverable services.`;
       const hint =
-        availableServices.length === 1
-          ? `Use serviceName="${cluster}/${availableServices[0]}" to target the correct service.`
-          : availableServices.length > 1
-            ? `Available services: ${availableServices.join(", ")}.`
-            : `Cluster '${cluster}' exists but service '${serviceName}' was not found.`;
+        `Service '${serviceName}' does not exist in cluster '${cluster}'. ` +
+        `${available} ` +
+        `Do NOT redirect diagnostics to a different service — the alert is specifically about '${serviceName}'. ` +
+        `Escalate to PENDING_APPROVAL if the target service cannot be found.`;
       return {
         success: false,
         simulated: false,
         service: "ecs",
         actionTaken: "DESCRIBE_SERVICES",
-        error: `Service '${serviceName}' not found in cluster '${cluster}'. ${hint}`,
+        error: hint,
         availableServices,
         hint,
       };
