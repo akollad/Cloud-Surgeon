@@ -49,13 +49,18 @@ All endpoints require `X-API-Key: <CLOUD_SURGEON_API_KEY>` header.
 
 ## Known Pitfalls — Do Not Repeat
 
-### ❌ Ne jamais remettre `VITE_API_BASE_URL` à une valeur non-vide
+### ⚠️ `VITE_API_BASE_URL` — origin seulement, jamais origin + `/api`
 
-Le client généré (`lib/api-client-react/src/generated/api.ts`) produit déjà des chemins absolus qui commencent par `/api/` (ex: `/api/healthz`, `/api/incidents`). Si `VITE_API_BASE_URL=/api` est défini, `setBaseUrl("/api")` est appelé dans `main.tsx` et **chaque requête devient `/api/api/...`** — double préfixe, 404 garanti.
+Le client généré (`lib/api-client-react/src/generated/api.ts`) produit déjà des chemins qui commencent par `/api/` (ex: `/api/healthz`, `/api/incidents`). `setBaseUrl()` dans `custom-fetch.ts` préfixe ces chemins tels quels.
 
-- **En dev Replit** : le proxy Vite (`vite.config.ts` → `server.proxy`) route `/api` → `localhost:8080`. Les chemins relatifs fonctionnent sans base URL.
-- **En prod AWS** : l'ALB route `/api/*` → Express. Même chose, pas de base URL nécessaire.
-- `VITE_API_BASE_URL` ne doit être renseigné que pour un API **cross-origin** (ex: staging sur un autre domaine depuis une app mobile). Il est actuellement vide dans les env vars partagés.
+**Règle** : si tu dois définir `VITE_API_BASE_URL`, mets-y **l'origine seule**, sans `/api`.
+
+| Scénario | Valeur correcte | Résultat |
+|---|---|---|
+| Dev Replit | *(vide)* | proxy Vite `/api` → `localhost:8080` |
+| Prod AWS same-origin | *(vide)* | ALB route `/api/*` → Express |
+| Cross-origin (mobile, staging) | `https://mon-api.example.com` | `https://mon-api.example.com/api/healthz` ✓ |
+| ❌ FAUX | `https://mon-api.example.com/api` | `https://mon-api.example.com/api/api/healthz` 404 |
 
 ### ❌ Ne jamais redéfinir `CCLOUD_BINARY` en inline dans un fichier
 
