@@ -49,7 +49,7 @@ const SIZE_H: Record<LogoSize, number> = {
 
 // The SVG viewBox (from the original Illustrator export)
 const FULL_VB    = "0 0 150.53 140.33";
-const MARK_VB    = "60 0 91 97";     // crop to the upper scalpel+circle mark only
+const MARK_VB    = "0 0 151 97";     // crop to the upper scalpel+circle mark only (full width needed)
 const WORDMARK_VB = "5 126 142 15";  // crop to the SURGEON text only
 
 export function Logo({
@@ -63,9 +63,9 @@ export function Logo({
   const height  = SIZE_H[size];
 
   // Mark: viewBox crops to icon, preserve aspect ratio of that crop
-  // full viewBox 150.53 × 140.33 → mark crop 91 × 97 → w/h ≈ 0.937
+  // full viewBox 150.53 × 140.33 → mark crop 151 × 97 → w/h ≈ 1.557
   // full crop   150.53 × 140.33 → w/h ≈ 1.073
-  const markAR  = 91 / 97;
+  const markAR  = 151 / 97;
   const fullAR  = 150.53 / 140.33;
 
   if (variant === "horizontal") {
