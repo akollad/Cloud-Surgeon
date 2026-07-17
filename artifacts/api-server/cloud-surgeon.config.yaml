@@ -1,0 +1,165 @@
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║           cloud-surgeon.config.yaml                             ║
+# ║   Infrastructure topology for your deployment.                  ║
+# ║   Copy this file, fill in your values, and restart the server.  ║
+# ║   Secrets (API keys, passwords) always stay in env vars —       ║
+# ║   never put them here.                                          ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+infrastructure:
+
+  aws:
+    # AWS region for all SDK calls. Override with AWS_REGION env var.
+    region: us-east-1
+
+    ecs:
+      # Name of your ECS cluster.
+      cluster: cloud-surgeon
+
+      # List every ECS service the agent may diagnose or restart.
+      # - name    : exact ECS service name (must match AWS Console)
+      # - aliases : words that appear in alert text and should resolve
+      #             to this service (case-insensitive substring match)
+      # - default : true on exactly one service → used as fallback when
+      #             no service name can be extracted from the alert
+      services:
+        - name: api
+          description: "Main API backend (Express / Fargate)"
+          aliases: ["backend", "api-server", "main-api"]
+          default: true
+
+        - name: checkout
+          description: "Checkout / payment processing service"
+          aliases: ["payment", "payment-service", "payment-gateway",
+                    "checkout-service", "orders"]
+
+    lambda:
+      # List every Lambda function the agent may describe or remediate.
+      # - name    : exact function name in AWS
+      # - aliases : words in alert text that identify this function
+      # - default : true → used when alert mentions Lambda but no name found
+      functions:
+        - name: order-processor
+          description: "Order processing Lambda (nodejs20.x)"
+          aliases: ["order", "processor", "order-handler"]
+          default: true
+
+    rds:
+      # Set to your RDS DB instance identifier to enable RDS repair tools.
+      # Leave null (or omit) if your database is CockroachDB / external.
+      instance_identifier: ~
+
+  database:
+    # Declares what database technology backs this deployment.
+    # cockroachdb → enables crdb_cluster_health in the repair path
+    # rds-postgres / rds-mysql → enables repairRdsConnections
+    provider: cockroachdb          # cockroachdb | rds-postgres | rds-mysql
+    display_name: polite-genie     # shown in logs and dashboard only
+
+
+# ── Alert → Strategy mapping ─────────────────────────────────────────────────
+#
+# Rules evaluated TOP-DOWN, first match wins.
+# Add your custom patterns ABOVE the built-in section.
+#
+# Each rule has:
+#   match     : list of keywords — ANY one found in the alert text triggers
+#               this rule (OR logic).  Case-insensitive substring match.
+#   match_all : list of keywords — ALL must be present (AND logic).
+#               Use match_all for rules that need multiple signals.
+#   strategy  : strategy name to apply (must exist in STRATEGY_PLANS or be
+#               a crdb_* skill name).
+#
+# ── Built-in patterns (edit or extend as needed) ─────────────────────────────
+alert_patterns:
+
+  # CockroachDB — checked first (most specific)
+  - match: ["hot range", "hotspot"]
+    strategy: crdb_hotspot_resolution
+
+  - match_all: ["cockroach", "contention"]
+    strategy: crdb_hotspot_resolution
+
+  - match_all: ["cockroach", "full scan"]
+    strategy: crdb_index_optimization
+
+  - match_all: ["cockroach", "slow query"]
+    strategy: crdb_slow_query_termination
+
+  - match_all: ["cockroach", "under-replicated"]
+    strategy: crdb_replication_recovery
+
+  - match_all: ["crdb", "full scan"]
+    strategy: crdb_index_optimization
+
+  - match_all: ["crdb", "slow query"]
+    strategy: crdb_slow_query_termination
+
+  - match_all: ["crdb", "under-replicated"]
+    strategy: crdb_replication_recovery
+
+  - match: ["changefeed"]
+    strategy: crdb_changefeed_restart
+
+  - match_all: ["cdc", "paused"]
+    strategy: crdb_changefeed_restart
+
+  # JVM / memory — before generic CPU so "jvm cpu" hits here first
+  - match: ["jvm", "heap", "oom"]
+    strategy: jvm_heap_restart
+
+  # DB connection pool — before "rds" catch-all
+  - match: ["max_connections", "connection pool", "pg_stat"]
+    strategy: db_connection_pool_reset
+
+  # Network
+  - match_all: ["latency", "cross-region"]
+    strategy: network_route_failover
+
+  - match_all: ["latency", "bgp"]
+    strategy: network_route_failover
+
+  # IAM / credentials
+  - match: ["accessdenied", "credential", "iam", "expired aws"]
+    strategy: iam_credential_rotation
+
+  # External dependencies
+  - match: ["stripe", "payment gateway", "circuit breaker"]
+    strategy: external_dependency_circuit_break
+
+  # ECS service health
+  - match: ["5xx", "unhealthy"]
+    strategy: ecs_service_restart
+
+  - match_all: ["ecs", "service"]
+    strategy: ecs_service_restart
+
+  # RDS / DB CPU
+  - match: ["rds", "db cpu", "database cpu"]
+    strategy: rds_cpu_throttle
+
+  # Lambda throttling — before generic "cpu" catch
+  - match: ["throttl", "concurrentexecution"]
+    strategy: lambda_concurrency_scale
+
+  # Disk / storage
+  - match: ["disk", "storage"]
+    strategy: disk_cleanup
+
+  # CloudWatch triage — last specific rule
+  - match_all: ["cloudwatch", "alarm"]
+    strategy: cloudwatch_alarm_triage
+
+  # CPU fallback (less specific — catches "cpu" when nothing else matched)
+  - match: ["cpu"]
+    strategy: rds_cpu_throttle
+
+
+# ── Routing thresholds ────────────────────────────────────────────────────────
+routing:
+  # Win-rate above this → AUTONOMOUS repair (no human approval needed).
+  # Range: 0.0 – 1.0.  Default: 0.80
+  autonomous_threshold: 0.80
+
+  # Calibration correction factor floor.  Default: 0.15
+  calibration_threshold: 0.15

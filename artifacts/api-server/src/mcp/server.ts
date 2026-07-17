@@ -14,6 +14,13 @@ import {
   logAwsToolMode,
 } from "../lib/aws";
 import { searchDocs } from "../lib/doc-rag";
+import {
+  hasRdsConfigured,
+  rdsInstanceId,
+  ecsCluster as configEcsCluster,
+  ecsDefaultService,
+  allKnownServiceNames,
+} from "../lib/surgeon-config";
 
 // ----------------------------------------------------------------------------
 // MCP server (Model Context Protocol) exposing the two tools Cloud-Surgeon
@@ -240,14 +247,13 @@ function extractEcsParams(serviceName: string): { cluster: string; service: stri
   // Accept "cluster/service" format (preferred — always pass the real cluster).
   const parts = serviceName.split("/");
   if (parts.length === 2) return { cluster: parts[0]!, service: parts[1]! };
-  // Single service name provided by detectServiceName — use IT with the default cluster.
-  // Never silently replace a real extracted name with ECS_DEFAULT_SERVICE.
+  // Single service name — attach the configured cluster.
   const trimmed = serviceName.trim();
-  const defaultCluster = process.env.ECS_DEFAULT_CLUSTER ?? "cloud-surgeon";
+  const defaultCluster = configEcsCluster();
   if (trimmed && trimmed !== "unknown" && trimmed !== "") {
     return { cluster: defaultCluster, service: trimmed };
   }
-  return { cluster: defaultCluster, service: process.env.ECS_DEFAULT_SERVICE ?? "api" };
+  return { cluster: defaultCluster, service: ecsDefaultService() };
 }
 
 const server = new McpServer({ name: "cloud-surgeon-tools", version: "1.0.0" });
@@ -313,21 +319,26 @@ server.registerTool(
     const actionLower = action.toLowerCase();
     const combined = (serviceName + " " + action).toLowerCase();
 
-    // Determine whether this deployment uses RDS. When COCKROACHDB_URL is set
-    // (i.e. CockroachDB Serverless is the database) there is no RDS instance —
-    // routing an alert there would always fail with "DBInstance not found".
-    const hasRds = Boolean(process.env.RDS_INSTANCE_IDENTIFIER);
+    // Determine whether this deployment uses RDS — driven by cloud-surgeon.config.yaml
+    // (infrastructure.aws.rds.instance_identifier) with RDS_INSTANCE_IDENTIFIER env
+    // var as a runtime override. CockroachDB deployments have hasRds = false.
+    const hasRds = hasRdsConfigured();
 
     let result;
 
     // Explicit "lambda:" prefix in action takes precedence — avoids keyword-miss
     // when the function name (e.g. "order-processor") doesn't contain "lambda".
+    // Build a set of known Lambda function names (from config) so routing works
+    // even when the LLM passes a bare function name without the "lambda:" prefix.
+    const lambdaNames = allKnownServiceNames().filter(n => !n.includes("/"));
+    const isLambdaTarget = lambdaNames.some(n => combined.includes(n.toLowerCase()));
+
     if (
       actionLower.startsWith("lambda:") ||
       combined.includes("lambda") ||
       combined.includes("function") ||
-      combined.includes("payment-processor") ||
-      combined.includes("concurrency")
+      combined.includes("concurrency") ||
+      isLambdaTarget
     ) {
       // Diagnostician (PHASE 0) uses lambda:diagnose → read-only describe.
       // Remediator (PHASE 1) uses lambda:describe_and_remediate → scale concurrency.
@@ -342,11 +353,10 @@ server.registerTool(
         combined.includes("rds") ||
         combined.includes("postgres") ||
         combined.includes("mysql") ||
-        combined.includes("catalog") ||
         combined.includes("database")) &&
       hasRds
     ) {
-      result = await repairRdsConnections(process.env.RDS_INSTANCE_IDENTIFIER!);
+      result = await repairRdsConnections(rdsInstanceId()!);
     } else if (
       combined.includes("rds") ||
       combined.includes("database") ||

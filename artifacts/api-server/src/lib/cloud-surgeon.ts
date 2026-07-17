@@ -14,6 +14,15 @@ import { callMcpTool } from "../mcp/client";
 import { invokeLLMThought, invokeLLMText } from "./llm";
 import { generateEmbedding } from "./embeddings";
 import { type ChaosConfig, ChaosPartitionError, injectChaos, sleep as chaosSleep } from "./chaos";
+import {
+  matchAlertPattern,
+  ecsCluster,
+  ecsDefaultRef,
+  resolveEcsService,
+  resolveLambdaFunction,
+  lambdaDefaultFunction,
+  getSurgeonConfig,
+} from "./surgeon-config";
 
 // ============================================================================
 // Cloud-Surgeon — 3-Layer Architecture
@@ -90,16 +99,30 @@ export function fingerprint(alertText: string): string {
 }
 
 
-/** Detects the strategy to apply from the alert text. */
+/**
+ * Detects the repair strategy from the alert text.
+ *
+ * Priority:
+ *  1. alert_patterns from cloud-surgeon.config.yaml (top-down, first match)
+ *  2. Built-in CockroachDB patterns (specific, checked before generic AWS)
+ *  3. Built-in AWS / generic patterns
+ *
+ * Clients override or extend step 1 without touching code.
+ */
 export function detectStrategy(alertText: string): string {
+  // 1 — Config-defined patterns (client-customisable)
+  const fromConfig = matchAlertPattern(alertText);
+  if (fromConfig) return fromConfig;
+
+  // 2 — Built-in CockroachDB patterns (fallback when config has no patterns)
   const t = alertText.toLowerCase();
-  // ── CockroachDB-specific patterns (checked first — more specific) ──────────
   if (t.includes("hot range") || t.includes("hotspot") || (t.includes("cockroach") && t.includes("contention"))) return "crdb_hotspot_resolution";
   if ((t.includes("cockroach") || t.includes("crdb")) && (t.includes("full scan") || t.includes("table scan") || t.includes("missing index") || (t.includes("index") && t.includes("recommend")))) return "crdb_index_optimization";
   if ((t.includes("cockroach") || t.includes("crdb")) && (t.includes("slow query") || t.includes("long-running") || t.includes("long running") || t.includes("query timeout"))) return "crdb_slow_query_termination";
   if ((t.includes("cockroach") || t.includes("crdb")) && (t.includes("under-replicated") || t.includes("replication lag") || t.includes("range unavailable"))) return "crdb_replication_recovery";
   if (t.includes("changefeed") || (t.includes("cdc") && (t.includes("paused") || t.includes("stalled") || t.includes("failed") || t.includes("lag")))) return "crdb_changefeed_restart";
-  // ── AWS / generic patterns ──────────────────────────────────────────────────
+
+  // 3 — Built-in AWS / generic patterns
   if (t.includes("jvm") || t.includes("heap") || t.includes("oom")) return "jvm_heap_restart";
   if (t.includes("max_connections") || t.includes("connection pool") || t.includes("pg_stat")) return "db_connection_pool_reset";
   if (t.includes("latency") && (t.includes("cross-region") || t.includes("cross_region") || t.includes("bgp"))) return "network_route_failover";
@@ -113,76 +136,86 @@ export function detectStrategy(alertText: string): string {
   return "default_repair";
 }
 
-/** Extracts a readable service name from the alert text.
+/**
+ * Extracts a service reference from the alert text.
  *
- * Returns a service reference the aws_repair_service MCP tool can target.
- * For ECS-routed alerts the format is "cluster/service" (e.g. "cloud-surgeon/api").
- * ECS_DEFAULT_CLUSTER / ECS_DEFAULT_SERVICE control the real service names so
- * this function never returns generic placeholders like "ecs-service" that would
- * cause "Cluster not found" / "Service not found" AWS errors.
+ * Returns a value the aws_repair_service MCP tool can target:
+ *   - ECS  → "cluster/service"  (e.g. "cloud-surgeon/checkout")
+ *   - Lambda → bare function name (e.g. "order-processor")
+ *   - RDS  → bare instance id   (e.g. "orders-db")
  *
- * RDS and EC2 are NOT part of this infra (CockroachDB Serverless is the DB;
- * compute runs on Fargate). Alerts mentioning them are routed to the real ECS
- * service so at minimum the ECS task health is checked.
+ * Resolution order (highest specificity first):
+ *  1. Single-quoted name in alert text
+ *  2. Service alias match against config (e.g. "payment" → "checkout")
+ *  3. Lambda function name / alias match
+ *  4. "ECS service <name>" regex
+ *  5. "RDS instance <name>" regex
+ *  6. Compound hyphenated word heuristic
+ *  7. Config default service fallback
  */
 export function detectServiceName(alertText: string): string {
-  const ecsCluster = process.env.ECS_DEFAULT_CLUSTER ?? "cloud-surgeon";
-  const ecsService = process.env.ECS_DEFAULT_SERVICE ?? "api";
-  const ecsRef = `${ecsCluster}/${ecsService}`;
+  const cluster   = ecsCluster();
+  const defaultRef = ecsDefaultRef();
   const t = alertText.toLowerCase();
 
-  // 1. Explicit single-quoted name wins — highest specificity.
+  // 1. Explicit single-quoted name — highest specificity.
   //    e.g. "ECS service 'checkout-api' unhealthy" → "checkout-api"
   const quoted = alertText.match(/'([^']+)'/);
   if (quoted) {
     const name = quoted[1]!;
-    // If it looks like a function name (no slash), keep as-is for Lambda routing.
     if (t.includes("lambda") || t.includes("function")) return name;
-    // Otherwise qualify with ECS cluster so extractEcsParams splits correctly.
-    return name.includes("/") ? name : `${ecsCluster}/${name}`;
+    return name.includes("/") ? name : `${cluster}/${name}`;
   }
 
-  // 2. Lambda / serverless — return the function name so aws_repair_service
-  //    routes to Lambda instead of ECS.
+  // 2. Alias match against config services — resolves "payment" → "checkout" etc.
+  //    Scan every word and token in the alert text against known service aliases.
+  const resolvedEcs = resolveEcsService(t);
+  if (resolvedEcs && !t.includes("lambda") && !t.includes("function")) {
+    return `${cluster}/${resolvedEcs}`;
+  }
+
+  // 3. Lambda path — try explicit name, then alias match, then default function.
   if (t.includes("lambda") || t.includes("concurrentexecution")) {
     const fn = alertText.match(/(?:lambda\s+function|function)[:\s']+([a-zA-Z0-9_-]+)/i);
     if (fn) return fn[1]!;
-    // Fallback: extract a hyphenated word that looks like a function name.
     const word = alertText.match(/\b([a-zA-Z0-9]+-(?:processor|handler|worker|function))\b/i);
-    if (word) return word[1]!;
-    // Last resort: use the configured default Lambda function so "Cascading Lambda
-    // throttling" (and similar generic alerts) target a real function instead of
-    // producing "Function not found: lambda/unknown".
-    return process.env.LAMBDA_DEFAULT_FUNCTION ?? "lambda/unknown";
+    if (word) {
+      const resolved = resolveLambdaFunction(word[1]!);
+      return resolved ?? word[1]!;
+    }
+    // Alias scan against known Lambda functions
+    const resolvedLambda = resolveLambdaFunction(t);
+    if (resolvedLambda) return resolvedLambda;
+    return lambdaDefaultFunction();
   }
 
-  // 3. ECS service: "ECS service <name>" or "ECS task <name>"
-  //    e.g. "ECS service checkout unhealthy" → "cloud-surgeon/checkout"
+  // 4. "ECS service <name>" or "ECS task <name>"
   const ecsMatch = alertText.match(/ECS\s+(?:service|task)\s+(?:')?([a-zA-Z0-9_-]+)(?:')?/i);
   if (ecsMatch && ecsMatch[1]!.toLowerCase() !== "is" && ecsMatch[1]!.toLowerCase() !== "the") {
-    return `${ecsCluster}/${ecsMatch[1]!}`;
+    const extracted = ecsMatch[1]!;
+    // Try to resolve via alias in case the extracted name is an alias
+    const resolved = resolveEcsService(extracted);
+    return `${cluster}/${resolved ?? extracted}`;
   }
 
-  // 4. RDS instance identifier — return bare name so aws_repair_service
-  //    can use RDS_INSTANCE_IDENTIFIER or the extracted name.
+  // 5. RDS instance identifier
   const rdsMatch = alertText.match(/RDS\s+(?:primary\s+)?(?:instance|db)\s+(?:')?([a-zA-Z0-9_-]+)(?:')?/i);
   if (rdsMatch) return rdsMatch[1]!;
 
-  // 5. Compound hyphenated service names (e.g. "recommendation-service", "order-processor")
-  //    that appear before a verb — a reasonable heuristic for un-quoted names.
+  // 6. Compound hyphenated word heuristic (e.g. "recommendation-service")
   const compoundMatch = alertText.match(/\b([a-zA-Z][a-zA-Z0-9]*-[a-zA-Z0-9][a-zA-Z0-9_-]*)\b/);
   if (compoundMatch) {
     const candidate = compoundMatch[1]!;
-    // Skip generic words that are not service names.
     const skip = ["5xx-spike", "cpu-utilization", "max-connections", "idle-in-transaction"];
     if (!skip.some((s) => candidate.toLowerCase().includes(s))) {
       if (t.includes("lambda") || t.includes("function")) return candidate;
-      return `${ecsCluster}/${candidate}`;
+      const resolved = resolveEcsService(candidate);
+      return `${cluster}/${resolved ?? candidate}`;
     }
   }
 
-  // 6. Fallback to the configured ECS service.
-  return ecsRef;
+  // 7. Config default
+  return defaultRef;
 }
 
 /**
@@ -904,7 +937,7 @@ async function indexResolvedIncident(
  * above which the correction factor is activated.
  * Configurable via CALIBRATION_THRESHOLD env var (default: 0.15 = 15%).
  */
-const CALIBRATION_THRESHOLD = Number(process.env.CALIBRATION_THRESHOLD ?? 0.15);
+const CALIBRATION_THRESHOLD = getSurgeonConfig().routing.calibration_threshold;
 
 /**
  * Records the predicted win-rate at the time of a routing decision.

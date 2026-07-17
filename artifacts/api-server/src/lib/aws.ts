@@ -31,6 +31,7 @@ import {
   CloudWatchClient,
   GetMetricStatisticsCommand,
 } from "@aws-sdk/client-cloudwatch";
+import { getSurgeonConfig } from "./surgeon-config";
 
 // ── Shared helpers ─────────────────────────────────────────────────────────
 
@@ -39,7 +40,8 @@ function hasCredentials(): boolean {
 }
 
 function region(): string {
-  return process.env.AWS_REGION ?? "us-east-1";
+  // AWS_REGION env var wins; then falls back to cloud-surgeon.config.yaml value.
+  return process.env.AWS_REGION ?? getSurgeonConfig().infrastructure.aws.region;
 }
 
 function noCredentialsResult(service: string): AwsToolResult {
