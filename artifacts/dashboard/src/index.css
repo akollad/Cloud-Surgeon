@@ -215,34 +215,51 @@
   50%       { background-color: rgba(234,179,8,0.18); color: rgba(234,179,8,1); box-shadow: none; }
 }
 
-/* ─── Scrollbar ────────────────────────────────────────────────────────────── */
+/* ─── Scrollbar — invisible at rest, appears on hover ─────────────────────── */
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+*:hover {
+  scrollbar-color: rgba(18,72,150,0.45) transparent;
+}
+.dark *:hover {
+  scrollbar-color: rgba(90,145,220,0.50) transparent;
+}
+
+/* WebKit (Chrome / Safari / Edge) */
 ::-webkit-scrollbar              { width: 6px; height: 6px; }
-::-webkit-scrollbar-track        { background: hsl(var(--muted) / 0.4); border-radius: 99px; }
-::-webkit-scrollbar-thumb        {
-  background: linear-gradient(180deg, rgba(18,72,150,0.45) 0%, rgba(18,72,150,0.25) 100%);
-  border-radius: 99px;
-  border: 1px solid rgba(18,72,150,0.12);
-}
-::-webkit-scrollbar-thumb:hover  {
-  background: linear-gradient(180deg, rgba(18,72,150,0.70) 0%, rgba(18,72,150,0.45) 100%);
-  border-color: rgba(18,72,150,0.25);
-}
-::-webkit-scrollbar-thumb:active {
-  background: rgba(18,72,150,0.80);
-}
+::-webkit-scrollbar-track        { background: transparent; }
 ::-webkit-scrollbar-corner       { background: transparent; }
 
-/* Dark mode scrollbar */
-.dark ::-webkit-scrollbar-track  { background: hsl(var(--muted) / 0.3); }
-.dark ::-webkit-scrollbar-thumb  {
-  background: linear-gradient(180deg, rgba(90,145,220,0.50) 0%, rgba(90,145,220,0.28) 100%);
-  border-color: rgba(90,145,220,0.15);
+/* Thumb — transparent by default */
+::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 99px;
+  transition: background 0.2s ease;
 }
-.dark ::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(180deg, rgba(90,145,220,0.75) 0%, rgba(90,145,220,0.50) 100%);
-  border-color: rgba(90,145,220,0.30);
+
+/* Thumb — visible when the scrollable element is hovered */
+*:hover::-webkit-scrollbar-thumb {
+  background: rgba(18,72,150,0.40);
 }
-.dark ::-webkit-scrollbar-thumb:active {
+*:hover::-webkit-scrollbar-thumb:hover {
+  background: rgba(18,72,150,0.65);
+}
+*:hover::-webkit-scrollbar-thumb:active {
+  background: rgba(18,72,150,0.80);
+}
+
+/* Dark mode */
+.dark *:hover::-webkit-scrollbar-thumb {
+  background: rgba(90,145,220,0.45);
+}
+.dark *:hover::-webkit-scrollbar-thumb:hover {
+  background: rgba(90,145,220,0.70);
+}
+.dark *:hover::-webkit-scrollbar-thumb:active {
   background: rgba(90,145,220,0.85);
 }
 

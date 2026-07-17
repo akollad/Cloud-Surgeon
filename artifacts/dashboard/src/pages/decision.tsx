@@ -68,9 +68,10 @@ function ConfidenceCard({ incident }: { incident: Incident }) {
         </CardTitle>
       </CardHeader>
       <CardContent className="p-4 space-y-4">
-        {/* Circular score gauge */}
-        <div className="flex items-center gap-4">
-          <div className="relative shrink-0">
+        {/* Circular score gauge + stats */}
+        <div className="flex flex-col xs:flex-row items-center gap-4 min-w-0">
+          {/* Gauge — fixed size, never shrinks */}
+          <div className="shrink-0">
             <svg width="96" height="96" viewBox="0 0 96 96">
               <circle cx="48" cy="48" r="44" fill="none" stroke="hsl(var(--border))" strokeWidth="8" />
               <circle
@@ -85,49 +86,56 @@ function ConfidenceCard({ incident }: { incident: Incident }) {
               <text x="48" y="60" textAnchor="middle" fontSize="10" fill="hsl(var(--muted-foreground))" fontFamily="monospace">/ 100</text>
             </svg>
           </div>
-          <div className="font-mono text-sm space-y-1.5 flex-1">
-            <div className="flex items-center gap-2">
-              <CheckCircle className="w-3 h-3 text-green-400 shrink-0" />
-              <span className="text-muted-foreground text-xs">Similar incidents:</span>
-              <span className="text-foreground font-bold text-xs">{sampleSize}</span>
+
+          {/* Stats grid — two columns so labels never wrap awkwardly */}
+          <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 font-mono min-w-0 w-full">
+            <CheckCircle className="w-3 h-3 text-green-400 self-center" />
+            <div className="flex items-center justify-between gap-1 min-w-0">
+              <span className="text-muted-foreground text-xs truncate">Similar incidents</span>
+              <span className="text-foreground font-bold text-xs shrink-0">{sampleSize}</span>
             </div>
-            <div className="flex items-center gap-2">
-              <CheckCircle className="w-3 h-3 text-green-400 shrink-0" />
-              <span className="text-muted-foreground text-xs">Success rate:</span>
-              <span className="text-foreground font-bold text-xs">{score}%</span>
+
+            <CheckCircle className="w-3 h-3 text-green-400 self-center" />
+            <div className="flex items-center justify-between gap-1 min-w-0">
+              <span className="text-muted-foreground text-xs truncate">Success rate</span>
+              <span className="text-foreground font-bold text-xs shrink-0">{score}%</span>
             </div>
-            <div className="flex items-center gap-2">
-              <AlertTriangle className={`w-3 h-3 shrink-0 ${riskColor}`} />
-              <span className="text-muted-foreground text-xs">Blast radius:</span>
-              <span className={`font-bold text-xs capitalize ${riskColor}`}>{riskLabel}</span>
+
+            <AlertTriangle className={`w-3 h-3 self-center shrink-0 ${riskColor}`} />
+            <div className="flex items-center justify-between gap-1 min-w-0">
+              <span className="text-muted-foreground text-xs truncate">Blast radius</span>
+              <span className={`font-bold text-xs capitalize shrink-0 ${riskColor}`}>{riskLabel}</span>
             </div>
+
             {correctionFactor != null && Math.abs(correctionFactor - 1) > 0.01 && (
-              <div className="flex items-center gap-2">
-                <Layers className="w-3 h-3 text-cyan-400 shrink-0" />
-                <span className="text-muted-foreground text-xs">Calibrated:</span>
-                <span className="text-cyan-400 font-bold text-xs">×{correctionFactor.toFixed(2)}</span>
-              </div>
+              <>
+                <Layers className="w-3 h-3 text-cyan-400 self-center shrink-0" />
+                <div className="flex items-center justify-between gap-1 min-w-0">
+                  <span className="text-muted-foreground text-xs truncate">Calibrated</span>
+                  <span className="text-cyan-400 font-bold text-xs shrink-0">×{correctionFactor.toFixed(2)}</span>
+                </div>
+              </>
             )}
           </div>
         </div>
 
-        {/* Routing mode badge */}
-        <div className="space-y-1.5">
+        {/* Routing Decision */}
+        <div className="space-y-1.5 min-w-0">
           <div className="text-xs text-muted-foreground uppercase font-mono">Routing Decision</div>
-          <Badge variant={(ctx?.routingMode as string)?.toLowerCase() as any || "outline"} className="text-xs">
+          <Badge variant={(ctx?.routingMode as string)?.toLowerCase() as any || "outline"} className="text-xs max-w-full truncate">
             {(ctx?.routingMode as string) || "UNKNOWN"}
           </Badge>
         </div>
 
         {/* Strategy */}
-        <div className="space-y-1.5">
+        <div className="space-y-1.5 min-w-0">
           <div className="text-xs text-muted-foreground uppercase font-mono">Strategy</div>
           <div className="text-cyan-400 font-mono text-xs break-all">{strategyName}</div>
         </div>
 
         {/* Reason summary */}
         {sampleSize > 0 && (
-          <div className="bg-muted/30 border border-border/50 rounded-sm px-3 py-2 text-xs font-mono text-muted-foreground leading-relaxed">
+          <div className="bg-muted/30 border border-border/50 rounded-sm px-3 py-2 text-xs font-mono text-muted-foreground leading-relaxed break-words">
             Based on <span className="text-foreground font-bold">{sampleSize}</span> historical execution{sampleSize > 1 ? "s" : ""} with{" "}
             <span className="text-foreground font-bold">{score}%</span> weighted success rate
             {correctionFactor != null && Math.abs(correctionFactor - 1) > 0.01
