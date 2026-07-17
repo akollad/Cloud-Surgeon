@@ -151,23 +151,23 @@ export function Sidebar({ open, onClose, collapsed, onToggleCollapse }: SidebarP
               <h2 className="font-mono text-[11px] uppercase font-bold tracking-wider">Trigger Incident</h2>
             </div>
             <div className="space-y-1.5">
-              <label className="text-[10px] uppercase font-mono text-muted-foreground">Scenario</label>
-              <Select value={scenario} onChange={(e) => setScenario(e.target.value)}>
+              <label className="text-[10px] uppercase font-mono text-sidebar-foreground/70">Scenario</label>
+              <Select value={scenario} onChange={(e) => setScenario(e.target.value)} className="bg-sidebar-accent/30 border-sidebar-border text-sidebar-foreground">
                 {PRESET_SCENARIOS.map((s) => <option key={s} value={s}>{s}</option>)}
               </Select>
             </div>
             <div className="space-y-1.5">
-              <label className="text-[10px] uppercase font-mono text-muted-foreground">Custom Alert Text</label>
+              <label className="text-[10px] uppercase font-mono text-sidebar-foreground/70">Custom Alert Text</label>
               <Textarea
                 value={customText}
                 onChange={(e) => setCustomText(e.target.value)}
                 placeholder="Paste PagerDuty payload or text here..."
-                className="font-mono text-xs h-16"
+                className="font-mono text-xs h-16 bg-sidebar-accent/30 border-sidebar-border text-sidebar-foreground placeholder:text-sidebar-foreground/30"
               />
             </div>
             <div className="space-y-1.5">
-              <label className="text-[10px] uppercase font-mono text-muted-foreground">Chaos Engineering</label>
-              <Select value={chaosMode} onChange={(e) => setChaosMode(e.target.value)}>
+              <label className="text-[10px] uppercase font-mono text-sidebar-foreground/70">Chaos Engineering</label>
+              <Select value={chaosMode} onChange={(e) => setChaosMode(e.target.value)} className="bg-sidebar-accent/30 border-sidebar-border text-sidebar-foreground">
                 <option value="none">None</option>
                 <option value="latency">Network latency (500ms)</option>
                 <option value="partition">DB partition (2 timeouts)</option>
@@ -187,7 +187,7 @@ export function Sidebar({ open, onClose, collapsed, onToggleCollapse }: SidebarP
               <Activity className="w-3.5 h-3.5" />
               <h2 className="font-mono text-[11px] uppercase font-bold tracking-wider">Predictive Injection</h2>
             </div>
-            <Select value={predictiveScenario} onChange={(e) => setPredictiveScenario(e.target.value)}>
+            <Select value={predictiveScenario} onChange={(e) => setPredictiveScenario(e.target.value)} className="bg-sidebar-accent/30 border-sidebar-border text-sidebar-foreground">
               {PREDICTIVE_SCENARIOS.map((s) => <option key={s} value={s}>{s}</option>)}
             </Select>
             <Button
@@ -209,8 +209,8 @@ export function Sidebar({ open, onClose, collapsed, onToggleCollapse }: SidebarP
               <h2 className="font-mono text-[11px] uppercase font-bold tracking-wider">CloudWatch Webhook</h2>
             </div>
             <div className="space-y-1.5">
-              <Input value={cwAlarm} onChange={(e) => setCwAlarm(e.target.value)} placeholder="Alarm Name" className="text-xs" />
-              <Input value={cwReason} onChange={(e) => setCwReason(e.target.value)} placeholder="NewStateReason" className="text-xs" />
+              <Input value={cwAlarm} onChange={(e) => setCwAlarm(e.target.value)} placeholder="Alarm Name" className="text-xs bg-sidebar-accent/30 border-sidebar-border text-sidebar-foreground placeholder:text-sidebar-foreground/30" />
+              <Input value={cwReason} onChange={(e) => setCwReason(e.target.value)} placeholder="NewStateReason" className="text-xs bg-sidebar-accent/30 border-sidebar-border text-sidebar-foreground placeholder:text-sidebar-foreground/30" />
             </div>
             <Button
               variant="outline"
@@ -226,7 +226,7 @@ export function Sidebar({ open, onClose, collapsed, onToggleCollapse }: SidebarP
 
           {/* System Ops */}
           <section className="space-y-2">
-            <div className="flex items-center gap-2 text-muted-foreground">
+            <div className="flex items-center gap-2 text-sidebar-foreground/70">
               <Server className="w-3.5 h-3.5" />
               <h2 className="font-mono text-[11px] uppercase font-bold tracking-wider">System Ops</h2>
             </div>

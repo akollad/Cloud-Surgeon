@@ -158,7 +158,7 @@ export default function StrategyMemory() {
                 </div>
               )}
 
-              <div className="pt-2 text-[10px] text-muted-foreground/40 uppercase tracking-widest text-center">
+              <div className="pt-2 text-[10px] text-muted-foreground uppercase tracking-widest text-center">
                 CockroachDB Serverless × AWS 2026
               </div>
             </div>

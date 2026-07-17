@@ -14,7 +14,6 @@ export default function Logs() {
   const [debouncedFilter, setDebouncedFilter] = useState("");
   const [page, setPage] = useState(1);
 
-  // Reset to page 1 when filter changes
   useEffect(() => { setPage(1); }, [debouncedFilter]);
 
   const { data: logs, isLoading, refetch, isRefetching } = useListExecutionLogs(
@@ -52,46 +51,44 @@ export default function Logs() {
         </div>
       </div>
 
-      {/* Table */}
-      <div className="border border-border bg-[#0a0a0a] rounded-sm overflow-x-auto">
-        <div className="max-h-[calc(100vh-260px)] overflow-y-auto">
-          <Table className="min-w-[700px] w-full">
-            <TableHeader className="sticky top-0 bg-[#0a0a0a] z-10 border-b border-border">
-              <TableRow className="hover:bg-transparent">
-                <TableHead className="w-[150px] whitespace-nowrap">Timestamp</TableHead>
-                <TableHead className="w-[100px] whitespace-nowrap">Incident ID</TableHead>
-                <TableHead className="w-[200px] whitespace-nowrap">Action</TableHead>
-                <TableHead>Result / Output</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {isLoading ? (
-                <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground font-mono">Querying logs...</TableCell></TableRow>
-              ) : paginated.length === 0 ? (
-                <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground font-mono">No logs found</TableCell></TableRow>
-              ) : (
-                paginated.map((log) => (
-                  <TableRow key={log.logId} className="border-b border-border/30 hover:bg-white/5">
-                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap align-top pt-3">
-                      {formatDate(log.createdAt)}
-                    </TableCell>
-                    <TableCell className="text-xs text-primary font-bold align-top pt-3 font-mono">
-                      {log.incidentId.split("-")[0]}
-                    </TableCell>
-                    <TableCell className="text-xs text-cyan-400 font-bold align-top pt-3 break-words max-w-[200px]">
-                      {log.actionTaken}
-                    </TableCell>
-                    <TableCell className="text-[11px] text-muted-foreground font-mono pb-3">
-                      <div className="bg-black/30 p-2 border border-white/5 rounded-sm max-h-[150px] overflow-y-auto whitespace-pre-wrap break-all">
-                        {log.result || "—"}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
+      {/* Table — no internal scroll; page naturally scrolls */}
+      <div className="border border-border bg-card rounded-sm overflow-x-auto">
+        <Table className="min-w-[700px] w-full">
+          <TableHeader className="border-b border-border">
+            <TableRow className="hover:bg-transparent">
+              <TableHead className="w-[150px] whitespace-nowrap">Timestamp</TableHead>
+              <TableHead className="w-[100px] whitespace-nowrap">Incident ID</TableHead>
+              <TableHead className="w-[200px] whitespace-nowrap">Action</TableHead>
+              <TableHead>Result / Output</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {isLoading ? (
+              <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground font-mono">Querying logs...</TableCell></TableRow>
+            ) : paginated.length === 0 ? (
+              <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground font-mono">No logs found</TableCell></TableRow>
+            ) : (
+              paginated.map((log) => (
+                <TableRow key={log.logId} className="border-b border-border/30 hover:bg-muted/20">
+                  <TableCell className="text-xs text-muted-foreground whitespace-nowrap align-top pt-3">
+                    {formatDate(log.createdAt)}
+                  </TableCell>
+                  <TableCell className="text-xs text-primary font-bold align-top pt-3 font-mono">
+                    {log.incidentId.split("-")[0]}
+                  </TableCell>
+                  <TableCell className="text-xs text-cyan-400 font-bold align-top pt-3 break-words max-w-[200px]">
+                    {log.actionTaken}
+                  </TableCell>
+                  <TableCell className="text-[11px] text-muted-foreground font-mono pb-3">
+                    <div className="bg-muted/30 p-2 border border-border/40 rounded-sm max-h-[150px] overflow-y-auto whitespace-pre-wrap break-all">
+                      {log.result || "—"}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
         <div className="px-4 pb-3">
           <Paginator
             page={page}

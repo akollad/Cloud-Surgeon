@@ -335,12 +335,12 @@ export default function DecisionTrace() {
   return (
     <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-500 pb-12">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-border pb-4 flex-wrap gap-3">
-        <h1 className="text-2xl font-mono font-bold tracking-tighter uppercase text-foreground flex items-center">
-          <GitCommit className="mr-2 h-5 w-5 text-primary" />
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-border pb-4 gap-3">
+        <h1 className="text-xl sm:text-2xl font-mono font-bold tracking-tighter uppercase text-foreground flex items-center shrink-0">
+          <GitCommit className="mr-2 h-5 w-5 text-primary shrink-0" />
           Decision Trace
         </h1>
-        <div className="w-96">
+        <div className="w-full sm:w-80 min-w-0">
           <Select value={actualSelectedId} onChange={(e) => { setSelectedId(e.target.value); setActiveTab("execution"); }}>
             <option value="" disabled>Select an incident...</option>
             {incidents?.map(i => (
@@ -405,15 +405,17 @@ export default function DecisionTrace() {
           </div>
 
           {/* ── Right column with tabs ── */}
-          <div className="lg:col-span-2">
+          <div className="lg:col-span-2 min-w-0">
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList className="w-full">
-                <TabsTrigger value="execution"><Cpu className="w-3.5 h-3.5 mr-1.5" />Execution</TabsTrigger>
-                <TabsTrigger value="plan"><Zap className="w-3.5 h-3.5 mr-1.5" />Repair Plan</TabsTrigger>
-                <TabsTrigger value="graph"><GitBranch className="w-3.5 h-3.5 mr-1.5" />Causal Graph</TabsTrigger>
-                <TabsTrigger value="playbook"><BookOpen className="w-3.5 h-3.5 mr-1.5" />Playbook</TabsTrigger>
-                <TabsTrigger value="rollback"><RotateCcw className="w-3.5 h-3.5 mr-1.5" />Rollback</TabsTrigger>
-              </TabsList>
+              <div className="overflow-x-auto">
+                <TabsList className="w-full min-w-max">
+                  <TabsTrigger value="execution"><Cpu className="w-3.5 h-3.5 sm:mr-1.5" /><span className="hidden sm:inline">Execution</span></TabsTrigger>
+                  <TabsTrigger value="plan"><Zap className="w-3.5 h-3.5 sm:mr-1.5" /><span className="hidden sm:inline">Repair Plan</span></TabsTrigger>
+                  <TabsTrigger value="graph"><GitBranch className="w-3.5 h-3.5 sm:mr-1.5" /><span className="hidden sm:inline">Causal Graph</span></TabsTrigger>
+                  <TabsTrigger value="playbook"><BookOpen className="w-3.5 h-3.5 sm:mr-1.5" /><span className="hidden sm:inline">Playbook</span></TabsTrigger>
+                  <TabsTrigger value="rollback"><RotateCcw className="w-3.5 h-3.5 sm:mr-1.5" /><span className="hidden sm:inline">Rollback</span></TabsTrigger>
+                </TabsList>
+              </div>
 
               {/* ── Tab 1: Execution Trace ── */}
               <TabsContent value="execution">

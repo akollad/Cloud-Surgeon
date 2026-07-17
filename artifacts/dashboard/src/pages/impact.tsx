@@ -122,10 +122,10 @@ export default function Impact() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-mono font-bold text-cyan-400">
+            <div className="text-2xl lg:text-3xl font-mono font-bold text-cyan-400 truncate">
               {animMttr.toFixed(1)}m
             </div>
-            <div className="text-xs text-muted-foreground mt-1">
+            <div className="text-xs text-muted-foreground mt-1 truncate">
               vs {formatMin(toMin(mttr?.humanBaselineSeconds))} human baseline
             </div>
             {(mttr as any)?.outlierCount > 0 && (
@@ -143,7 +143,7 @@ export default function Impact() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-mono font-bold text-green-400">
+            <div className="text-2xl lg:text-3xl font-mono font-bold text-green-400">
               {animReduc.toFixed(1)}%
             </div>
             <div className="text-xs text-muted-foreground mt-1">Faster resolution time</div>
@@ -157,7 +157,7 @@ export default function Impact() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-mono font-bold text-primary">
+            <div className="text-2xl lg:text-3xl font-mono font-bold text-primary truncate">
               ${animSaved.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </div>
             <div className="text-xs text-muted-foreground mt-1">
@@ -173,7 +173,7 @@ export default function Impact() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-mono font-bold text-foreground">
+            <div className="text-2xl lg:text-3xl font-mono font-bold text-foreground">
               {Math.round(animResolved)}
             </div>
             <div className="text-xs text-muted-foreground mt-1">
@@ -266,8 +266,8 @@ export default function Impact() {
         <Card>
           <CardHeader className="border-b border-border/50 pb-3">
             <CardTitle>MTTR by Strategy</CardTitle>
-            <p className="text-xs text-muted-foreground mt-1">
-              Incidents resolved in &gt;30 min excluded (stuck during server restarts).
+            <p className="text-xs text-muted-foreground mt-1 leading-snug">
+              Incidents &gt;30 min excluded (stuck incidents).
             </p>
           </CardHeader>
           <CardContent className="p-4 space-y-5">

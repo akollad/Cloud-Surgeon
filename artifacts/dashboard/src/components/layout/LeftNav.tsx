@@ -130,7 +130,7 @@ export function LeftNav({ open, onClose, collapsed, onToggleCollapse }: LeftNavP
         collapsed ? "py-3 justify-center" : "px-4 py-3 justify-between"
       )}>
         {!collapsed && (
-          <p className="text-[9px] font-mono text-sidebar-foreground/30 uppercase tracking-widest truncate">
+          <p className="text-[9px] font-mono text-sidebar-foreground/60 uppercase tracking-widest truncate">
             CockroachDB × AWS 2026
           </p>
         )}

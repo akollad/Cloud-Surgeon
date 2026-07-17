@@ -37,7 +37,7 @@ export default function Calibration() {
   const paginated = allRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6 animate-in fade-in duration-500 pb-12">
+    <div className="w-full max-w-5xl mx-auto space-y-6 animate-in fade-in duration-500 pb-12">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-border pb-4 gap-3">
         <h1 className="text-xl sm:text-2xl font-mono font-bold tracking-tighter uppercase text-foreground flex items-center">
           <ShieldAlert className="mr-2 h-5 w-5 text-primary shrink-0" />
@@ -57,15 +57,15 @@ export default function Calibration() {
       <Card>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
-            <Table className="min-w-[600px]">
+            <Table className="min-w-[480px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Strategy</TableHead>
-                  <TableHead className="text-right">Predicted</TableHead>
-                  <TableHead className="text-right">Observed</TableHead>
-                  <TableHead className="text-right">Correction</TableHead>
-                  <TableHead className="text-right">Sample</TableHead>
-                  <TableHead className="text-right whitespace-nowrap">Last Calibrated</TableHead>
+                  <TableHead className="text-right whitespace-nowrap">Predicted</TableHead>
+                  <TableHead className="text-right whitespace-nowrap">Observed</TableHead>
+                  <TableHead className="text-right whitespace-nowrap">Correction</TableHead>
+                  <TableHead className="text-right whitespace-nowrap">N</TableHead>
+                  <TableHead className="text-right whitespace-nowrap hidden sm:table-cell">Last Calibrated</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -91,7 +91,7 @@ export default function Calibration() {
                         ) : "—"}
                       </TableCell>
                       <TableCell className="text-right font-mono text-xs text-muted-foreground">{cal.predictionCount ?? "—"}</TableCell>
-                      <TableCell className="text-right font-mono text-xs text-muted-foreground whitespace-nowrap">
+                      <TableCell className="text-right font-mono text-xs text-muted-foreground whitespace-nowrap hidden sm:table-cell">
                         {formatDate(cal.lastRecalculatedAt)}
                       </TableCell>
                     </TableRow>
