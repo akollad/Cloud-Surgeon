@@ -2111,11 +2111,12 @@ export async function runRollbackLoop(incidentId: string): Promise<{
     [JSON.stringify(rollbackResult), incidentId],
   ).catch(() => {});
 
-  // 4. Update incident status — raw SQL so no enum migration needed
+  // 4. Update incident status + step — raw SQL so no enum migration needed
   await pool.query(
     `UPDATE incident_state
-     SET    status     = 'ROLLED_BACK',
-            updated_at = now()
+     SET    status       = 'ROLLED_BACK',
+            current_step = 'ROLLBACK_COMPLETE',
+            updated_at   = now()
      WHERE  incident_id = $1`,
     [incidentId],
   ).catch(() => {});

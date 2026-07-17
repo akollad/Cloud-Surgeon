@@ -205,7 +205,10 @@ router.post("/incidents/:incidentId/reject", async (req, res): Promise<void> => 
   }
 
   const context = incident.contextJson as IncidentContext;
-  context.routingMode = "REJECTED";
+  context.originalRoutingMode = context.routingMode;   // preserve "PENDING_APPROVAL"
+  context.humanApproved       = false;
+  context.rejectedAt          = new Date().toISOString();
+  context.routingMode         = "REJECTED";
   context.finalResponse = `FAILED [rejected by human]: Operator decided not to apply strategy '${context.strategyName ?? "unknown"}'. Incident closed without corrective action.`;
 
   const [updated] = await db
@@ -284,7 +287,11 @@ router.post("/incidents/:incidentId/correct", async (req, res): Promise<void> =>
   const context = incident.contextJson as IncidentContext;
   const originalStrategy = context.strategyName ?? "unknown";
 
-  context.routingMode = "REJECTED";
+  context.originalRoutingMode  = context.routingMode;   // preserve "PENDING_APPROVAL"
+  context.humanApproved        = false;
+  context.rejectedAt           = new Date().toISOString();
+  context.correctedStrategy    = suggestedStrategy;      // operator's suggested alternative
+  context.routingMode          = "REJECTED";
   context.finalResponse =
     `HUMAN_CORRECTED: Operator rejected strategy '${originalStrategy}' ` +
     `and suggested '${suggestedStrategy}'. ` +

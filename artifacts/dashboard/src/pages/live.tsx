@@ -3,7 +3,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useListIncidents } from "@workspace/api-client-react";
 import { Activity, Terminal, AlertTriangle, ShieldCheck, Database } from "lucide-react";
-import { formatDate } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 
 interface SSEEvent {
   type: "connected" | "heartbeat" | "execution_log" | "agent_handoff" | "incident_status" | string;
