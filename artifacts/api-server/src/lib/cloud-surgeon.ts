@@ -1418,16 +1418,58 @@ async function callTool(
     return callMcpTool(toolName, toolInput);
   }
   if (toolName === "verify_resolution") {
-    // Internal Auditor tool — local evaluation, not via MCP
-    const repairVerified = Boolean(toolInput.repairVerified);
+    // Internal Auditor tool — local evaluation, not via MCP.
+    //
+    // Three distinct verdicts:
+    //   PASS               — real mutation executed + success (e.g. PUT_FUNCTION_CONCURRENCY)
+    //   NO_ACTION_REQUIRED — success but only a describe was performed; service was already healthy
+    //   FAIL               — tool returned success: false
+    //
+    // This prevents describe-only calls (DESCRIBE_FUNCTION_CONCURRENCY, DESCRIBE_SERVICES …)
+    // from being indistinguishable from actual repairs in the playbook audit trail.
+    const repairVerified  = Boolean(toolInput.repairVerified);
+    const actionPerformed = Boolean(toolInput.actionPerformed);   // true = real mutation ran
+
+    // Canonical set of describe-only actionTaken values (passed through for transparency).
+    const describeActions = new Set([
+      "DESCRIBE_FUNCTION",
+      "DESCRIBE_FUNCTION_CONCURRENCY",
+      "DESCRIBE_SERVICES",
+      "DESCRIBE_DB_INSTANCES",
+      "AWS_API_CALL",           // generic fallback that never mutates
+    ]);
+    const actionTaken = String(toolInput.actionTaken ?? "");
+    const isDescribeOnly = !actionPerformed || describeActions.has(actionTaken);
+
+    let verdict: string;
+    let verified: boolean;
+    let message: string;
+
+    if (!repairVerified) {
+      verdict  = "FAIL";
+      verified = false;
+      message  = "Repair output indicates failure. Escalation to on-call team recommended.";
+    } else if (isDescribeOnly) {
+      verdict  = "NO_ACTION_REQUIRED";
+      verified = true;   // incident can close — service was already healthy
+      message  =
+        `No infrastructure change was made (${actionTaken || "describe only"}). ` +
+        "Service state confirmed healthy — no repair action was necessary. " +
+        "If throttling persists, a quota increase via AWS Support may be required.";
+    } else {
+      verdict  = "PASS";
+      verified = true;
+      message  = `Repair action confirmed (${actionTaken}). Incident can be closed.`;
+    }
+
     return {
-      verified: repairVerified,
-      verdict: repairVerified ? "PASS" : "FAIL",
+      verified,
+      verdict,
+      actionPerformed,
+      actionTaken,
       auditTime: new Date().toISOString(),
       strategyUsed: toolInput.strategyUsed,
-      message: repairVerified
-        ? "Repair output indicates success. Incident can be closed."
-        : "Repair output indicates failure. Escalation recommended.",
+      message,
     };
   }
   return { success: false, error: `Unknown tool: ${toolName}` };
@@ -1914,10 +1956,27 @@ export async function runAgentLoop(
     );
 
     const repairOutput = context.turns[1]?.toolOutput as Record<string, unknown>;
-    const repairSuccess = Boolean(repairOutput?.success);
+    const repairSuccess  = Boolean(repairOutput?.success);
+    const repairAction   = String(repairOutput?.actionTaken ?? "");
+
+    // Canonical real-mutation actions — anything else is considered describe-only.
+    const MUTATION_ACTIONS = new Set([
+      "PUT_FUNCTION_CONCURRENCY",
+      "UPDATE_SERVICE",
+      "FORCE_NEW_DEPLOYMENT",
+      "REBOOT_DB_INSTANCE",
+      "MODIFY_DB_INSTANCE",
+      "RESTORE_DB_PARAMETER_GROUP",
+      "CHANGEFEED_RESTART",
+      "CRDB_SKILL_REPAIR",
+    ]);
+    const actionPerformed = MUTATION_ACTIONS.has(repairAction);
+
     const toolInput = {
       incidentId: incident.incidentId,
       repairVerified: repairSuccess,
+      actionPerformed,
+      actionTaken: repairAction,
       strategyUsed: strategyName,
     };
     const { thought, source: thoughtSource } = await invokeLLMThought(alertText, 2, repairOutput ?? null, { strategyName, repairSuccess });
@@ -1941,9 +2000,12 @@ export async function runAgentLoop(
 
     const finalStatus = repairSuccess ? "RESOLVED" : "FAILED";
     const routingLabel = context.routingMode ?? "AUTONOMOUS";
-    context.finalResponse = repairSuccess
-      ? `RESOLVED [${strategyName}] [${routingLabel}]: Diagnostic confirmed by Diagnostician, repair applied by Remediator, closure validated by Auditor.`
-      : `FAILED [${strategyName}]: Repair failed — escalation to on-call team recommended by Auditor.`;
+    const auditVerdict = String((toolOutput as Record<string, unknown>).verdict ?? "PASS");
+    context.finalResponse = !repairSuccess
+      ? `FAILED [${strategyName}]: Repair failed — escalation to on-call team recommended by Auditor.`
+      : auditVerdict === "NO_ACTION_REQUIRED"
+        ? `RESOLVED [${strategyName}] [${routingLabel}]: Service confirmed healthy — no repair action was required. ${(toolOutput as Record<string, unknown>).message ?? ""}`
+        : `RESOLVED [${strategyName}] [${routingLabel}]: Diagnostic confirmed by Diagnostician, repair applied by Remediator (${repairAction}), closure validated by Auditor.`;
 
     current = await persistWithChaosRetry(
       incident.incidentId,
