@@ -118,11 +118,20 @@ export default function LiveDiagnostic() {
                   </span>
                   <Badge variant={inc.status.toLowerCase() as any}>{inc.status}</Badge>
                 </div>
-                <div className="p-4 space-y-3">
-                  <p className="font-mono text-sm leading-tight text-foreground truncate">{inc.alertFingerprint}</p>
-                  <div className="flex justify-between items-center text-xs font-mono text-muted-foreground">
-                    <span>{inc.contextJson?.routingMode || "ROUTING_PENDING"}</span>
-                    <span>{inc.contextJson?.strategyName || "NO_STRATEGY"}</span>
+                <div className="p-4 space-y-3 min-w-0">
+                  {/* Fingerprint — truncated with full value on hover */}
+                  <p className="font-mono text-xs leading-tight text-foreground/70 truncate min-w-0"
+                     title={inc.alertFingerprint}>
+                    {inc.alertFingerprint}
+                  </p>
+                  {/* Routing mode + strategy — each truncates independently */}
+                  <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground min-w-0">
+                    <span className="shrink-0 border border-border/50 px-1 rounded-sm text-[10px] uppercase tracking-wide">
+                      {inc.contextJson?.routingMode || "PENDING"}
+                    </span>
+                    <span className="truncate min-w-0 text-cyan-400/80">
+                      {inc.contextJson?.strategyName || "NO_STRATEGY"}
+                    </span>
                   </div>
                 </div>
               </div>

@@ -91,13 +91,21 @@ export default function Incidents() {
                 className="border border-yellow-500/30 bg-background p-4 flex flex-col gap-4 font-mono text-sm"
               >
                 <div className="space-y-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-muted-foreground shrink-0">{inc.incidentId.split("-")[0]}</span>
-                    <span className="text-foreground font-bold break-all">{inc.alertFingerprint}</span>
+                  {/* ID row */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground shrink-0 text-xs">{inc.incidentId.split("-")[0]}</span>
+                    <span className="text-muted-foreground/50 text-xs shrink-0">·</span>
+                    <span className="text-foreground/60 text-[10px] font-mono truncate min-w-0" title={inc.alertFingerprint}>
+                      {inc.alertFingerprint}
+                    </span>
                   </div>
-                  <div className="text-xs text-muted-foreground">
-                    Proposed: <span className="text-cyan-400">{inc.contextJson?.strategyName || "None"}</span>
-                    &nbsp;(WR: {inc.contextJson?.winRate ? (inc.contextJson.winRate * 100).toFixed(1) + "%" : "N/A"})
+                  {/* Proposed strategy */}
+                  <div className="text-xs text-muted-foreground flex flex-wrap items-center gap-x-1 gap-y-0.5">
+                    <span>Proposed:</span>
+                    <span className="text-cyan-400 break-all">{inc.contextJson?.strategyName || "None"}</span>
+                    <span className="shrink-0">
+                      (WR: {inc.contextJson?.winRate != null ? (Number(inc.contextJson.winRate) * 100).toFixed(1) + "%" : "N/A"})
+                    </span>
                   </div>
                 </div>
                 <div className="flex flex-col sm:flex-row sm:items-center gap-2">
