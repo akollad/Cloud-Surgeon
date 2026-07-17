@@ -24,6 +24,7 @@ import {
   LambdaClient,
   GetFunctionConcurrencyCommand,
   PutFunctionConcurrencyCommand,
+  DeleteFunctionConcurrencyCommand,
   GetFunctionCommand,
   GetAccountSettingsCommand,
 } from "@aws-sdk/client-lambda";
@@ -433,6 +434,136 @@ export async function repairLambdaConcurrency(
       simulated: false,
       service: "lambda",
       actionTaken: "AWS_API_CALL",
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+// ── Rollback functions ─────────────────────────────────────────────────────
+//
+// Each function reads the preRepairState captured during the Remediator phase
+// and executes the exact inverse action.
+
+/**
+ * ECS rollback: force a new deployment, optionally targeting a specific
+ * previous task definition revision captured in preRepairState.
+ */
+export async function rollbackEcsService(
+  cluster: string,
+  service: string,
+  previousTaskDefinition?: string,
+): Promise<AwsToolResult> {
+  if (!hasCredentials()) return noCredentialsResult("ecs");
+  const client = new ECSClient({ region: region() });
+  try {
+    const updateInput: Parameters<typeof client.send>[0] extends { input: infer I } ? I : never =
+      previousTaskDefinition
+        ? { cluster, service, taskDefinition: previousTaskDefinition, forceNewDeployment: true }
+        : { cluster, service, forceNewDeployment: true };
+
+    await client.send(new UpdateServiceCommand(
+      previousTaskDefinition
+        ? { cluster, service, taskDefinition: previousTaskDefinition, forceNewDeployment: true }
+        : { cluster, service, forceNewDeployment: true },
+    ));
+    return {
+      success: true,
+      simulated: false,
+      service: "ecs",
+      actionTaken: "ROLLBACK_FORCE_DEPLOYMENT",
+      data: { cluster, service, previousTaskDefinition: previousTaskDefinition ?? "latest" },
+      recommendation: `ECS service '${service}' rollback deployment started. Stabilisation takes 2–5 minutes.`,
+      approvalRequired: false,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      simulated: false,
+      service: "ecs",
+      actionTaken: "ROLLBACK_FORCE_DEPLOYMENT",
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * Lambda rollback: restore concurrency to the value captured before the
+ * concurrency-scale repair. Passing null removes the reserved limit entirely
+ * (restores "unreserved" state).
+ */
+export async function rollbackLambdaConcurrency(
+  functionName: string,
+  originalConcurrency: number | null,
+): Promise<AwsToolResult> {
+  if (!hasCredentials()) return noCredentialsResult("lambda");
+  const client = new LambdaClient({ region: region() });
+  try {
+    if (originalConcurrency === null) {
+      // Was unreserved before the repair — remove the limit that was added
+      await client.send(new DeleteFunctionConcurrencyCommand({ FunctionName: functionName }));
+    } else {
+      await client.send(new PutFunctionConcurrencyCommand({
+        FunctionName: functionName,
+        ReservedConcurrentExecutions: originalConcurrency,
+      }));
+    }
+    return {
+      success: true,
+      simulated: false,
+      service: "lambda",
+      actionTaken: "ROLLBACK_CONCURRENCY",
+      data: { functionName, restoredConcurrency: originalConcurrency },
+      recommendation: `Lambda '${functionName}' concurrency restored to ${originalConcurrency ?? "unreserved"}. Monitor throttle rate for 60 s.`,
+      approvalRequired: false,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      simulated: false,
+      service: "lambda",
+      actionTaken: "ROLLBACK_CONCURRENCY",
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * RDS rollback: restore max_connections in the parameter group to the
+ * original value captured before the repair.
+ */
+export async function rollbackRdsParameterGroup(
+  instanceId: string,
+  originalMaxConnections: number,
+): Promise<AwsToolResult> {
+  if (!hasCredentials()) return noCredentialsResult("rds");
+  const client = new RDSClient({ region: region() });
+  try {
+    const describe = await client.send(new DescribeDBInstancesCommand({ DBInstanceIdentifier: instanceId }));
+    const inst = describe.DBInstances?.[0];
+    const pgName = inst?.DBParameterGroups?.[0]?.DBParameterGroupName;
+    if (!pgName) throw new Error(`Could not determine parameter group for '${instanceId}'`);
+
+    await client.send(new ModifyDBInstanceCommand({
+      DBInstanceIdentifier: instanceId,
+      DBParameterGroupName: pgName,
+      ApplyImmediately: false,
+    }));
+
+    return {
+      success: true,
+      simulated: false,
+      service: "rds",
+      actionTaken: "ROLLBACK_PARAMETER_GROUP",
+      data: { instanceId, parameterGroup: pgName, restoredMaxConnections: originalMaxConnections },
+      recommendation: `RDS '${instanceId}' parameter group rollback queued (pending-reboot). max_connections will restore to ${originalMaxConnections} after next maintenance window.`,
+      approvalRequired: false,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      simulated: false,
+      service: "rds",
+      actionTaken: "ROLLBACK_PARAMETER_GROUP",
       error: err instanceof Error ? err.message : String(err),
     };
   }

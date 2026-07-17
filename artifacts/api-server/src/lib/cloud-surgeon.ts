@@ -835,9 +835,14 @@ export async function createRollbackPlansTable(): Promise<void> {
       rollback_steps           TEXT         NOT NULL DEFAULT '',
       estimated_rollback_time  VARCHAR(50),
       risk_level               VARCHAR(20)  NOT NULL DEFAULT 'low',
-      created_at               TIMESTAMPTZ  NOT NULL DEFAULT now()
+      created_at               TIMESTAMPTZ  NOT NULL DEFAULT now(),
+      rolled_back_at           TIMESTAMPTZ,
+      rollback_result          JSONB
     )
   `);
+  // Idempotent: add new columns if they don't exist yet (existing deployments)
+  await pool.query(`ALTER TABLE rollback_plans ADD COLUMN IF NOT EXISTS rolled_back_at TIMESTAMPTZ`).catch(() => {});
+  await pool.query(`ALTER TABLE rollback_plans ADD COLUMN IF NOT EXISTS rollback_result JSONB`).catch(() => {});
 }
 
 // ── Layer 1: AI-generated repair playbooks ────────────────────────────────
@@ -1409,6 +1414,9 @@ async function callTool(
   if (toolName === "crdb_skill_repair") {
     return callMcpTool(toolName, toolInput);
   }
+  if (toolName === "rollback_service") {
+    return callMcpTool(toolName, toolInput);
+  }
   if (toolName === "verify_resolution") {
     // Internal Auditor tool — local evaluation, not via MCP
     const repairVerified = Boolean(toolInput.repairVerified);
@@ -1799,11 +1807,26 @@ export async function runAgentLoop(
     context.repairPlan = repairPlan;
 
     // ── Feature 3: Capture pre-repair state for rollback ──────────────────
+    // Pull concrete infrastructure values from the Diagnostician's tool output
+    // so the rollback_service tool can invert the exact change that was made.
+    const diagOutput = (context.turns[0]?.toolOutput ?? {}) as Record<string, unknown>;
+    const diagData   = (diagOutput.data ?? {}) as Record<string, unknown>;
+
     const preRepairState: Record<string, unknown> = {
       serviceName,
       strategy: strategyName,
       routingMode: context.routingMode,
       capturedAt: new Date().toISOString(),
+      // ECS — desired count + task definition before the restart
+      desiredCount:            diagData.desiredCount,
+      runningCount:            diagData.runningCount,
+      previousTaskDefinition:  (diagData.deployments as Array<Record<string, unknown>>)?.[0]?.taskDefinition,
+      // Lambda — reserved concurrency before scale-up
+      functionName:            diagData.functionName ?? (strategyName === "lambda_concurrency_scale" ? serviceName : undefined),
+      originalConcurrency:     diagData.previousReservedConcurrency ?? diagData.reservedConcurrency ?? null,
+      // RDS — instance id + max_connections before parameter group change
+      rdsInstanceId:           process.env.RDS_INSTANCE_IDENTIFIER ?? diagData.instanceId,
+      originalMaxConnections:  diagData.originalMaxConnections ?? diagData.maxConnections,
     };
 
     // ── CockroachDB Agent Skills routing ──────────────────────────────────
@@ -1958,4 +1981,86 @@ export async function runAgentLoop(
   }
 
   return current;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ROLLBACK LOOP — human-triggered reversal of a completed repair
+//
+// Flow:
+//  1. Read rollback_plans row for this incident (contains pre_repair_state)
+//  2. Call rollback_service MCP tool with strategy + preRepairState
+//  3. Persist result in rollback_plans.rollback_result + rolled_back_at
+//  4. Mark incident status = ROLLED_BACK in incident_state
+// ════════════════════════════════════════════════════════════════════════════
+
+export async function runRollbackLoop(incidentId: string): Promise<{
+  success: boolean;
+  result: Record<string, unknown>;
+  message: string;
+}> {
+  // 1. Load the rollback plan
+  const planRows = await pool.query<{
+    strategy_name: string;
+    pre_repair_state: unknown;
+    risk_level: string;
+  }>(
+    `SELECT strategy_name, pre_repair_state, risk_level
+     FROM   rollback_plans
+     WHERE  incident_id = $1
+     LIMIT  1`,
+    [incidentId],
+  );
+
+  if (planRows.rows.length === 0) {
+    return {
+      success: false,
+      result: {},
+      message: "No rollback plan found — incident may not have reached the Remediator phase yet.",
+    };
+  }
+
+  const plan = planRows.rows[0]!;
+  const preRepairState = (plan.pre_repair_state ?? {}) as Record<string, unknown>;
+
+  // 2. Execute the rollback via the MCP tool
+  let rollbackResult: Record<string, unknown>;
+  try {
+    rollbackResult = await callMcpTool("rollback_service", {
+      strategy: plan.strategy_name,
+      preRepairState,
+    });
+  } catch (err) {
+    rollbackResult = {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+
+  const succeeded = Boolean(rollbackResult.success);
+
+  // 3. Persist execution result in rollback_plans
+  await pool.query(
+    `UPDATE rollback_plans
+     SET    rolled_back_at  = now(),
+            rollback_result = $1
+     WHERE  incident_id     = $2`,
+    [JSON.stringify(rollbackResult), incidentId],
+  ).catch(() => {});
+
+  // 4. Update incident status — raw SQL so no enum migration needed
+  await pool.query(
+    `UPDATE incident_state
+     SET    status     = 'ROLLED_BACK',
+            updated_at = now()
+     WHERE  incident_id = $1`,
+    [incidentId],
+  ).catch(() => {});
+
+  return {
+    success: succeeded,
+    result: rollbackResult,
+    message: succeeded
+      ? `Rollback executed successfully for strategy '${plan.strategy_name}'.`
+      : `Rollback attempted but reported failure — check result for details.`,
+  };
 }

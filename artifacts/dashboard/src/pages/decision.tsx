@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Select } from "@/components/ui/input";
@@ -284,22 +284,53 @@ function RiskBadge({ level }: { level: string }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────
 
+type RollbackExecState = "idle" | "confirming" | "executing" | "done" | "error";
+
 export default function DecisionTrace() {
   const { data: incidents } = useListIncidents({ query: { refetchInterval: 5000 } });
   const [selectedId, setSelectedId] = useState<string>("");
   const [activeTab, setActiveTab] = useState("execution");
 
+  // Rollback execution state
+  const [rollbackState, setRollbackState] = useState<RollbackExecState>("idle");
+  const [rollbackExecResult, setRollbackExecResult] = useState<Record<string, unknown> | null>(null);
+
   const actualSelectedId = selectedId || (incidents?.[0]?.incidentId ?? "");
 
-  const { data: incident } = useGetIncident(actualSelectedId, { query: { enabled: !!actualSelectedId } });
+  const { data: incident, refetch: refetchIncident } = useGetIncident(actualSelectedId, { query: { enabled: !!actualSelectedId } });
   const { data: chain } = useGetIncidentCausalChain(actualSelectedId, { query: { enabled: !!actualSelectedId } });
   const { data: handoffs } = useGetIncidentHandoffs(actualSelectedId, { query: { enabled: !!actualSelectedId } });
   const { data: playbook } = useGetIncidentPlaybook(actualSelectedId, { query: { enabled: !!actualSelectedId } });
-  const { data: rollbackPlan } = useGetIncidentRollbackPlan(actualSelectedId, { query: { enabled: !!actualSelectedId } });
+  const { data: rollbackPlan, refetch: refetchRollbackPlan } = useGetIncidentRollbackPlan(actualSelectedId, { query: { enabled: !!actualSelectedId } });
 
   const ctx = incident?.contextJson as Record<string, unknown> | undefined;
   const repairPlan = ctx?.repairPlan as RepairPlan | undefined;
   const rollbackInfo = ctx?.rollbackInfo as RollbackInfo | undefined;
+
+  const executeRollback = useCallback(async () => {
+    if (!actualSelectedId) return;
+    setRollbackState("executing");
+    setRollbackExecResult(null);
+    try {
+      const apiKey = import.meta.env.VITE_API_KEY ?? "";
+      const res = await fetch(`/api/incidents/${actualSelectedId}/rollback`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(apiKey ? { "X-API-Key": apiKey } : {}),
+        },
+      });
+      const data = await res.json() as Record<string, unknown>;
+      setRollbackExecResult(data);
+      setRollbackState(data.success ? "done" : "error");
+      // Refresh the incident and rollback plan to reflect ROLLED_BACK status
+      void refetchIncident();
+      void refetchRollbackPlan();
+    } catch (err) {
+      setRollbackExecResult({ error: err instanceof Error ? err.message : String(err) });
+      setRollbackState("error");
+    }
+  }, [actualSelectedId, refetchIncident, refetchRollbackPlan]);
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-500 pb-12">
@@ -583,11 +614,71 @@ export default function DecisionTrace() {
               <TabsContent value="rollback">
                 <Card>
                   <CardHeader className="pb-3 border-b border-border/50 bg-muted/20">
-                    <CardTitle className="text-foreground flex items-center gap-2">
-                      <RotateCcw className="w-4 h-4 text-orange-400" /> Rollback Policy
+                    <CardTitle className="text-foreground flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-2">
+                        <RotateCcw className="w-4 h-4 text-orange-400" /> Rollback Policy
+                      </span>
+                      {/* Execute Rollback button — only shown when a plan exists and incident hasn't been rolled back yet */}
+                      {(rollbackPlan || rollbackInfo) && incident?.status !== "ROLLED_BACK" && (
+                        <div className="flex items-center gap-2">
+                          {rollbackState === "idle" && (
+                            <button
+                              onClick={() => setRollbackState("confirming")}
+                              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono font-bold rounded border border-orange-400/40 text-orange-400 bg-orange-400/5 hover:bg-orange-400/15 transition-colors"
+                            >
+                              <RotateCcw className="w-3 h-3" /> Execute Rollback
+                            </button>
+                          )}
+                          {rollbackState === "confirming" && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-yellow-400 font-mono">Confirm rollback?</span>
+                              <button
+                                onClick={() => void executeRollback()}
+                                className="px-2 py-1 text-xs font-mono font-bold rounded border border-red-500/50 text-red-400 bg-red-500/10 hover:bg-red-500/20 transition-colors"
+                              >Yes, rollback</button>
+                              <button
+                                onClick={() => setRollbackState("idle")}
+                                className="px-2 py-1 text-xs font-mono rounded border border-border text-muted-foreground hover:bg-muted/30 transition-colors"
+                              >Cancel</button>
+                            </div>
+                          )}
+                          {rollbackState === "executing" && (
+                            <span className="flex items-center gap-1.5 text-xs font-mono text-orange-400 animate-pulse">
+                              <RotateCcw className="w-3 h-3 animate-spin" /> Executing rollback…
+                            </span>
+                          )}
+                          {rollbackState === "done" && (
+                            <span className="flex items-center gap-1.5 text-xs font-mono text-green-400">
+                              <CheckCircle className="w-3 h-3" /> Rolled back
+                            </span>
+                          )}
+                          {rollbackState === "error" && (
+                            <span className="flex items-center gap-1.5 text-xs font-mono text-red-400">
+                              <AlertTriangle className="w-3 h-3" /> Rollback failed — see result below
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {incident?.status === "ROLLED_BACK" && (
+                        <span className="flex items-center gap-1.5 text-xs font-mono text-green-400">
+                          <CheckCircle className="w-3 h-3" /> Already rolled back
+                        </span>
+                      )}
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="p-4">
+                    {/* Rollback execution result */}
+                    {rollbackExecResult && (
+                      <div className={`mb-4 p-3 rounded border text-xs font-mono ${rollbackState === "done" ? "border-green-500/30 bg-green-500/5 text-green-300" : "border-red-500/30 bg-red-500/5 text-red-300"}`}>
+                        <div className="font-bold mb-1">{rollbackState === "done" ? "✓ Rollback succeeded" : "✗ Rollback encountered an error"}</div>
+                        <div className="text-muted-foreground">{String(rollbackExecResult.message ?? rollbackExecResult.error ?? "")}</div>
+                        {rollbackExecResult.result && (
+                          <pre className="mt-2 text-[10px] text-muted-foreground overflow-x-auto whitespace-pre-wrap">
+                            {JSON.stringify(rollbackExecResult.result, null, 2)}
+                          </pre>
+                        )}
+                      </div>
+                    )}
                     {/* Prefer DB rollback plan, fallback to context_json.rollbackInfo */}
                     {rollbackPlan ? (
                       <div className="space-y-5 font-mono text-sm">

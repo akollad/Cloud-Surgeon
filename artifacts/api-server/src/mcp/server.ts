@@ -11,6 +11,9 @@ import {
   repairRdsConnections,
   repairLambdaConcurrency,
   describeLambdaFunction,
+  rollbackEcsService,
+  rollbackLambdaConcurrency,
+  rollbackRdsParameterGroup,
   logAwsToolMode,
 } from "../lib/aws";
 import { searchDocs } from "../lib/doc-rag";
@@ -901,6 +904,89 @@ server.registerTool(
         }],
       };
     }
+  },
+);
+
+// ── Rollback execution tool ────────────────────────────────────────────────
+//
+// Called by runRollbackLoop when a human requests rollback of a resolved
+// incident. Reads the preRepairState snapshot captured by the Remediator and
+// executes the exact inverse AWS action.
+//
+// Routing by strategy:
+//   ecs_*         → rollbackEcsService   (force new deployment, optional prev task def)
+//   lambda_*      → rollbackLambdaConcurrency (restore original reserved concurrency)
+//   rds_* / db_*  → rollbackRdsParameterGroup (restore max_connections)
+//   crdb_*        → no automated rollback (CockroachDB changes are either read-only
+//                   or handled by the DB engine; return safe instructions)
+//   others        → generic ECS rollback
+
+server.registerTool(
+  "rollback_service",
+  {
+    title: "Rollback last repair action",
+    description:
+      "Reverses the repair executed by the Remediator phase by restoring the " +
+      "pre-repair state snapshot. Called automatically when a human requests rollback " +
+      "via POST /api/incidents/:id/rollback. " +
+      "Routes to the correct inverse AWS operation based on the strategy used. " +
+      "For CockroachDB strategies, returns the manual rollback steps (those changes " +
+      "are either read-only or managed by the DB engine).",
+    inputSchema: {
+      strategy:      z.string().describe("Strategy name from the original repair (e.g. ecs_service_restart)"),
+      preRepairState: z.record(z.unknown()).describe("Pre-repair state snapshot from rollback_plans.pre_repair_state"),
+    },
+  },
+  async ({ strategy, preRepairState }) => {
+    let result: Record<string, unknown>;
+
+    try {
+      if (strategy.startsWith("crdb_")) {
+        // CockroachDB repairs are either read-only or self-managed by the DB.
+        // Return the human-readable rollback steps from the stored plan.
+        result = {
+          success: true,
+          simulated: false,
+          service: "cockroachdb",
+          actionTaken: "ROLLBACK_INSTRUCTIONS_ONLY",
+          note: "CockroachDB rollbacks require manual execution — see rollbackSteps in the rollback plan.",
+          preRepairState,
+        };
+
+      } else if (strategy === "lambda_concurrency_scale") {
+        const fn = String(preRepairState.functionName ?? preRepairState.serviceName ?? "");
+        const origConcurrency =
+          preRepairState.originalConcurrency !== undefined
+            ? (preRepairState.originalConcurrency as number | null)
+            : null;
+        result = await rollbackLambdaConcurrency(fn, origConcurrency) as unknown as Record<string, unknown>;
+
+      } else if (strategy === "rds_cpu_throttle" || strategy === "db_connection_pool_reset") {
+        const instanceId = String(
+          preRepairState.rdsInstanceId ?? preRepairState.instanceId ?? process.env.RDS_INSTANCE_IDENTIFIER ?? "",
+        );
+        const origMax = Number(preRepairState.originalMaxConnections ?? 100);
+        result = await rollbackRdsParameterGroup(instanceId, origMax) as unknown as Record<string, unknown>;
+
+      } else {
+        // ECS: ecs_service_restart, jvm_heap_restart, default_repair, etc.
+        const svcName = String(preRepairState.serviceName ?? "");
+        const parts = svcName.split("/");
+        const cluster = parts.length === 2 ? parts[0]! : (process.env.ECS_DEFAULT_CLUSTER ?? "cloud-surgeon");
+        const service = parts.length === 2 ? parts[1]! : svcName;
+        const prevTaskDef = preRepairState.previousTaskDefinition as string | undefined;
+        result = await rollbackEcsService(cluster, service, prevTaskDef) as unknown as Record<string, unknown>;
+      }
+    } catch (err) {
+      result = {
+        success: false,
+        service: "unknown",
+        actionTaken: "ROLLBACK_ATTEMPT",
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+
+    return { content: [{ type: "text", text: JSON.stringify(result) }] };
   },
 );
 

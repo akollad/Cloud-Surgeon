@@ -18,6 +18,7 @@ import {
   recordHumanFeedback,
   releaseIncidentClaim,
   runAgentLoop,
+  runRollbackLoop,
   type IncidentContext,
 } from "../lib/cloud-surgeon";
 import { generateEmbedding } from "../lib/embeddings";
@@ -508,6 +509,46 @@ router.get("/incidents/:incidentId/rollback-plan", async (req, res): Promise<voi
     rollbackSteps: r.rollback_steps, estimatedRollbackTime: r.estimated_rollback_time,
     riskLevel: r.risk_level, createdAt: r.created_at,
   });
+});
+
+// ── Human-triggered rollback ──────────────────────────────────────────────
+//
+// POST /api/incidents/:incidentId/rollback
+//
+// Reads the rollback plan generated during the Remediator phase and executes
+// the inverse AWS action (force-new-deployment, restore Lambda concurrency,
+// restore RDS parameter group).  Only allowed when incident status is
+// RESOLVED, FAILED, or PENDING_APPROVAL (i.e. repair phase has started).
+
+router.post("/incidents/:incidentId/rollback", async (req, res): Promise<void> => {
+  const params = GetIncidentParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+  const { incidentId } = params.data;
+
+  // Guard: only rollback incidents that have passed the Remediator phase
+  const incident = await getIncidentById(incidentId);
+  if (!incident) {
+    res.status(404).json({ error: "Incident not found" });
+    return;
+  }
+  const allowedStatuses = ["RESOLVED", "FAILED", "PENDING_APPROVAL", "REPAIRING"];
+  if (!allowedStatuses.includes(incident.status)) {
+    res.status(409).json({
+      error: `Cannot rollback — incident status is '${incident.status}'. ` +
+             `Rollback is only available after the repair phase has started.`,
+    });
+    return;
+  }
+  if (incident.status === "ROLLED_BACK") {
+    res.status(409).json({ error: "Incident has already been rolled back." });
+    return;
+  }
+
+  const rollbackOutcome = await runRollbackLoop(incidentId);
+  res.status(rollbackOutcome.success ? 200 : 500).json(rollbackOutcome);
 });
 
 // ── Incident handoffs ─────────────────────────────────────────────────────
