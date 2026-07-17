@@ -122,9 +122,37 @@ function ConfidenceCard({ incident }: { incident: Incident }) {
         {/* Routing Decision */}
         <div className="space-y-1.5 min-w-0">
           <div className="text-xs text-muted-foreground uppercase font-mono">Routing Decision</div>
-          <Badge variant={(ctx?.routingMode as string)?.toLowerCase() as any || "outline"} className="text-xs max-w-full truncate">
-            {(ctx?.routingMode as string) || "UNKNOWN"}
-          </Badge>
+          {ctx?.humanApproved ? (
+            <div className="space-y-1.5">
+              {/* Original decision: PENDING_APPROVAL */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <Badge variant={(ctx.originalRoutingMode as string)?.toLowerCase() as any || "outline"} className="text-xs shrink-0">
+                  {(ctx.originalRoutingMode as string) || "PENDING_APPROVAL"}
+                </Badge>
+                <ArrowRight className="w-3 h-3 text-muted-foreground shrink-0" />
+                {/* Human approval stamp */}
+                <span className="flex items-center gap-1 px-2 py-0.5 text-[11px] font-mono font-bold rounded-sm border border-green-500/40 bg-green-500/10 text-green-400 shrink-0">
+                  <CheckCircle className="w-3 h-3" /> Human approved
+                </span>
+              </div>
+              {/* Resolved to AUTONOMOUS */}
+              <div className="flex items-center gap-1.5">
+                <ArrowRight className="w-3 h-3 text-muted-foreground shrink-0" />
+                <Badge variant={(ctx.routingMode as string)?.toLowerCase() as any || "outline"} className="text-xs shrink-0">
+                  {(ctx.routingMode as string) || "AUTONOMOUS"}
+                </Badge>
+              </div>
+              {ctx.approvedAt && (
+                <div className="text-[10px] font-mono text-muted-foreground/60">
+                  {formatDate(ctx.approvedAt as string)}
+                </div>
+              )}
+            </div>
+          ) : (
+            <Badge variant={(ctx?.routingMode as string)?.toLowerCase() as any || "outline"} className="text-xs max-w-full truncate">
+              {(ctx?.routingMode as string) || "UNKNOWN"}
+            </Badge>
+          )}
         </div>
 
         {/* Strategy */}

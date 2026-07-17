@@ -149,9 +149,13 @@ router.post("/incidents/:incidentId/approve", async (req, res): Promise<void> =>
   }
 
   const context = incident.contextJson as IncidentContext;
-  // Human approves: replace mode with AUTONOMOUS so the Remediator
-  // proceeds without a new validation check.
-  context.routingMode = "AUTONOMOUS";
+  // Preserve the original routing decision before granting autonomy so the
+  // Decision Trace can display "PENDING_APPROVAL → human approved → AUTONOMOUS"
+  // rather than erasing the approval from history.
+  context.originalRoutingMode = context.routingMode;   // "PENDING_APPROVAL"
+  context.humanApproved       = true;
+  context.approvedAt          = new Date().toISOString();
+  context.routingMode         = "AUTONOMOUS";
 
   const [updated] = await db
     .update(incidentStateTable)
