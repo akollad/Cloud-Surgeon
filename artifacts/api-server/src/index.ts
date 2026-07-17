@@ -12,6 +12,7 @@ import { promisify } from "node:util";
 import fs from "node:fs";
 import os from "node:os";
 import { CCLOUD_BINARY } from "./lib/ccloud-path";
+import { initSurgeonConfig, getConfigPath } from "./lib/surgeon-config";
 
 const execFileAsync = promisify(execFile);
 
@@ -115,6 +116,14 @@ app.listen(port, async (err) => {
   }
 
   logger.info({ port }, "Server listening");
+
+  // ── Load infrastructure config (YAML → SSM → env-var defaults) ─────────
+  // Must run before anything that calls getSurgeonConfig() so SSM-mode
+  // (AWS Marketplace) has its async fetch completed before any incident is
+  // processed.  In YAML/env mode this completes in <1 ms.
+  await initSurgeonConfig();
+  const cfgSrc = getConfigPath() ?? "env-var defaults";
+  logger.info(`[BOOT] Config source: ${cfgSrc}`);
 
   // ── Startup diagnostic log ─────────────────────────────────────────────
   // Surfaces the production-readiness story in the workflow logs so judges

@@ -1,0 +1,639 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Cloud-Surgeon — AI-powered autonomous infrastructure repair agent.
+  Deploys the API server on ECS Fargate behind an Application Load Balancer.
+  All runtime configuration is stored in SSM Parameter Store so the container
+  never needs a persistent filesystem.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# METADATA — shown in the CloudFormation console parameter groups UI
+# ─────────────────────────────────────────────────────────────────────────────
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: { default: "Network" }
+        Parameters: [VpcId, SubnetIds, AllowedCidr]
+      - Label: { default: "Container image" }
+        Parameters: [ImageUri]
+      - Label: { default: "Your ECS infrastructure" }
+        Parameters: [EcsClusterName, EcsService1Name, EcsService1Aliases,
+                     EcsService2Name, EcsService2Aliases, EcsService3Name, EcsService3Aliases]
+      - Label: { default: "Your Lambda functions" }
+        Parameters: [LambdaFunction1Name, LambdaFunction1Aliases]
+      - Label: { default: "Database" }
+        Parameters: [DatabaseProvider, RdsInstanceIdentifier]
+      - Label: { default: "AI provider" }
+        Parameters: [BedrockRegion, AnthropicApiKey]
+      - Label: { default: "CockroachDB (if applicable)" }
+        Parameters: [CockroachCloudApiKey, CockroachCloudClusterId, CockroachDbUrl]
+      - Label: { default: "Repair thresholds" }
+        Parameters: [AutonomousThreshold, CalibrationThreshold]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PARAMETERS
+# ─────────────────────────────────────────────────────────────────────────────
+Parameters:
+
+  # ── Network ─────────────────────────────────────────────────────────────────
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC where Cloud-Surgeon will run.
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: At least two subnets (different AZs) for the ALB and ECS tasks.
+
+  AllowedCidr:
+    Type: String
+    Default: "0.0.0.0/0"
+    Description: CIDR allowed to reach the Cloud-Surgeon dashboard (restrict to your office IP range in production).
+
+  # ── Image ────────────────────────────────────────────────────────────────────
+  ImageUri:
+    Type: String
+    Description: >
+      ECR image URI for the Cloud-Surgeon API server.
+      Example: 123456789012.dkr.ecr.us-east-1.amazonaws.com/cloud-surgeon:latest
+      Available in the AWS Marketplace listing after subscribing.
+
+  # ── ECS infrastructure of the CUSTOMER ──────────────────────────────────────
+  EcsClusterName:
+    Type: String
+    Description: Name of the ECS cluster Cloud-Surgeon will monitor and repair.
+
+  EcsService1Name:
+    Type: String
+    Description: "Primary ECS service name (must match AWS Console exactly)."
+
+  EcsService1Aliases:
+    Type: String
+    Default: ""
+    Description: "Comma-separated alert-text keywords that should resolve to this service (e.g. 'api,backend,main-api')."
+
+  EcsService2Name:
+    Type: String
+    Default: ""
+    Description: "Second ECS service (optional)."
+
+  EcsService2Aliases:
+    Type: String
+    Default: ""
+    Description: "Comma-separated aliases for the second service."
+
+  EcsService3Name:
+    Type: String
+    Default: ""
+    Description: "Third ECS service (optional)."
+
+  EcsService3Aliases:
+    Type: String
+    Default: ""
+    Description: "Comma-separated aliases for the third service."
+
+  # ── Lambda ───────────────────────────────────────────────────────────────────
+  LambdaFunction1Name:
+    Type: String
+    Default: ""
+    Description: "Lambda function Cloud-Surgeon may remediate (optional)."
+
+  LambdaFunction1Aliases:
+    Type: String
+    Default: ""
+    Description: "Comma-separated aliases for the Lambda function."
+
+  # ── Database ─────────────────────────────────────────────────────────────────
+  DatabaseProvider:
+    Type: String
+    Default: cockroachdb
+    AllowedValues: [cockroachdb, rds-postgres, rds-mysql]
+    Description: Database technology backing the monitored services.
+
+  RdsInstanceIdentifier:
+    Type: String
+    Default: ""
+    Description: "RDS instance identifier (leave blank if using CockroachDB)."
+
+  # ── AI provider ──────────────────────────────────────────────────────────────
+  BedrockRegion:
+    Type: String
+    Default: us-east-1
+    Description: AWS region for Amazon Bedrock (Nova Lite). Must support eu.amazon.nova-lite-v1:0.
+
+  AnthropicApiKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: "Anthropic API key (leave blank to use Amazon Bedrock instead)."
+
+  # ── CockroachDB ──────────────────────────────────────────────────────────────
+  CockroachCloudApiKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: "CockroachDB Cloud API key (only required if DatabaseProvider = cockroachdb)."
+
+  CockroachCloudClusterId:
+    Type: String
+    Default: ""
+    Description: "CockroachDB Cloud cluster ID."
+
+  CockroachDbUrl:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: "CockroachDB connection URL (postgresql://...)."
+
+  # ── Thresholds ───────────────────────────────────────────────────────────────
+  AutonomousThreshold:
+    Type: Number
+    Default: 0.80
+    MinValue: 0.5
+    MaxValue: 1.0
+    Description: "Win-rate above which Cloud-Surgeon acts without human approval (0.5–1.0)."
+
+  CalibrationThreshold:
+    Type: Number
+    Default: 0.15
+    MinValue: 0.0
+    MaxValue: 1.0
+    Description: "Minimum correction factor for the contextual bandit calibration."
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CONDITIONS
+# ─────────────────────────────────────────────────────────────────────────────
+Conditions:
+  HasService2:   !Not [!Equals [!Ref EcsService2Name, ""]]
+  HasService3:   !Not [!Equals [!Ref EcsService3Name, ""]]
+  HasLambda1:    !Not [!Equals [!Ref LambdaFunction1Name, ""]]
+  HasRds:        !Not [!Equals [!Ref RdsInstanceIdentifier, ""]]
+  HasAnthropic:  !Not [!Equals [!Ref AnthropicApiKey, ""]]
+  HasCrdb:       !Not [!Equals [!Ref CockroachCloudApiKey, ""]]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RESOURCES
+# ─────────────────────────────────────────────────────────────────────────────
+Resources:
+
+  # ── SSM Parameters (config — non-secret) ────────────────────────────────────
+
+  SsmEcsCluster:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /cloud-surgeon/ecs/cluster
+      Type: String
+      Value: !Ref EcsClusterName
+      Description: ECS cluster Cloud-Surgeon monitors
+
+  SsmEcsService1:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /cloud-surgeon/ecs/services/0/name
+      Type: String
+      Value: !Ref EcsService1Name
+
+  SsmEcsService1Aliases:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /cloud-surgeon/ecs/services/0/aliases
+      Type: String
+      Value: !Ref EcsService1Aliases
+
+  SsmEcsService2:
+    Type: AWS::SSM::Parameter
+    Condition: HasService2
+    Properties:
+      Name: /cloud-surgeon/ecs/services/1/name
+      Type: String
+      Value: !Ref EcsService2Name
+
+  SsmEcsService2Aliases:
+    Type: AWS::SSM::Parameter
+    Condition: HasService2
+    Properties:
+      Name: /cloud-surgeon/ecs/services/1/aliases
+      Type: String
+      Value: !Ref EcsService2Aliases
+
+  SsmEcsService3:
+    Type: AWS::SSM::Parameter
+    Condition: HasService3
+    Properties:
+      Name: /cloud-surgeon/ecs/services/2/name
+      Type: String
+      Value: !Ref EcsService3Name
+
+  SsmEcsService3Aliases:
+    Type: AWS::SSM::Parameter
+    Condition: HasService3
+    Properties:
+      Name: /cloud-surgeon/ecs/services/2/aliases
+      Type: String
+      Value: !Ref EcsService3Aliases
+
+  SsmLambda1:
+    Type: AWS::SSM::Parameter
+    Condition: HasLambda1
+    Properties:
+      Name: /cloud-surgeon/lambda/functions/0/name
+      Type: String
+      Value: !Ref LambdaFunction1Name
+
+  SsmLambda1Aliases:
+    Type: AWS::SSM::Parameter
+    Condition: HasLambda1
+    Properties:
+      Name: /cloud-surgeon/lambda/functions/0/aliases
+      Type: String
+      Value: !Ref LambdaFunction1Aliases
+
+  SsmDatabaseProvider:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /cloud-surgeon/database/provider
+      Type: String
+      Value: !Ref DatabaseProvider
+
+  SsmRdsInstanceId:
+    Type: AWS::SSM::Parameter
+    Condition: HasRds
+    Properties:
+      Name: /cloud-surgeon/rds/instance_identifier
+      Type: String
+      Value: !Ref RdsInstanceIdentifier
+
+  SsmAutonomousThreshold:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /cloud-surgeon/routing/autonomous_threshold
+      Type: String
+      Value: !Sub "${AutonomousThreshold}"
+
+  SsmCalibrationThreshold:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /cloud-surgeon/routing/calibration_threshold
+      Type: String
+      Value: !Sub "${CalibrationThreshold}"
+
+  SsmBedrockRegion:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /cloud-surgeon/ai/bedrock_region
+      Type: String
+      Value: !Ref BedrockRegion
+
+  # ── Secrets (SecureString via SSM) ──────────────────────────────────────────
+  # Note: CloudFormation cannot create SecureString parameters directly.
+  # The secrets below are written by the post-deploy Lambda (SecretBootstrap).
+
+  SecretBootstrapRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "cloud-surgeon-secret-bootstrap-${AWS::StackName}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: WriteSecureStrings
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [ssm:PutParameter, ssm:DeleteParameter]
+                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/cloud-surgeon/*"
+
+  SecretBootstrapFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "cloud-surgeon-secret-bootstrap-${AWS::StackName}"
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt SecretBootstrapRole.Arn
+      Timeout: 30
+      Code:
+        ZipFile: |
+          import boto3, cfnresponse, os
+          ssm = boto3.client("ssm")
+
+          def put(name, value, description=""):
+            if not value:
+              return
+            ssm.put_parameter(Name=name, Value=value, Type="SecureString",
+                              Description=description, Overwrite=True)
+
+          def handler(event, context):
+            try:
+              if event["RequestType"] in ("Create", "Update"):
+                p = event["ResourceProperties"]
+                put("/cloud-surgeon/secrets/anthropic_api_key",
+                    p.get("AnthropicApiKey",""), "Anthropic API key")
+                put("/cloud-surgeon/secrets/cockroach_cloud_api_key",
+                    p.get("CockroachCloudApiKey",""), "CockroachDB Cloud API key")
+                put("/cloud-surgeon/secrets/cockroach_db_url",
+                    p.get("CockroachDbUrl",""), "CockroachDB connection URL")
+                put("/cloud-surgeon/secrets/cockroach_cloud_cluster_id",
+                    p.get("CockroachCloudClusterId",""), "CockroachDB cluster ID")
+              elif event["RequestType"] == "Delete":
+                for key in ["/cloud-surgeon/secrets/anthropic_api_key",
+                             "/cloud-surgeon/secrets/cockroach_cloud_api_key",
+                             "/cloud-surgeon/secrets/cockroach_db_url",
+                             "/cloud-surgeon/secrets/cockroach_cloud_cluster_id"]:
+                  try: ssm.delete_parameter(Name=key)
+                  except: pass
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+            except Exception as e:
+              cfnresponse.send(event, context, cfnresponse.FAILED, {"Error": str(e)})
+
+  SecretBootstrap:
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn: SecretBootstrapFunction
+    Properties:
+      ServiceToken: !GetAtt SecretBootstrapFunction.Arn
+      AnthropicApiKey:        !If [HasAnthropic, !Ref AnthropicApiKey, ""]
+      CockroachCloudApiKey:   !If [HasCrdb,      !Ref CockroachCloudApiKey, ""]
+      CockroachDbUrl:         !Ref CockroachDbUrl
+      CockroachCloudClusterId: !Ref CockroachCloudClusterId
+
+  # ── IAM: ECS Task Execution Role ─────────────────────────────────────────────
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "cloud-surgeon-execution-${AWS::StackName}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: ReadSsmSecrets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [ssm:GetParameter, ssm:GetParameters, ssm:GetParametersByPath]
+                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/cloud-surgeon/*"
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*"
+
+  # ── IAM: ECS Task Role (what the container can DO) ───────────────────────────
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "cloud-surgeon-task-${AWS::StackName}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CloudSurgeonRepairActions
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # ECS — describe + restart services
+              - Effect: Allow
+                Action:
+                  - ecs:DescribeServices
+                  - ecs:UpdateService
+                  - ecs:ListServices
+                  - ecs:DescribeClusters
+                Resource: "*"
+              # Lambda — describe + set concurrency
+              - Effect: Allow
+                Action:
+                  - lambda:GetFunction
+                  - lambda:GetFunctionConcurrency
+                  - lambda:PutFunctionConcurrency
+                  - lambda:GetAccountSettings
+                Resource: "*"
+              # RDS — describe + modify parameter group
+              - Effect: Allow
+                Action:
+                  - rds:DescribeDBInstances
+                  - rds:ModifyDBInstance
+                  - rds:DescribeDBParameterGroups
+                  - rds:ModifyDBParameterGroup
+                  - rds:CreateDBParameterGroup
+                Resource: "*"
+              # CloudWatch — read metrics and alarms
+              - Effect: Allow
+                Action:
+                  - cloudwatch:GetMetricData
+                  - cloudwatch:GetMetricStatistics
+                  - cloudwatch:DescribeAlarms
+                Resource: "*"
+              # Bedrock — invoke Nova Lite
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource:
+                  - !Sub "arn:aws:bedrock:${BedrockRegion}::foundation-model/amazon.nova-lite-v1:0"
+                  - !Sub "arn:aws:bedrock:${BedrockRegion}::foundation-model/eu.amazon.nova-lite-v1:0"
+              # SSM — read config at runtime
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:GetParametersByPath
+                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/cloud-surgeon/*"
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: "*"
+              # CloudWatch Logs
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+
+  # ── Security groups ──────────────────────────────────────────────────────────
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Cloud-Surgeon ALB — allow inbound HTTP
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: !Ref AllowedCidr
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref AllowedCidr
+
+  TaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Cloud-Surgeon ECS tasks — allow traffic from ALB only
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          SourceSecurityGroupId: !Ref AlbSecurityGroup
+
+  # ── ECS cluster for Cloud-Surgeon itself ─────────────────────────────────────
+  CloudSurgeonCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub "cloud-surgeon-${AWS::StackName}"
+      CapacityProviders: [FARGATE, FARGATE_SPOT]
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 1
+
+  # ── CloudWatch log group ──────────────────────────────────────────────────────
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/ecs/cloud-surgeon-${AWS::StackName}"
+      RetentionInDays: 30
+
+  # ── ECS Task Definition ───────────────────────────────────────────────────────
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    DependsOn: SecretBootstrap
+    Properties:
+      Family: !Sub "cloud-surgeon-${AWS::StackName}"
+      Cpu: "512"
+      Memory: "1024"
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      ContainerDefinitions:
+        - Name: api-server
+          Image: !Ref ImageUri
+          PortMappings:
+            - ContainerPort: 8080
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+          Environment:
+            - Name: NODE_ENV
+              Value: production
+            - Name: PORT
+              Value: "8080"
+            - Name: AWS_REGION
+              Value: !Ref AWS::Region
+            - Name: BEDROCK_REGION
+              Value: !Ref BedrockRegion
+            # Tell the app to load config from SSM instead of a YAML file
+            - Name: CLOUD_SURGEON_CONFIG_SOURCE
+              Value: ssm
+            - Name: SSM_CONFIG_PREFIX
+              Value: /cloud-surgeon
+          Secrets:
+            - Name: ANTHROPIC_API_KEY
+              ValueFrom: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/cloud-surgeon/secrets/anthropic_api_key"
+            - Name: COCKROACH_CLOUD_API_KEY
+              ValueFrom: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/cloud-surgeon/secrets/cockroach_cloud_api_key"
+            - Name: COCKROACHDB_URL
+              ValueFrom: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/cloud-surgeon/secrets/cockroach_db_url"
+            - Name: COCKROACH_CLOUD_CLUSTER_ID
+              ValueFrom: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/cloud-surgeon/secrets/cockroach_cloud_cluster_id"
+          HealthCheck:
+            Command: ["CMD-SHELL", "curl -f http://localhost:8080/api/healthz || exit 1"]
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 60
+
+  # ── ALB ──────────────────────────────────────────────────────────────────────
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub "cloud-surgeon-${AWS::StackName}"
+      Scheme: internet-facing
+      Type: application
+      SecurityGroups: [!Ref AlbSecurityGroup]
+      Subnets: !Ref SubnetIds
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub "cs-tg-${AWS::StackName}"
+      Port: 8080
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref VpcId
+      HealthCheckPath: /api/healthz
+      HealthCheckIntervalSeconds: 30
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  # ── ECS Service ───────────────────────────────────────────────────────────────
+  EcsService:
+    Type: AWS::ECS::Service
+    DependsOn: Listener
+    Properties:
+      ServiceName: !Sub "cloud-surgeon-${AWS::StackName}"
+      Cluster: !Ref CloudSurgeonCluster
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups: [!Ref TaskSecurityGroup]
+          Subnets: !Ref SubnetIds
+      LoadBalancers:
+        - ContainerName: api-server
+          ContainerPort: 8080
+          TargetGroupArn: !Ref TargetGroup
+      HealthCheckGracePeriodSeconds: 120
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OUTPUTS
+# ─────────────────────────────────────────────────────────────────────────────
+Outputs:
+
+  DashboardUrl:
+    Description: Cloud-Surgeon dashboard URL (may take 2-3 minutes to become healthy)
+    Value: !Sub "http://${LoadBalancer.DNSName}/dashboard/"
+
+  ApiBaseUrl:
+    Description: Cloud-Surgeon API base URL
+    Value: !Sub "http://${LoadBalancer.DNSName}/api"
+
+  SsmConfigPrefix:
+    Description: SSM Parameter Store prefix — edit parameters here to reconfigure without redeploying
+    Value: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/cloud-surgeon"
+
+  TaskRoleArn:
+    Description: IAM role ARN the ECS task assumes — grant additional permissions here if needed
+    Value: !GetAtt TaskRole.Arn
+
+  EcsCluster:
+    Description: ECS cluster running Cloud-Surgeon
+    Value: !Ref CloudSurgeonCluster
+
+  LogGroup:
+    Description: CloudWatch log group
+    Value: !Ref LogGroup

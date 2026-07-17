@@ -17,6 +17,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parse } from "yaml";
+import {
+  SSMClient,
+  GetParametersByPathCommand,
+  type Parameter,
+} from "@aws-sdk/client-ssm";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -188,25 +193,187 @@ function deepMerge(defaults: SurgeonConfig, yaml: Partial<SurgeonConfig>): Surge
   return merged;
 }
 
+// ── SSM loader (AWS Marketplace / ECS production) ────────────────────────────
+
+/**
+ * Reads all parameters under `prefix` from SSM Parameter Store and maps them
+ * to a partial SurgeonConfig.  Only called when CLOUD_SURGEON_CONFIG_SOURCE=ssm.
+ *
+ * SSM path layout (written by the CloudFormation template):
+ *   <prefix>/ecs/cluster
+ *   <prefix>/ecs/services/0/name
+ *   <prefix>/ecs/services/0/aliases      ← comma-separated string
+ *   <prefix>/ecs/services/0/default      ← "true" | "false"
+ *   <prefix>/ecs/services/1/name         ← optional second service
+ *   ...
+ *   <prefix>/lambda/functions/0/name
+ *   <prefix>/lambda/functions/0/aliases
+ *   <prefix>/lambda/functions/0/default
+ *   <prefix>/rds/instance_identifier     ← blank string = no RDS
+ *   <prefix>/database/provider
+ *   <prefix>/database/display_name
+ *   <prefix>/routing/autonomous_threshold
+ *   <prefix>/routing/calibration_threshold
+ *   <prefix>/alert_patterns/custom       ← optional JSON array
+ */
+async function loadFromSsm(prefix: string): Promise<Partial<SurgeonConfig>> {
+  const client = new SSMClient({ region: process.env.AWS_REGION ?? "us-east-1" });
+  const params: Parameter[] = [];
+
+  let nextToken: string | undefined;
+  do {
+    const resp = await client.send(
+      new GetParametersByPathCommand({
+        Path: prefix,
+        Recursive: true,
+        WithDecryption: false,   // non-secret config only; secrets injected via ECS env
+        NextToken: nextToken,
+      }),
+    );
+    params.push(...(resp.Parameters ?? []));
+    nextToken = resp.NextToken;
+  } while (nextToken);
+
+  if (params.length === 0) {
+    console.warn(`[cloud-surgeon] SSM: no parameters found under ${prefix}`);
+    return {};
+  }
+
+  // Strip the prefix to get relative paths like "ecs/cluster"
+  const get = (rel: string): string | undefined =>
+    params.find(p => p.Name === `${prefix}/${rel}`)?.Value;
+
+  const getNum = (rel: string, fallback: number): number => {
+    const v = get(rel);
+    return v !== undefined ? Number(v) : fallback;
+  };
+
+  const parseAliases = (raw: string | undefined): string[] =>
+    raw ? raw.split(",").map(s => s.trim()).filter(Boolean) : [];
+
+  // Build ECS services list from indexed SSM parameters
+  const ecsSvcs: EcsServiceDef[] = [];
+  for (let i = 0; i < 10; i++) {
+    const name = get(`ecs/services/${i}/name`);
+    if (!name) break;
+    ecsSvcs.push({
+      name,
+      aliases: parseAliases(get(`ecs/services/${i}/aliases`)),
+      description: get(`ecs/services/${i}/description`),
+      default: get(`ecs/services/${i}/default`) === "true" || i === 0,
+    });
+  }
+
+  // Build Lambda functions list
+  const lambdaFns: LambdaFunctionDef[] = [];
+  for (let i = 0; i < 10; i++) {
+    const name = get(`lambda/functions/${i}/name`);
+    if (!name) break;
+    lambdaFns.push({
+      name,
+      aliases: parseAliases(get(`lambda/functions/${i}/aliases`)),
+      description: get(`lambda/functions/${i}/description`),
+      default: get(`lambda/functions/${i}/default`) === "true" || i === 0,
+    });
+  }
+
+  // Custom alert patterns (optional JSON stored in SSM)
+  let alertPatterns: AlertPatternRule[] = [];
+  const customPatterns = get("alert_patterns/custom");
+  if (customPatterns) {
+    try {
+      alertPatterns = JSON.parse(customPatterns) as AlertPatternRule[];
+    } catch {
+      console.warn("[cloud-surgeon] SSM: alert_patterns/custom is not valid JSON — ignored");
+    }
+  }
+
+  const rdsId = get("rds/instance_identifier");
+
+  const partial: Partial<SurgeonConfig> = {
+    infrastructure: {
+      aws: {
+        region: get("aws/region") ?? process.env.AWS_REGION ?? "us-east-1",
+        ecs: {
+          cluster: get("ecs/cluster") ?? "",
+          services: ecsSvcs.length ? ecsSvcs : [],
+        },
+        lambda: {
+          functions: lambdaFns.length ? lambdaFns : [],
+        },
+        rds: {
+          instance_identifier: rdsId || null,
+        },
+      },
+      database: {
+        provider: (get("database/provider") ?? "cockroachdb") as SurgeonConfig["infrastructure"]["database"]["provider"],
+        display_name: get("database/display_name") ?? "db",
+      },
+    },
+    alert_patterns: alertPatterns,
+    routing: {
+      autonomous_threshold: getNum("routing/autonomous_threshold", 0.80),
+      calibration_threshold: getNum("routing/calibration_threshold", 0.15),
+    },
+  };
+
+  console.info(
+    `[cloud-surgeon] SSM config loaded — ${params.length} parameters from ${prefix} | ` +
+    `cluster=${partial.infrastructure?.aws?.ecs?.cluster} | ` +
+    `services=${ecsSvcs.map(s => s.name).join(",")} | ` +
+    `lambda=${lambdaFns.map(f => f.name).join(",")}`,
+  );
+
+  return partial;
+}
+
 // ── Singleton ─────────────────────────────────────────────────────────────────
 
 let _config: SurgeonConfig | null = null;
 let _configPath: string | null = null;
 
-export function getSurgeonConfig(): SurgeonConfig {
-  if (_config) return _config;
+/**
+ * Must be called once at server startup when CLOUD_SURGEON_CONFIG_SOURCE=ssm.
+ * Fetches config from SSM Parameter Store and caches it so subsequent
+ * synchronous calls to getSurgeonConfig() work without async overhead.
+ *
+ * Safe to call in all environments — falls back to YAML/env silently if SSM
+ * is not reachable or the env var is not set.
+ */
+export async function initSurgeonConfig(): Promise<void> {
+  const source = process.env.CLOUD_SURGEON_CONFIG_SOURCE;
+  const prefix = (process.env.SSM_CONFIG_PREFIX ?? "/cloud-surgeon").replace(/\/$/, "");
 
+  if (source === "ssm") {
+    try {
+      const partial = await loadFromSsm(prefix);
+      _config = deepMerge(buildDefaults(), partial);
+      _configPath = `ssm:${prefix}`;
+      return;
+    } catch (err) {
+      console.error(
+        "[cloud-surgeon] SSM load failed — falling back to YAML/env:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
+  // YAML fallback (dev / self-hosted)
   const defaults = buildDefaults();
   const yamlPath = findConfigFile();
 
   if (!yamlPath) {
-    console.warn(
-      "[cloud-surgeon] No cloud-surgeon.config.yaml found — " +
-      "using env-var defaults. Create cloud-surgeon.config.yaml to declare " +
-      "your infrastructure topology.",
-    );
+    if (source !== "ssm") {
+      // Only warn in non-SSM mode; SSM mode already logged above
+      console.warn(
+        "[cloud-surgeon] No cloud-surgeon.config.yaml found — " +
+        "using env-var defaults. Create cloud-surgeon.config.yaml to declare " +
+        "your infrastructure topology, or set CLOUD_SURGEON_CONFIG_SOURCE=ssm " +
+        "for AWS Marketplace deployments.",
+      );
+    }
     _config = defaults;
-    return _config;
+    return;
   }
 
   try {
@@ -219,7 +386,31 @@ export function getSurgeonConfig(): SurgeonConfig {
     console.error(`[cloud-surgeon] Failed to parse ${yamlPath}:`, err);
     _config = defaults;
   }
+}
 
+export function getSurgeonConfig(): SurgeonConfig {
+  if (_config) return _config;
+
+  // Synchronous fallback: initSurgeonConfig() wasn't awaited before first use.
+  // This happens in unit tests or if index.ts forgot to call init.
+  // Load synchronously from YAML/env (SSM is skipped — it's async-only).
+  const defaults = buildDefaults();
+  const yamlPath = findConfigFile();
+
+  if (yamlPath) {
+    try {
+      const raw = fs.readFileSync(yamlPath, "utf8");
+      const yaml = parse(raw) as Partial<SurgeonConfig>;
+      _config = deepMerge(defaults, yaml);
+      _configPath = yamlPath;
+      console.info(`[cloud-surgeon] Config loaded synchronously from ${yamlPath}`);
+      return _config;
+    } catch {
+      // fall through
+    }
+  }
+
+  _config = defaults;
   return _config;
 }
 
