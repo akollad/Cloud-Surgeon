@@ -119,10 +119,12 @@ router.get("/metrics/impact", async (_req, res): Promise<void> => {
         FILTER (WHERE status = 'RESOLVED'), 2)                         AS avg_ru_per_incident,
 
       -- Breakdown by routing mode (Layer 2)
-      COUNT(*) FILTER (WHERE context_json->>'routingMode' = 'AUTONOMOUS')        AS autonomous_count,
-      COUNT(*) FILTER (WHERE context_json->>'routingMode' = 'PENDING_APPROVAL')  AS pending_approval_count,
-      COUNT(*) FILTER (WHERE context_json->>'routingMode' = 'EXPLORATORY')       AS exploratory_count,
-      COUNT(*) FILTER (WHERE context_json->>'routingMode' = 'REJECTED')          AS rejected_count
+      -- Use originalRoutingMode when present (incident was approved/rejected and routingMode
+      -- was overwritten); fall back to routingMode for unmodified incidents.
+      COUNT(*) FILTER (WHERE COALESCE(context_json->>'originalRoutingMode', context_json->>'routingMode') = 'AUTONOMOUS')        AS autonomous_count,
+      COUNT(*) FILTER (WHERE COALESCE(context_json->>'originalRoutingMode', context_json->>'routingMode') = 'PENDING_APPROVAL')  AS pending_approval_count,
+      COUNT(*) FILTER (WHERE COALESCE(context_json->>'originalRoutingMode', context_json->>'routingMode') = 'EXPLORATORY')       AS exploratory_count,
+      COUNT(*) FILTER (WHERE COALESCE(context_json->>'originalRoutingMode', context_json->>'routingMode') = 'REJECTED')          AS rejected_count
     FROM incident_state
   `);
 
