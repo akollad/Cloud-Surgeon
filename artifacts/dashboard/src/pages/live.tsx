@@ -78,23 +78,56 @@ export default function LiveDiagnostic() {
 
       {activeIncidents.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {activeIncidents.map(inc => (
-            <Card key={inc.incidentId} className="border-primary/50 shadow-[0_0_15px_rgba(0,255,255,0.1)]">
-              <CardHeader className="py-3 px-4 flex flex-row items-center justify-between space-y-0 border-b border-border/50">
-                <CardTitle className="text-xs text-muted-foreground truncate" title={inc.incidentId}>
-                  {inc.incidentId.split("-")[0]}
-                </CardTitle>
-                <Badge variant={inc.status.toLowerCase() as any}>{inc.status}</Badge>
-              </CardHeader>
-              <CardContent className="p-4 space-y-3">
-                <p className="font-mono text-sm leading-tight text-foreground truncate">{inc.alertFingerprint}</p>
-                <div className="flex justify-between items-center text-xs font-mono text-muted-foreground">
-                  <span>{inc.contextJson?.routingMode || "ROUTING_PENDING"}</span>
-                  <span>{inc.contextJson?.strategyName || "NO_STRATEGY"}</span>
+          {activeIncidents.map((inc, idx) => {
+            const statusStyle: Record<string, string> = {
+              TRIGGERED:       "border-red-500/60 shadow-[0_0_24px_rgba(239,68,68,0.25)]",
+              DIAGNOSING:      "border-yellow-500/60 shadow-[0_0_20px_rgba(234,179,8,0.2)]",
+              REPAIRING:       "border-cyan-500/60 shadow-[0_0_20px_rgba(34,211,238,0.2)]",
+              PENDING_APPROVAL:"border-orange-500/60 shadow-[0_0_22px_rgba(249,115,22,0.28)]",
+              PREDICTIVE:      "border-purple-500/60 shadow-[0_0_20px_rgba(168,85,247,0.2)]",
+            };
+            const pulseStatus = ["TRIGGERED", "PENDING_APPROVAL"];
+            const scanStatus  = ["DIAGNOSING"];
+            const repairStatus = ["REPAIRING"];
+
+            return (
+              <div
+                key={inc.incidentId}
+                className={cn(
+                  "animate-in fade-in slide-in-from-bottom-2 duration-300 rounded-sm border bg-card overflow-hidden",
+                  statusStyle[inc.status] ?? "border-border",
+                  pulseStatus.includes(inc.status) && "animate-pulse"
+                )}
+                style={{ animationDelay: `${idx * 60}ms`, animationFillMode: "both" }}
+              >
+                {/* Phase progress bar */}
+                <div className="h-0.5 w-full overflow-hidden">
+                  <div className={cn(
+                    "h-full",
+                    inc.status === "TRIGGERED"        && "w-1/5 bg-red-500",
+                    inc.status === "DIAGNOSING"       && "w-2/5 bg-yellow-500 animate-[scan_2s_ease-in-out_infinite]",
+                    inc.status === "REPAIRING"        && "w-3/5 bg-cyan-400 animate-[scan_1.5s_ease-in-out_infinite]",
+                    inc.status === "PENDING_APPROVAL" && "w-4/5 bg-orange-400",
+                    inc.status === "PREDICTIVE"       && "w-1/3 bg-purple-400 animate-pulse",
+                  )} />
                 </div>
-              </CardContent>
-            </Card>
-          ))}
+
+                <div className="py-3 px-4 flex flex-row items-center justify-between border-b border-border/50">
+                  <span className="text-xs text-muted-foreground font-mono truncate" title={inc.incidentId}>
+                    {inc.incidentId.split("-")[0]}
+                  </span>
+                  <Badge variant={inc.status.toLowerCase() as any}>{inc.status}</Badge>
+                </div>
+                <div className="p-4 space-y-3">
+                  <p className="font-mono text-sm leading-tight text-foreground truncate">{inc.alertFingerprint}</p>
+                  <div className="flex justify-between items-center text-xs font-mono text-muted-foreground">
+                    <span>{inc.contextJson?.routingMode || "ROUTING_PENDING"}</span>
+                    <span>{inc.contextJson?.strategyName || "NO_STRATEGY"}</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       ) : (
         <div className="shrink-0 p-6 border border-dashed border-border flex items-center justify-center text-muted-foreground font-mono text-sm bg-card/30">
@@ -102,8 +135,8 @@ export default function LiveDiagnostic() {
         </div>
       )}
 
-      <div className="min-h-[320px] flex flex-col border border-border bg-[#0a0a0a] rounded-sm overflow-hidden">
-        <div className="bg-muted px-4 py-2 border-b border-border flex items-center space-x-2 text-xs font-mono text-muted-foreground uppercase tracking-wider shrink-0">
+      <div className="min-h-[320px] flex flex-col border border-border bg-card rounded-sm overflow-hidden">
+        <div className="bg-muted/50 px-4 py-2 border-b border-border flex items-center space-x-2 text-xs font-mono text-muted-foreground uppercase tracking-wider shrink-0">
           <Terminal className="h-4 w-4" />
           <span>CDC Audit Stream (Latest {maxEvents})</span>
         </div>
@@ -160,7 +193,7 @@ export default function LiveDiagnostic() {
 
                   {/* execution_log */}
                   {ev.type === "execution_log" && ev.actionTaken && (
-                    <div className="text-white/90">&gt; {ev.actionTaken}</div>
+                    <div className="text-foreground">&gt; {ev.actionTaken}</div>
                   )}
                   {ev.type === "execution_log" && ev.result && (
                     <div className="text-muted-foreground ml-2 whitespace-pre-wrap break-all">
@@ -182,7 +215,7 @@ export default function LiveDiagnostic() {
                     </div>
                   )}
                   {ev.type === "agent_handoff" && ev.note && (
-                    <div className="text-white/90">{ev.note}</div>
+                    <div className="text-foreground">{ev.note}</div>
                   )}
 
                   {/* incident_status */}
@@ -192,7 +225,7 @@ export default function LiveDiagnostic() {
                         {ev.status}
                       </Badge>
                       {ev.alertFingerprint && (
-                        <span className="text-white/80 truncate max-w-[400px]" title={ev.alertFingerprint}>
+                        <span className="text-foreground/80 truncate max-w-[400px]" title={ev.alertFingerprint}>
                           {ev.alertFingerprint}
                         </span>
                       )}

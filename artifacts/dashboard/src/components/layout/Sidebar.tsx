@@ -95,14 +95,14 @@ export function Sidebar({ open, onClose, collapsed, onToggleCollapse }: SidebarP
         <div className="hidden md:flex flex-col items-center pt-4 gap-3 flex-1">
           <button
             onClick={onToggleCollapse}
-            className="w-7 h-7 flex items-center justify-center rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            className="w-7 h-7 flex items-center justify-center rounded-sm text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
             aria-label="Expand controls"
           >
             <ChevronLeft className="w-3.5 h-3.5" />
           </button>
           {/* Rotated label */}
           <span
-            className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground/40 select-none"
+            className="text-[10px] font-mono uppercase tracking-widest text-sidebar-foreground/40 select-none"
             style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
           >
             Controls
@@ -116,16 +116,16 @@ export function Sidebar({ open, onClose, collapsed, onToggleCollapse }: SidebarP
         collapsed ? "md:hidden" : ""
       )}>
         {/* Header */}
-        <div className="h-14 px-4 flex items-center justify-between border-b border-border shrink-0">
+        <div className="h-14 px-4 flex items-center justify-between border-b border-sidebar-border shrink-0">
           <div className="flex items-center gap-2">
             <Terminal className="w-4 h-4 text-primary" />
-            <span className="font-mono font-bold text-sm uppercase tracking-tight text-foreground">Controls</span>
+            <span className="font-mono font-bold text-sm uppercase tracking-tight text-sidebar-foreground">Controls</span>
           </div>
           <div className="flex items-center gap-1">
             {/* Desktop collapse button */}
             <button
               onClick={onToggleCollapse}
-              className="hidden md:flex items-center justify-center w-6 h-6 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              className="hidden md:flex items-center justify-center w-6 h-6 rounded-sm text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
               aria-label="Collapse controls"
             >
               <ChevronRight className="w-3.5 h-3.5" />
@@ -133,7 +133,7 @@ export function Sidebar({ open, onClose, collapsed, onToggleCollapse }: SidebarP
             {/* Mobile close */}
             <button
               onClick={onClose}
-              className="md:hidden flex items-center justify-center w-6 h-6 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              className="md:hidden flex items-center justify-center w-6 h-6 rounded-sm text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
               aria-label="Close controls"
             >
               <X className="w-3.5 h-3.5" />

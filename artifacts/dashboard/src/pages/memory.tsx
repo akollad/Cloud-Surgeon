@@ -45,7 +45,7 @@ export default function StrategyMemory() {
             className="border-primary/40 text-primary hover:bg-primary/10 font-mono text-xs gap-2"
           >
             <Database className="w-3.5 h-3.5" />
-            CockroachDB
+            <span className="hidden sm:inline">CockroachDB</span>
           </Button>
         </div>
       </div>
@@ -79,7 +79,7 @@ export default function StrategyMemory() {
                       <div className="flex items-center gap-2">
                         <div className="h-2 flex-1 bg-muted rounded-full overflow-hidden">
                           <div
-                            className={`h-full ${getBarColor(wr.winRate)}`}
+                            className={`h-full transition-all duration-700 ease-out ${getBarColor(wr.winRate)}`}
                             style={{ width: `${Math.max(wr.winRate * 100, 2)}%` }}
                           />
                         </div>
@@ -111,7 +111,7 @@ export default function StrategyMemory() {
       {/* CockroachDB modal */}
       {dbOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
           onClick={() => setDbOpen(false)}
         >
           <div

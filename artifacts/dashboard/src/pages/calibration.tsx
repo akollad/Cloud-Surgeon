@@ -49,8 +49,8 @@ export default function Calibration() {
           disabled={recalibrate.isPending}
           className="border-primary/50 text-primary hover:bg-primary/10 shrink-0"
         >
-          <RefreshCw className={`w-4 h-4 mr-2 ${recalibrate.isPending ? "animate-spin" : ""}`} />
-          Run Recalibration Job
+          <RefreshCw className={`w-4 h-4 ${recalibrate.isPending ? "animate-spin" : ""} sm:mr-2`} />
+          <span className="hidden sm:inline">Run Recalibration Job</span>
         </Button>
       </div>
 

@@ -33,14 +33,15 @@ export default function Logs() {
     <div className="w-full max-w-6xl mx-auto space-y-6 animate-in fade-in duration-500 pb-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-border pb-4 gap-3">
-        <h1 className="text-xl sm:text-2xl font-mono font-bold tracking-tighter uppercase text-foreground flex items-center">
+        <h1 className="text-xl sm:text-2xl font-mono font-bold tracking-tighter uppercase text-foreground flex items-center shrink-0">
           <Terminal className="mr-2 h-5 w-5 text-primary shrink-0" />
-          Execution Logs
+          <span className="hidden sm:inline">Execution Logs</span>
+          <span className="sm:hidden">Logs</span>
         </h1>
         <div className="flex items-center gap-2 w-full sm:w-auto">
           <Input
-            placeholder="Filter by Incident ID… (Enter)"
-            className="flex-1 sm:w-64 sm:flex-none min-w-0"
+            placeholder="Filter by ID… (Enter)"
+            className="flex-1 sm:w-64 sm:flex-none min-w-0 text-xs sm:text-sm"
             value={filterId}
             onChange={(e) => setFilterId(e.target.value)}
             onKeyDown={handleFilter}

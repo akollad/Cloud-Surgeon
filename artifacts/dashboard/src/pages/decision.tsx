@@ -1,7 +1,7 @@
 import { useState, useCallback } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Select } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   useListIncidents, useGetIncident, useGetIncidentCausalChain,
@@ -11,8 +11,10 @@ import type { Incident } from "@workspace/api-client-react";
 import {
   GitCommit, Search, Cpu, ArrowRight, Zap, RotateCcw, BookOpen,
   AlertTriangle, CheckCircle, Clock, ShieldCheck, GitBranch, Layers,
+  X, ChevronDown,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
 // ── Local type mirrors (server types reflected in contextJson) ─────────────
 
@@ -295,6 +297,11 @@ export default function DecisionTrace() {
   const [rollbackState, setRollbackState] = useState<RollbackExecState>("idle");
   const [rollbackExecResult, setRollbackExecResult] = useState<Record<string, unknown> | null>(null);
 
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerSearch, setPickerSearch] = useState("");
+  const [pickerPage, setPickerPage] = useState(1);
+  const PICKER_PAGE_SIZE = 8;
+
   const actualSelectedId = selectedId || (incidents?.[0]?.incidentId ?? "");
 
   const { data: incident, refetch: refetchIncident } = useGetIncident(actualSelectedId, { query: { enabled: !!actualSelectedId } });
@@ -340,17 +347,112 @@ export default function DecisionTrace() {
           <GitCommit className="mr-2 h-5 w-5 text-primary shrink-0" />
           Decision Trace
         </h1>
-        <div className="w-full sm:w-80 min-w-0">
-          <Select value={actualSelectedId} onChange={(e) => { setSelectedId(e.target.value); setActiveTab("execution"); }}>
-            <option value="" disabled>Select an incident...</option>
-            {incidents?.map(i => (
-              <option key={i.incidentId} value={i.incidentId}>
-                {formatDate(i.updatedAt)} — {i.alertFingerprint.slice(0, 40)}
-              </option>
-            ))}
-          </Select>
-        </div>
+        {/* Incident picker trigger */}
+        <button
+          onClick={() => { setPickerSearch(""); setPickerPage(1); setPickerOpen(true); }}
+          className="flex items-center gap-2 w-full sm:w-80 min-w-0 h-9 px-3 border border-border rounded-sm bg-background text-left hover:border-primary/50 transition-colors group shrink-0"
+        >
+          <GitCommit className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+          <span className="flex-1 font-mono text-xs text-muted-foreground truncate">
+            {incident
+              ? `${incident.status} · ${incident.alertFingerprint.slice(0, 38)}…`
+              : "Select incident…"}
+          </span>
+          <ChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0 group-hover:text-foreground transition-colors" />
+        </button>
       </div>
+
+      {/* Incident picker modal */}
+      {pickerOpen && (() => {
+        const filtered = (incidents || []).filter(i =>
+          i.alertFingerprint.toLowerCase().includes(pickerSearch.toLowerCase()) ||
+          i.incidentId.toLowerCase().includes(pickerSearch.toLowerCase()) ||
+          i.status.toLowerCase().includes(pickerSearch.toLowerCase())
+        );
+        const totalPicker = Math.ceil(filtered.length / PICKER_PAGE_SIZE);
+        const paged = filtered.slice((pickerPage - 1) * PICKER_PAGE_SIZE, pickerPage * PICKER_PAGE_SIZE);
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-start justify-center pt-16 p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-150"
+            onClick={() => setPickerOpen(false)}
+          >
+            <div
+              className="w-full max-w-lg bg-card border border-border shadow-2xl rounded-sm animate-in zoom-in-95 fade-in duration-150 overflow-hidden"
+              onClick={e => e.stopPropagation()}
+            >
+              {/* Search row */}
+              <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-muted/20">
+                <Search className="w-4 h-4 text-muted-foreground shrink-0" />
+                <input
+                  autoFocus
+                  value={pickerSearch}
+                  onChange={e => { setPickerSearch(e.target.value); setPickerPage(1); }}
+                  placeholder="Search by fingerprint, ID or status…"
+                  className="flex-1 bg-transparent outline-none font-mono text-sm text-foreground placeholder:text-muted-foreground/60"
+                />
+                <button
+                  onClick={() => setPickerOpen(false)}
+                  className="w-6 h-6 flex items-center justify-center rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* List */}
+              <div className="divide-y divide-border/30 max-h-[380px] overflow-y-auto">
+                {paged.length === 0 ? (
+                  <div className="py-10 text-center font-mono text-xs text-muted-foreground">No incidents found</div>
+                ) : paged.map((inc, idx) => (
+                  <button
+                    key={inc.incidentId}
+                    onClick={() => { setSelectedId(inc.incidentId); setActiveTab("execution"); setPickerOpen(false); }}
+                    className={cn(
+                      "w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-muted/30 transition-colors",
+                      "animate-in fade-in duration-150",
+                      inc.incidentId === actualSelectedId && "bg-primary/5 border-l-2 border-l-primary pl-3.5"
+                    )}
+                    style={{ animationDelay: `${idx * 20}ms` }}
+                  >
+                    <Badge variant={inc.status.toLowerCase() as any} className="shrink-0 text-[10px] mt-0.5">{inc.status}</Badge>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-mono text-xs text-foreground truncate">{inc.alertFingerprint}</div>
+                      <div className="font-mono text-[10px] text-muted-foreground mt-0.5 flex items-center gap-2">
+                        <span>{formatDate(inc.updatedAt)}</span>
+                        <span className="text-primary/60">#{inc.incidentId.slice(0, 8)}</span>
+                      </div>
+                    </div>
+                    {inc.incidentId === actualSelectedId && (
+                      <CheckCircle className="w-3.5 h-3.5 text-primary shrink-0 mt-0.5" />
+                    )}
+                  </button>
+                ))}
+              </div>
+
+              {/* Footer / pagination */}
+              <div className="flex items-center justify-between px-4 py-2.5 border-t border-border bg-muted/10">
+                <span className="text-[10px] font-mono text-muted-foreground">
+                  {filtered.length} incident{filtered.length !== 1 ? "s" : ""}
+                </span>
+                {totalPicker > 1 && (
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => setPickerPage(p => Math.max(1, p - 1))}
+                      disabled={pickerPage === 1}
+                      className="px-2 py-1 text-[10px] font-mono border border-border rounded-sm disabled:opacity-30 hover:bg-muted transition-colors"
+                    >Prev</button>
+                    <span className="px-2 text-[10px] font-mono text-muted-foreground">{pickerPage} / {totalPicker}</span>
+                    <button
+                      onClick={() => setPickerPage(p => Math.min(totalPicker, p + 1))}
+                      disabled={pickerPage === totalPicker}
+                      className="px-2 py-1 text-[10px] font-mono border border-border rounded-sm disabled:opacity-30 hover:bg-muted transition-colors"
+                    >Next</button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {!incident ? (
         <div className="p-12 text-center text-muted-foreground font-mono text-sm border border-dashed">
