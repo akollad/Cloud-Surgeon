@@ -79,7 +79,7 @@ function ConfidenceCard({ incident }: { incident: Incident }) {
                 transform="rotate(-90 48 48)"
                 style={{ transition: "stroke-dasharray 0.6s ease" }}
               />
-              <text x="48" y="44" textAnchor="middle" fontSize="20" fontWeight="bold" fill="white" fontFamily="monospace">{score}</text>
+              <text x="48" y="44" textAnchor="middle" fontSize="20" fontWeight="bold" fill="hsl(var(--foreground))" fontFamily="monospace">{score}</text>
               <text x="48" y="60" textAnchor="middle" fontSize="10" fill="hsl(var(--muted-foreground))" fontFamily="monospace">/ 100</text>
             </svg>
           </div>
@@ -444,7 +444,7 @@ export default function DecisionTrace() {
                                 {formatDate(String(h.createdAt ?? ""))}
                               </span>
                             </div>
-                            <div className="px-4 py-3 text-sm font-mono text-white/90 leading-relaxed bg-background/60">
+                            <div className="px-4 py-3 text-sm font-mono text-foreground leading-relaxed bg-muted/10">
                               {h.note ? String(h.note) : <span className="text-muted-foreground italic text-xs">No note recorded</span>}
                             </div>
                           </div>
@@ -486,7 +486,7 @@ export default function DecisionTrace() {
                         {/* Blast radius */}
                         <div className="bg-yellow-400/5 border border-yellow-400/20 rounded-sm p-3 space-y-1">
                           <div className="text-[10px] uppercase tracking-wide text-yellow-400/80 font-bold">Blast Radius</div>
-                          <div className="text-xs text-white/90">{repairPlan.blastRadius}</div>
+                          <div className="text-xs text-foreground">{repairPlan.blastRadius}</div>
                         </div>
 
                         {/* Steps */}
@@ -519,7 +519,7 @@ export default function DecisionTrace() {
                         {/* Expected outcome */}
                         <div className="bg-green-400/5 border border-green-400/20 rounded-sm p-3 space-y-1">
                           <div className="text-[10px] uppercase tracking-wide text-green-400/80 font-bold">Expected Outcome</div>
-                          <div className="text-xs text-white/90">{repairPlan.expectedOutcome}</div>
+                          <div className="text-xs text-foreground">{repairPlan.expectedOutcome}</div>
                         </div>
 
                         {/* Alternatives */}

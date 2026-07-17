@@ -152,7 +152,7 @@ export default function StrategyMemory() {
                   <div className="text-[10px] text-muted-foreground uppercase tracking-widest mb-2">
                     Cluster Metrics
                   </div>
-                  <pre className="text-[11px] text-muted-foreground bg-black/40 border border-border/40 p-3 overflow-x-auto rounded-sm max-h-48 overflow-y-auto">
+                  <pre className="text-[11px] text-foreground bg-muted/40 border border-border/50 p-3 overflow-x-auto rounded-sm max-h-48 overflow-y-auto">
                     {JSON.stringify(ccloud, null, 2)}
                   </pre>
                 </div>

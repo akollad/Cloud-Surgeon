@@ -271,63 +271,65 @@ export default function Impact() {
             </p>
           </CardHeader>
           <CardContent className="p-4 space-y-5">
-            {/* bar chart */}
-            <ResponsiveContainer width="100%" height={Math.max(180, barData.length * 44)}>
-              <BarChart
-                data={barData}
-                layout="vertical"
-                margin={{ top: 0, right: 16, left: 8, bottom: 0 }}
-                barSize={10}
-              >
-                <CartesianGrid horizontal={false} stroke="hsl(var(--border))" strokeOpacity={0.4} strokeDasharray="3 3" />
-                <XAxis
-                  type="number"
-                  tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10, fontFamily: "monospace" }}
-                  tickFormatter={(v) => `${v}m`}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <YAxis
-                  type="category"
-                  dataKey="name"
-                  width={140}
-                  tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10, fontFamily: "monospace" }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <Tooltip
-                  content={<DarkTooltip formatter={(v: number) => `${v.toFixed(2)}m`} />}
-                  cursor={{ fill: "hsl(var(--muted))", fillOpacity: 0.3 }}
-                />
-                <Bar
-                  dataKey="min"
-                  name="Min"
-                  fill="#60a5fa"
-                  radius={[0, 3, 3, 0]}
-                  animationBegin={100}
-                  animationDuration={600}
-                  animationEasing="ease-out"
-                />
-                <Bar
-                  dataKey="avg"
-                  name="Avg"
-                  fill="#22d3ee"
-                  radius={[0, 3, 3, 0]}
-                  animationBegin={200}
-                  animationDuration={700}
-                  animationEasing="ease-out"
-                />
-                <Bar
-                  dataKey="max"
-                  name="Max"
-                  fill="#818cf8"
-                  radius={[0, 3, 3, 0]}
-                  animationBegin={300}
-                  animationDuration={800}
-                  animationEasing="ease-out"
-                />
-              </BarChart>
-            </ResponsiveContainer>
+            {/* bar chart — capped height, scrollable when many strategies */}
+            <div className="overflow-y-auto" style={{ maxHeight: 300 }}>
+              <ResponsiveContainer width="100%" height={Math.max(160, barData.length * 40)}>
+                <BarChart
+                  data={barData}
+                  layout="vertical"
+                  margin={{ top: 0, right: 16, left: 8, bottom: 0 }}
+                  barSize={10}
+                >
+                  <CartesianGrid horizontal={false} stroke="hsl(var(--border))" strokeOpacity={0.4} strokeDasharray="3 3" />
+                  <XAxis
+                    type="number"
+                    tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10, fontFamily: "monospace" }}
+                    tickFormatter={(v) => `${v}m`}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    type="category"
+                    dataKey="name"
+                    width={140}
+                    tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10, fontFamily: "monospace" }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <Tooltip
+                    content={<DarkTooltip formatter={(v: number) => `${v.toFixed(2)}m`} />}
+                    cursor={{ fill: "hsl(var(--muted))", fillOpacity: 0.3 }}
+                  />
+                  <Bar
+                    dataKey="min"
+                    name="Min"
+                    fill="#60a5fa"
+                    radius={[0, 3, 3, 0]}
+                    animationBegin={100}
+                    animationDuration={600}
+                    animationEasing="ease-out"
+                  />
+                  <Bar
+                    dataKey="avg"
+                    name="Avg"
+                    fill="#22d3ee"
+                    radius={[0, 3, 3, 0]}
+                    animationBegin={200}
+                    animationDuration={700}
+                    animationEasing="ease-out"
+                  />
+                  <Bar
+                    dataKey="max"
+                    name="Max"
+                    fill="#818cf8"
+                    radius={[0, 3, 3, 0]}
+                    animationBegin={300}
+                    animationDuration={800}
+                    animationEasing="ease-out"
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
 
             {/* legend */}
             <div className="flex items-center gap-5 font-mono text-xs text-muted-foreground">
