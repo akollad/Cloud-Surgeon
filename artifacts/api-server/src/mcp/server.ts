@@ -963,8 +963,8 @@ server.registerTool(
       } else if (strategy === "lambda_concurrency_scale") {
         const fn = String(preRepairState.functionName ?? preRepairState.serviceName ?? "");
         const origConcurrency =
-          preRepairState.originalConcurrency !== undefined
-            ? (preRepairState.originalConcurrency as number | null)
+          preRepairState.originalConcurrency !== undefined && preRepairState.originalConcurrency !== null
+            ? Number(preRepairState.originalConcurrency)
             : null;
         result = await rollbackLambdaConcurrency(fn, origConcurrency) as unknown as Record<string, unknown>;
 
