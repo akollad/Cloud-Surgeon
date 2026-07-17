@@ -1236,9 +1236,11 @@ export function computeRoutingMode(
 ): RoutingMode {
   // Generic fallback strategy → always exploratory (nothing to learn from)
   if (strategyName === "default_repair") return "EXPLORATORY";
-  // sampleCount === 0 with unknown strategy: optimistic prior (0.85) set in
-  // getStrategyWinRate routes this AUTONOMOUSLY on first encounter — system
-  // learns from the outcome rather than stalling for human approval.
+  // Unproven strategy (< 3 real outcomes): require human approval regardless
+  // of the optimistic prior. The prior (0.85) exists to seed win-rate display,
+  // not to grant autonomy without evidence.
+  if (sampleCount < 3) return "PENDING_APPROVAL";
+  // Proven strategy: autonomous only when win-rate is reliably high (> 80%)
   if ((winRate ?? 0) > 0.8) return "AUTONOMOUS";
   return "PENDING_APPROVAL";
 }
