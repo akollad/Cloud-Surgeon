@@ -95,7 +95,7 @@ export function Sidebar({ open, onClose, collapsed, onToggleCollapse }: SidebarP
         <div className="hidden md:flex flex-col items-center pt-4 gap-3 flex-1">
           <button
             onClick={onToggleCollapse}
-            className="w-7 h-7 flex items-center justify-center rounded-sm text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
+            className="w-7 h-7 flex items-center justify-center rounded-sm text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-border/40 transition-colors"
             aria-label="Expand controls"
           >
             <ChevronLeft className="w-3.5 h-3.5" />
@@ -125,7 +125,7 @@ export function Sidebar({ open, onClose, collapsed, onToggleCollapse }: SidebarP
             {/* Desktop collapse button */}
             <button
               onClick={onToggleCollapse}
-              className="hidden md:flex items-center justify-center w-6 h-6 rounded-sm text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
+              className="hidden md:flex items-center justify-center w-6 h-6 rounded-sm text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-border/40 transition-colors"
               aria-label="Collapse controls"
             >
               <ChevronRight className="w-3.5 h-3.5" />
@@ -133,7 +133,7 @@ export function Sidebar({ open, onClose, collapsed, onToggleCollapse }: SidebarP
             {/* Mobile close */}
             <button
               onClick={onClose}
-              className="md:hidden flex items-center justify-center w-6 h-6 rounded-sm text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
+              className="md:hidden flex items-center justify-center w-6 h-6 rounded-sm text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-border/40 transition-colors"
               aria-label="Close controls"
             >
               <X className="w-3.5 h-3.5" />
@@ -152,7 +152,7 @@ export function Sidebar({ open, onClose, collapsed, onToggleCollapse }: SidebarP
             </div>
             <div className="space-y-1.5">
               <label className="text-[10px] uppercase font-mono text-sidebar-foreground/70">Scenario</label>
-              <Select value={scenario} onChange={(e) => setScenario(e.target.value)} className="bg-sidebar-accent/30 border-sidebar-border text-sidebar-foreground">
+              <Select value={scenario} onChange={(e) => setScenario(e.target.value)} className="bg-sidebar-border/30 border-sidebar-border text-sidebar-foreground">
                 {PRESET_SCENARIOS.map((s) => <option key={s} value={s}>{s}</option>)}
               </Select>
             </div>
@@ -162,12 +162,12 @@ export function Sidebar({ open, onClose, collapsed, onToggleCollapse }: SidebarP
                 value={customText}
                 onChange={(e) => setCustomText(e.target.value)}
                 placeholder="Paste PagerDuty payload or text here..."
-                className="font-mono text-xs h-16 bg-sidebar-accent/30 border-sidebar-border text-sidebar-foreground placeholder:text-sidebar-foreground/30"
+                className="font-mono text-xs h-16 bg-sidebar-border/30 border-sidebar-border text-sidebar-foreground placeholder:text-sidebar-foreground/30"
               />
             </div>
             <div className="space-y-1.5">
               <label className="text-[10px] uppercase font-mono text-sidebar-foreground/70">Chaos Engineering</label>
-              <Select value={chaosMode} onChange={(e) => setChaosMode(e.target.value)} className="bg-sidebar-accent/30 border-sidebar-border text-sidebar-foreground">
+              <Select value={chaosMode} onChange={(e) => setChaosMode(e.target.value)} className="bg-sidebar-border/30 border-sidebar-border text-sidebar-foreground">
                 <option value="none">None</option>
                 <option value="latency">Network latency (500ms)</option>
                 <option value="partition">DB partition (2 timeouts)</option>
@@ -187,7 +187,7 @@ export function Sidebar({ open, onClose, collapsed, onToggleCollapse }: SidebarP
               <Activity className="w-3.5 h-3.5" />
               <h2 className="font-mono text-[11px] uppercase font-bold tracking-wider">Predictive Injection</h2>
             </div>
-            <Select value={predictiveScenario} onChange={(e) => setPredictiveScenario(e.target.value)} className="bg-sidebar-accent/30 border-sidebar-border text-sidebar-foreground">
+            <Select value={predictiveScenario} onChange={(e) => setPredictiveScenario(e.target.value)} className="bg-sidebar-border/30 border-sidebar-border text-sidebar-foreground">
               {PREDICTIVE_SCENARIOS.map((s) => <option key={s} value={s}>{s}</option>)}
             </Select>
             <Button
@@ -209,8 +209,8 @@ export function Sidebar({ open, onClose, collapsed, onToggleCollapse }: SidebarP
               <h2 className="font-mono text-[11px] uppercase font-bold tracking-wider">CloudWatch Webhook</h2>
             </div>
             <div className="space-y-1.5">
-              <Input value={cwAlarm} onChange={(e) => setCwAlarm(e.target.value)} placeholder="Alarm Name" className="text-xs bg-sidebar-accent/30 border-sidebar-border text-sidebar-foreground placeholder:text-sidebar-foreground/30" />
-              <Input value={cwReason} onChange={(e) => setCwReason(e.target.value)} placeholder="NewStateReason" className="text-xs bg-sidebar-accent/30 border-sidebar-border text-sidebar-foreground placeholder:text-sidebar-foreground/30" />
+              <Input value={cwAlarm} onChange={(e) => setCwAlarm(e.target.value)} placeholder="Alarm Name" className="text-xs bg-sidebar-border/30 border-sidebar-border text-sidebar-foreground placeholder:text-sidebar-foreground/30" />
+              <Input value={cwReason} onChange={(e) => setCwReason(e.target.value)} placeholder="NewStateReason" className="text-xs bg-sidebar-border/30 border-sidebar-border text-sidebar-foreground placeholder:text-sidebar-foreground/30" />
             </div>
             <Button
               variant="outline"
