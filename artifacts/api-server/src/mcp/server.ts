@@ -23,6 +23,7 @@ import {
   ecsCluster as configEcsCluster,
   ecsDefaultService,
   allKnownServiceNames,
+  allKnownLambdaFunctionNames,
 } from "../lib/surgeon-config";
 
 // ----------------------------------------------------------------------------
@@ -329,19 +330,25 @@ server.registerTool(
 
     let result;
 
+    // ECS cluster/service references always contain "/" (e.g. "cloud-surgeon/checkout").
+    // Lambda function names NEVER contain "/". This guard takes absolute precedence —
+    // if the serviceName has a "/" it is definitively an ECS target, not Lambda.
+    const isDefinitelyEcs = serviceName.includes("/");
+
     // Explicit "lambda:" prefix in action takes precedence — avoids keyword-miss
     // when the function name (e.g. "order-processor") doesn't contain "lambda".
-    // Build a set of known Lambda function names (from config) so routing works
-    // even when the LLM passes a bare function name without the "lambda:" prefix.
-    const lambdaNames = allKnownServiceNames().filter(n => !n.includes("/"));
-    const isLambdaTarget = lambdaNames.some(n => combined.includes(n.toLowerCase()));
+    // Only Lambda function names are checked here — NOT ECS service names — so that
+    // ECS service names like "checkout" do not accidentally trigger the Lambda route.
+    const lambdaFunctionNames = allKnownLambdaFunctionNames();
+    const isLambdaTarget = !isDefinitelyEcs && lambdaFunctionNames.some(n => combined.includes(n.toLowerCase()));
 
     if (
-      actionLower.startsWith("lambda:") ||
-      combined.includes("lambda") ||
-      combined.includes("function") ||
-      combined.includes("concurrency") ||
-      isLambdaTarget
+      !isDefinitelyEcs && (
+        actionLower.startsWith("lambda:") ||
+        combined.includes("lambda") ||
+        combined.includes("concurrency") ||
+        isLambdaTarget
+      )
     ) {
       // Diagnostician (PHASE 0) uses lambda:diagnose → read-only describe.
       // Remediator (PHASE 1) uses lambda:describe_and_remediate → scale concurrency.

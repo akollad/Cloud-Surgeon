@@ -56,6 +56,7 @@ async function buildAll() {
       "handlebars",
       "knex",
       "typeorm",
+      "yaml",
       "protobufjs",
       "onnxruntime-node",
       "@tensorflow/*",

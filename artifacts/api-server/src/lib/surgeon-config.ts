@@ -468,7 +468,7 @@ export function resolveLambdaFunction(candidate: string): string | null {
 /** Default Lambda function (the one marked default: true) */
 export function lambdaDefaultFunction(): string {
   const fns = getSurgeonConfig().infrastructure.aws.lambda.functions;
-  return fns.find(f => f.default)?.name ?? fns[0]?.name ?? "lambda/unknown";
+  return fns.find(f => f.default)?.name ?? fns[0]?.name ?? "unknown-lambda-function";
 }
 
 /** Whether an RDS instance is configured */
@@ -510,4 +510,9 @@ export function allKnownServiceNames(): string[] {
   const ecs = cfg.infrastructure.aws.ecs.services.map(s => s.name);
   const lambda = cfg.infrastructure.aws.lambda.functions.map(f => f.name);
   return [...ecs, ...lambda];
+}
+
+/** Only Lambda function names — used for routing decisions in aws_repair_service */
+export function allKnownLambdaFunctionNames(): string[] {
+  return getSurgeonConfig().infrastructure.aws.lambda.functions.map(f => f.name);
 }

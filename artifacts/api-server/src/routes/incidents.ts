@@ -468,7 +468,9 @@ router.get("/incidents/:incidentId/playbook", async (req, res): Promise<void> =>
     LIMIT  1
   `);
   if (rows.rows.length === 0) {
-    res.status(404).json({ error: "Playbook not found — incident may not be resolved yet" });
+    // Return 200+null (not 404) so the dashboard stops polling with errors.
+    // A missing playbook is normal for in-progress or failed incidents.
+    res.status(200).json(null);
     return;
   }
   const r = rows.rows[0];
@@ -499,7 +501,8 @@ router.get("/incidents/:incidentId/rollback-plan", async (req, res): Promise<voi
     LIMIT  1
   `);
   if (rows.rows.length === 0) {
-    res.status(404).json({ error: "Rollback plan not found — incident may not have reached repair phase yet" });
+    // Return 200+null so the dashboard doesn't log console errors for in-progress incidents.
+    res.status(200).json(null);
     return;
   }
   const r = rows.rows[0];
