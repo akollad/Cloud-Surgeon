@@ -664,13 +664,21 @@ router.get("/logs", async (req, res): Promise<void> => {
 
 // ── Global handoffs ───────────────────────────────────────────────────────
 
-router.get("/handoffs", async (_req, res): Promise<void> => {
-  const { asc } = await import("drizzle-orm");
-  const handoffs = await db
+router.get("/handoffs", async (req, res): Promise<void> => {
+  const { asc, eq } = await import("drizzle-orm");
+  const incidentId = req.query.incidentId as string | undefined;
+  const query = db
     .select()
     .from(agentHandoffsTable)
     .orderBy(asc(agentHandoffsTable.createdAt))
-    .limit(200);
+    .limit(500);
+
+  const handoffs = incidentId
+    ? await db.select().from(agentHandoffsTable)
+        .where(eq(agentHandoffsTable.incidentId, incidentId))
+        .orderBy(asc(agentHandoffsTable.createdAt))
+        .limit(500)
+    : await query;
 
   res.json(handoffs.map((h) => ({
     handoffId: h.handoffId,

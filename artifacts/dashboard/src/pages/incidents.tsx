@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { Link } from "wouter";
 import { useListIncidents, useApproveIncident, useRejectIncident, useCorrectIncident, getListIncidentsQueryKey } from "@workspace/api-client-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -8,7 +7,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Select } from "@/components/ui/input";
 import { Paginator } from "@/components/ui/paginator";
 import { useQueryClient } from "@tanstack/react-query";
-import { List, Check, X, ExternalLink } from "lucide-react";
+import { List, Check, X } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 
 const STRATEGIES = [
@@ -180,12 +179,7 @@ export default function Incidents() {
                     </span>
                   </TableCell>
                   <TableCell className="text-right text-xs text-muted-foreground whitespace-nowrap">
-                    <div className="flex items-center justify-end gap-2">
-                      <span>{formatDate(inc.updatedAt)}</span>
-                      <Link href={`/incidents/${inc.incidentId}`}>
-                        <ExternalLink className="w-3 h-3 text-muted-foreground/50 hover:text-primary transition-colors" />
-                      </Link>
-                    </div>
+                    {formatDate(inc.updatedAt)}
                   </TableCell>
                 </TableRow>
               ))

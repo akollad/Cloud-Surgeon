@@ -1,379 +1,371 @@
-import { useParams, Link } from "wouter";
-import {
-  useGetIncident,
-  useListExecutionLogs,
-  useGetIncidentHandoffs,
-  useCountExecutionLogs,
-} from "@workspace/api-client-react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  ArrowLeft,
-  GitBranch,
-  Clock,
-  Database,
-  AlertTriangle,
-  Wrench,
-  Zap,
-  Search,
-} from "lucide-react";
+import { useState } from "react";
+import { useListIncidents, customFetch } from "@workspace/api-client-react";
+import { useQuery } from "@tanstack/react-query";
+import { GitBranch, Database, AlertTriangle, Wrench, Zap, Check, X, Terminal, ArrowRight, Clock, Loader } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-// ── Agent config ────────────────────────────────────────────────────────────
+// ── Utils ────────────────────────────────────────────────────────────────────
 
-type AgentKey = "diagnostician" | "remediator" | "auditor";
-
-const AGENT: Record<
-  AgentKey,
-  { label: string; color: string; border: string; bg: string; Icon: React.ElementType }
-> = {
-  diagnostician: {
-    label: "DIAGNOSTICIAN",
-    color: "text-blue-400",
-    border: "border-blue-500",
-    bg: "bg-blue-500/15",
-    Icon: Search,
-  },
-  remediator: {
-    label: "REMEDIATOR",
-    color: "text-violet-400",
-    border: "border-violet-500",
-    bg: "bg-violet-500/15",
-    Icon: Wrench,
-  },
-  auditor: {
-    label: "AUDITOR",
-    color: "text-emerald-400",
-    border: "border-emerald-500",
-    bg: "bg-emerald-500/15",
-    Icon: Zap,
-  },
-};
-
-function agentCfg(name?: string | null) {
-  const key = (name ?? "").toLowerCase() as AgentKey;
-  return AGENT[key] ?? {
-    label: (name ?? "UNKNOWN").toUpperCase(),
-    color: "text-muted-foreground",
-    border: "border-border",
-    bg: "bg-muted/20",
-    Icon: Search,
-  };
+function fmtTime(ts: string | null | undefined) {
+  if (!ts) return "—";
+  try {
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return "—";
+    return d.toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  } catch { return "—"; }
 }
 
-// ── Mode badge ───────────────────────────────────────────────────────────────
+function fmtDate(ts: string | null | undefined) {
+  if (!ts) return "—";
+  try {
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return "—";
+    return d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+  } catch { return "—"; }
+}
 
-function ModeBadge({ mode }: { mode?: string | null }) {
-  if (!mode) return null;
-  const cls =
-    mode === "AUTONOMOUS"       ? "text-green-400 border-green-500/40 bg-green-500/10" :
-    mode === "EXPLORATORY"      ? "text-yellow-400 border-yellow-500/40 bg-yellow-500/10" :
-    mode === "PENDING_APPROVAL" ? "text-orange-400 border-orange-500/40 bg-orange-500/10" :
-    "text-muted-foreground border-border";
-  return (
-    <span className={cn("text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 border rounded-sm", cls)}>
-      {mode.replace(/_/g, " ")}
-    </span>
-  );
+function fmtMttr(ms: number) {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.round(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`;
+}
+
+// ── Agent helpers (mirrors prod Gie / Fie) ───────────────────────────────────
+
+function agentIcon(name: string) {
+  const n = name.toLowerCase();
+  if (n.includes("diag")) return <Database className="w-3.5 h-3.5 text-cyan-400" />;
+  if (n.includes("remed")) return <Wrench className="w-3.5 h-3.5 text-purple-400" />;
+  if (n.includes("audit")) return <Zap className="w-3.5 h-3.5 text-amber-400" />;
+  return <Terminal className="w-3.5 h-3.5 text-muted-foreground" />;
+}
+
+function agentClasses(name: string): string {
+  const n = name.toLowerCase();
+  if (n.includes("diag")) return "text-cyan-400 border-cyan-500/40 bg-cyan-500/10";
+  if (n.includes("remed")) return "text-purple-400 border-purple-500/40 bg-purple-500/10";
+  if (n.includes("audit")) return "text-amber-400 border-amber-500/40 bg-amber-500/10";
+  return "text-muted-foreground border-border bg-muted/20";
 }
 
 // ── Status badge ─────────────────────────────────────────────────────────────
 
-const STATUS_CLS: Record<string, string> = {
-  FAILED:           "text-red-400 border-red-500/50 bg-red-500/10",
-  RESOLVED:         "text-green-400 border-green-500/50 bg-green-500/10",
-  TRIGGERED:        "text-red-400 border-red-500/40 bg-red-500/10",
-  DIAGNOSING:       "text-yellow-400 border-yellow-500/40 bg-yellow-500/10",
-  REPAIRING:        "text-cyan-400 border-cyan-500/40 bg-cyan-500/10",
-  PENDING_APPROVAL: "text-orange-400 border-orange-500/40 bg-orange-500/10",
-  PREDICTIVE:       "text-purple-400 border-purple-500/40 bg-purple-500/10",
+const STATUS_CLASSES: Record<string, string> = {
+  RESOLVED:         "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
+  FAILED:           "bg-red-500/15 text-red-400 border-red-500/30",
+  PENDING_APPROVAL: "bg-amber-500/15 text-amber-400 border-amber-500/30",
+  TRIGGERED:        "bg-blue-500/15 text-blue-400 border-blue-500/30",
+  DIAGNOSING:       "bg-cyan-500/15 text-cyan-400 border-cyan-500/30",
+  REPAIRING:        "bg-purple-500/15 text-purple-400 border-purple-500/30",
+  PREDICTIVE:       "bg-violet-500/15 text-violet-400 border-violet-500/30",
 };
 
-// ── Time helpers ─────────────────────────────────────────────────────────────
-
-function toHMS(ts: string | Date | undefined | null): string {
-  if (!ts) return "—";
-  try {
-    const d = typeof ts === "string" ? new Date(ts) : ts;
-    if (isNaN(d.getTime())) return "—";
-    return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  } catch {
-    return "—";
-  }
-}
-
-function coerceDate(v: string | Date | undefined | null): Date | null {
-  if (!v) return null;
-  const d = typeof v === "string" ? new Date(v) : v;
-  return isNaN(d.getTime()) ? null : d;
-}
-
-// ── Component ────────────────────────────────────────────────────────────────
-
-export default function IncidentTimeline() {
-  const params = useParams<{ incidentId: string }>();
-  const { incidentId } = params;
-
-  const { data: incident, isLoading } = useGetIncident(incidentId, {
-    query: { refetchInterval: 5000 },
-  });
-  const { data: rawHandoffs } = useGetIncidentHandoffs(incidentId, {
-    query: { refetchInterval: 5000 },
-  });
-  const { data: logs } = useListExecutionLogs(
-    { incidentId },
-    { query: { refetchInterval: 5000 } },
-  );
-  const { data: logCount } = useCountExecutionLogs(
-    { incidentId },
-    { query: { refetchInterval: 10000 } },
-  );
-
-  // ── Loading ────────────────────────────────────────────────────────────────
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-64 font-mono text-sm text-muted-foreground animate-pulse">
-        LOADING INCIDENT…
-      </div>
-    );
-  }
-
-  if (!incident) {
-    return (
-      <div className="max-w-3xl mx-auto pt-16 text-center space-y-4">
-        <AlertTriangle className="mx-auto h-8 w-8 text-destructive" />
-        <p className="font-mono text-sm text-muted-foreground">Incident not found.</p>
-        <Link href="/incidents">
-          <Button variant="outline" size="sm" className="font-mono text-xs">
-            <ArrowLeft className="w-3.5 h-3.5 mr-1" /> Back
-          </Button>
-        </Link>
-      </div>
-    );
-  }
-
-  const ctx = incident.contextJson ?? ({} as Record<string, unknown>);
-  const strategyName = (ctx.strategyName as string | undefined) ?? null;
-
-  // Normalise handoffs — server returns `createdAt`, spec has `handoffAt`
-  const handoffs = (rawHandoffs ?? []) as Array<{
-    agentName?: string | null;
-    decisionMode?: string | null;
-    note?: string | null;
-    summary?: string | null;
-    handoffAt?: string | null;
-    createdAt?: string | null;
-  }>;
-
-  const handoffCount = handoffs.length;
-  const actionCount = logCount?.count ?? logs?.length ?? 0;
-
-  // ── Merged timeline ────────────────────────────────────────────────────────
-  type TItem =
-    | { kind: "handoff"; ts: Date | null; agentName?: string | null; decisionMode?: string | null; note?: string | null }
-    | { kind: "log";     ts: Date | null; action: string; result?: string | null };
-
-  const items: TItem[] = [
-    ...handoffs.map(h => ({
-      kind: "handoff" as const,
-      ts: coerceDate(h.createdAt ?? h.handoffAt),
-      agentName: h.agentName,
-      decisionMode: h.decisionMode,
-      note: h.note ?? h.summary,
-    })),
-    ...(logs ?? []).map(l => ({
-      kind: "log" as const,
-      ts: coerceDate(l.createdAt),
-      action: l.actionTaken,
-      result: l.result,
-    })),
-  ].sort((a, b) => {
-    if (!a.ts && !b.ts) return 0;
-    if (!a.ts) return 1;
-    if (!b.ts) return -1;
-    return a.ts.getTime() - b.ts.getTime();
-  });
-
+function StatusBadge({ status }: { status: string }) {
   return (
-    <div className="max-w-4xl mx-auto space-y-0 animate-in fade-in duration-300 pb-12">
+    <span className={cn(
+      "inline-flex items-center px-2 py-0.5 rounded-sm border font-mono text-[10px] uppercase tracking-wider",
+      STATUS_CLASSES[status] ?? "bg-muted/40 text-muted-foreground border-border/50"
+    )}>
+      {status}
+    </span>
+  );
+}
 
-      {/* ── Back + title ───────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2 pb-5 border-b border-border">
-        <Link href="/incidents">
-          <Button variant="ghost" size="sm" className="font-mono text-xs text-muted-foreground gap-1 px-2 h-7">
-            <ArrowLeft className="w-3 h-3" />
-          </Button>
-        </Link>
-        <h1 className="text-xl font-mono font-bold tracking-tighter uppercase text-foreground flex items-center gap-2">
-          <GitBranch className="h-4 w-4 text-primary" />
-          Incident Timeline
-        </h1>
+// ── Timestamp ─────────────────────────────────────────────────────────────────
+
+function Ts({ ts }: { ts: string | null | undefined }) {
+  return (
+    <span className="font-mono text-[10px] text-muted-foreground/70 tabular-nums shrink-0">
+      {fmtTime(ts)}
+    </span>
+  );
+}
+
+// ── Event types ───────────────────────────────────────────────────────────────
+
+type AnyEvent =
+  | { kind: "trigger"; ts: string; incident: any }
+  | { kind: "handoff"; ts: string; h: any }
+  | { kind: "log";     ts: string; l: any }
+  | { kind: "resolve"; ts: string; status: string; mttrMs: number | null };
+
+function mergeEvents(incident: any, logs: any[], handoffs: any[]): AnyEvent[] {
+  const r: AnyEvent[] = [];
+  r.push({ kind: "trigger", ts: incident.triggeredAt ?? incident.createdAt ?? incident.updatedAt, incident });
+  for (const h of handoffs) r.push({ kind: "handoff", ts: h.createdAt ?? h.handoffAt, h });
+  for (const l of logs)     r.push({ kind: "log",     ts: l.createdAt, l });
+  const terminal = ["RESOLVED", "FAILED", "PENDING_APPROVAL"];
+  if (incident.resolvedAt || terminal.includes(incident.status)) {
+    const ts = incident.resolvedAt ?? incident.updatedAt;
+    const mttrMs = incident.resolvedAt
+      ? new Date(incident.resolvedAt).getTime() - new Date(incident.triggeredAt ?? incident.createdAt).getTime()
+      : null;
+    r.push({ kind: "resolve", ts, status: incident.status, mttrMs });
+  }
+  return r.sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
+}
+
+// ── Sub-components ────────────────────────────────────────────────────────────
+
+function TriggerEvent({ ev }: { ev: Extract<AnyEvent, { kind: "trigger" }> }) {
+  const ctx = ev.incident.contextJson ?? {};
+  return (
+    <div className="flex gap-3">
+      <div className="flex flex-col items-center gap-1">
+        <div className="w-8 h-8 rounded-full bg-blue-500/15 border border-blue-500/40 flex items-center justify-center shrink-0">
+          <AlertTriangle className="w-3.5 h-3.5 text-blue-400" />
+        </div>
+        <div className="w-px flex-1 bg-border/40" />
       </div>
-
-      {/* ── Incident header card ───────────────────────────────────────────── */}
-      <div className="mt-5 border border-border rounded-sm bg-card">
-        {/* Top row: label + status badge + stats */}
-        <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-4 flex-wrap">
-          <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">Incident</p>
-          <div className="flex items-center gap-3 ml-auto">
-            <span className={cn("text-xs font-mono px-2 py-0.5 border rounded-sm font-semibold", STATUS_CLS[incident.status] ?? "")}>
-              {incident.status}
-            </span>
-            <span className="text-xs font-mono text-muted-foreground flex items-center gap-1.5 whitespace-nowrap">
-              <Clock className="w-3 h-3" />
-              {actionCount} action{actionCount !== 1 ? "s" : ""} · {handoffCount} handoff{handoffCount !== 1 ? "s" : ""}
-            </span>
+      <div className="pb-4 flex-1 min-w-0">
+        <div className="flex items-center gap-2 mb-1">
+          <Ts ts={ev.ts} />
+          <span className="font-mono text-xs font-bold text-blue-400 uppercase tracking-wider">
+            Incident Triggered
+          </span>
+        </div>
+        <div className="bg-blue-500/5 border border-blue-500/20 rounded-sm p-3 space-y-2">
+          <p className="font-mono text-xs text-foreground/90 break-words">{ev.incident.alertFingerprint}</p>
+          <div className="flex flex-wrap gap-3 text-[10px] font-mono text-muted-foreground">
+            <span>ID: <span className="text-foreground/70">{ev.incident.incidentId.slice(0, 8)}</span></span>
+            {ctx.strategyName && (
+              <span>Strategy: <span className="text-cyan-400">{ctx.strategyName}</span></span>
+            )}
+            {ctx.winRate != null && (
+              <span>Win-rate: <span className="text-emerald-400">{(ctx.winRate * 100).toFixed(0)}%</span></span>
+            )}
+            {ctx.stormDetected && (
+              <span className="text-red-400">⚠ Storm detected</span>
+            )}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
 
-        {/* Fingerprint row */}
-        <div className="px-4 py-3 border-b border-border font-mono text-sm text-foreground/80 truncate" title={incident.alertFingerprint}>
-          [{incident.status}]&nbsp;{incident.alertFingerprint}&nbsp;—
+function HandoffEvent({ ev }: { ev: Extract<AnyEvent, { kind: "handoff" }> }) {
+  const h = ev.h;
+  const cls = agentClasses(h.agentName ?? "");
+  const colorClass = cls.split(" ")[0]; // first class is the text color
+  return (
+    <div className="flex gap-3">
+      <div className="flex flex-col items-center gap-1">
+        <div className={cn("w-8 h-8 rounded-full border flex items-center justify-center shrink-0", cls)}>
+          {agentIcon(h.agentName ?? "")}
         </div>
+        <div className="w-px flex-1 bg-border/40" />
+      </div>
+      <div className="pb-4 flex-1 min-w-0">
+        <div className="flex items-center gap-2 mb-1 flex-wrap">
+          <Ts ts={ev.ts} />
+          <ArrowRight className="w-3 h-3 text-muted-foreground/50 shrink-0" />
+          <span className={cn("font-mono text-xs font-bold uppercase tracking-wider", colorClass)}>
+            {h.agentName}
+          </span>
+          {h.decisionMode && (
+            <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-sm border bg-muted/20 text-muted-foreground border-border/50 uppercase">
+              {h.decisionMode}
+            </span>
+          )}
+        </div>
+        {h.note && (
+          <p className="font-mono text-xs text-muted-foreground/80 italic pl-0.5 break-words">
+            "{h.note}"
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
 
-        {/* CockroachDB info bar */}
-        <div className="px-4 py-2.5 flex items-center gap-2 text-[11px] font-mono text-cyan-400/80 bg-cyan-500/5 border-b border-cyan-500/20 flex-wrap">
-          <Database className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
-          <span className="text-cyan-500 font-semibold">CockroachDB</span>
-          <span className="text-muted-foreground">—</span>
-          <span>incident_state <span className="text-muted-foreground/70">(SERIALIZABLE lock)</span></span>
-          <span className="text-muted-foreground">·</span>
-          <span>execution_logs <span className="text-muted-foreground/70">({actionCount} rows)</span></span>
-          <span className="text-muted-foreground">·</span>
-          <span>agent_handoffs <span className="text-muted-foreground/70">({handoffCount} rows)</span></span>
-          {strategyName && (
-            <>
-              <span className="text-muted-foreground">·</span>
-              <span>strategy <span className="text-foreground/70">"{strategyName}"</span></span>
-            </>
+function LogEvent({ ev }: { ev: Extract<AnyEvent, { kind: "log" }> }) {
+  const [expanded, setExpanded] = useState(false);
+  const l = ev.l;
+  const hasResult = l.result && l.result.trim().length > 0;
+  const preview = l.result?.slice(0, 200) ?? "";
+  const truncated = (l.result?.length ?? 0) > 200;
+  return (
+    <div className="flex gap-3">
+      <div className="flex flex-col items-center gap-1">
+        <div className="w-8 h-8 rounded-sm bg-muted/20 border border-border/50 flex items-center justify-center shrink-0">
+          <Terminal className="w-3.5 h-3.5 text-muted-foreground/70" />
+        </div>
+        <div className="w-px flex-1 bg-border/30" />
+      </div>
+      <div className="pb-3 flex-1 min-w-0">
+        <div className="flex items-center gap-2 mb-1">
+          <Ts ts={ev.ts} />
+          <span className="font-mono text-[11px] text-foreground/80 break-words">{l.actionTaken}</span>
+        </div>
+        {hasResult && (
+          <div
+            className="bg-muted/10 border border-border/30 rounded-sm px-3 py-2 cursor-pointer hover:bg-muted/20 transition-colors"
+            onClick={() => setExpanded(x => !x)}
+          >
+            <pre className="font-mono text-[10px] text-muted-foreground/70 whitespace-pre-wrap break-words leading-relaxed">
+              {expanded ? l.result : preview}{truncated && !expanded ? "…" : ""}
+            </pre>
+            {truncated && (
+              <span className="text-[9px] font-mono text-primary/60 mt-1 block">
+                {expanded ? "▲ collapse" : "▼ expand"}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ResolveEvent({ ev }: { ev: Extract<AnyEvent, { kind: "resolve" }> }) {
+  const ok = ev.status === "RESOLVED";
+  const pending = ev.status === "PENDING_APPROVAL";
+  return (
+    <div className="flex gap-3">
+      <div className="flex flex-col items-center">
+        <div className={cn(
+          "w-8 h-8 rounded-full border flex items-center justify-center shrink-0",
+          ok      ? "bg-emerald-500/15 border-emerald-500/40" :
+          pending ? "bg-amber-500/15 border-amber-500/40" :
+                    "bg-red-500/15 border-red-500/40"
+        )}>
+          {ok      ? <Check className="w-3.5 h-3.5 text-emerald-400" /> :
+           pending ? <AlertTriangle className="w-3.5 h-3.5 text-amber-400" /> :
+                     <X className="w-3.5 h-3.5 text-red-400" />}
+        </div>
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 mb-1 flex-wrap">
+          <Ts ts={ev.ts} />
+          <StatusBadge status={ev.status} />
+          {ev.mttrMs != null && (
+            <span className="font-mono text-[10px] text-muted-foreground">
+              MTTR: <span className="text-emerald-400 font-bold">{fmtMttr(ev.mttrMs)}</span>
+            </span>
           )}
         </div>
       </div>
+    </div>
+  );
+}
 
-      {/* ── Timeline ───────────────────────────────────────────────────────── */}
-      <div className="mt-6 relative pl-10">
-        {/* Vertical line */}
-        <div className="absolute left-[15px] top-0 bottom-0 w-px bg-border/60" />
+// ── Main page ─────────────────────────────────────────────────────────────────
 
-        {/* ── Incident triggered (synthetic first event) ── */}
-        <div className="relative mb-4">
-          <div className="absolute -left-[25px] top-[3px] w-8 h-8 rounded-full border-2 border-muted-foreground/40 bg-muted/20 flex items-center justify-center z-10">
-            <AlertTriangle className="w-3.5 h-3.5 text-muted-foreground/70" />
-          </div>
-          <div className="ml-2 space-y-1 font-mono">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span>{toHMS(incident.updatedAt)}</span>
-              <span className="uppercase text-foreground/60 font-bold tracking-wider text-[10px]">INCIDENT TRIGGERED</span>
-            </div>
-            <div className="border border-border/60 bg-card rounded-sm p-3 space-y-1 text-xs">
-              <p className="text-foreground/80 truncate" title={incident.alertFingerprint}>
-                {incident.alertFingerprint}
-              </p>
-              <div className="flex items-center gap-3 text-muted-foreground flex-wrap">
-                <span>ID: <span className="text-foreground/70">{incident.incidentId.slice(0, 8)}</span></span>
-                {strategyName && (
-                  <span>Strategy: <span className="text-cyan-400">{strategyName}</span></span>
-                )}
-                {ctx.winRate != null && (
-                  <span>Win-rate: <span className="text-foreground/70">{Math.round(Number(ctx.winRate) * 100)}%</span></span>
-                )}
-              </div>
-            </div>
-          </div>
+export default function IncidentTimeline() {
+  const { data: incidents = [], isLoading: loadingList } = useListIncidents();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const activeId = selectedId ?? incidents[0]?.incidentId ?? null;
+
+  const { data: incident, isLoading: loadingIncident } = useQuery({
+    queryKey: ["incident", activeId],
+    queryFn: () => customFetch<any>(`/api/incidents/${activeId}`),
+    enabled: !!activeId,
+  });
+
+  const { data: logs = [], isLoading: loadingLogs } = useQuery({
+    queryKey: ["logs", activeId],
+    queryFn: () => customFetch<any[]>(`/api/logs?incidentId=${activeId}`),
+    enabled: !!activeId,
+  });
+
+  const { data: handoffs = [], isLoading: loadingHandoffs } = useQuery({
+    queryKey: ["handoffs", activeId],
+    queryFn: () => customFetch<any[]>(`/api/handoffs?incidentId=${activeId}`),
+    enabled: !!activeId,
+  });
+
+  const isLoading = loadingList || loadingIncident || loadingLogs || loadingHandoffs;
+  const events = incident ? mergeEvents(incident, logs as any[], handoffs as any[]) : [];
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in duration-500 pb-10">
+
+      {/* ── Header ── */}
+      <div className="flex items-center justify-between border-b border-border pb-4">
+        <h1 className="text-2xl font-mono font-bold tracking-tighter uppercase text-foreground flex items-center gap-2">
+          <GitBranch className="h-5 w-5 text-primary" />
+          Incident Timeline
+        </h1>
+        {isLoading && <Loader className="w-4 h-4 text-muted-foreground/50 animate-spin" />}
+      </div>
+
+      {/* ── Incident selector + meta ── */}
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="flex-1">
+          <label className="block text-[10px] font-mono uppercase tracking-widest text-muted-foreground mb-1.5">
+            Incident
+          </label>
+          <select
+            value={activeId ?? ""}
+            onChange={e => setSelectedId(e.target.value || null)}
+            className={cn(
+              "w-full h-9 pl-3 pr-8 rounded-sm border font-mono text-xs appearance-none",
+              "bg-muted/10 border-border text-foreground",
+              "focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30",
+            )}
+          >
+            {incidents.map(inc => (
+              <option key={inc.incidentId} value={inc.incidentId}>
+                [{inc.status}] {inc.alertFingerprint.slice(0, 60)}{inc.alertFingerprint.length > 60 ? "…" : ""} · {fmtDate(inc.updatedAt)}
+              </option>
+            ))}
+          </select>
         </div>
-
-        {/* ── Timeline items ── */}
-        {items.length === 0 ? (
-          <div className="ml-2 py-10 text-center font-mono text-xs text-muted-foreground border border-dashed border-border rounded-sm">
-            NO EVENTS YET — AGENT MAY STILL BE RUNNING
-          </div>
-        ) : (
-          items.map((item, i) => {
-            if (item.kind === "handoff") {
-              const cfg = agentCfg(item.agentName);
-              const { Icon } = cfg;
-              return (
-                <div key={i} className="relative mb-3 group">
-                  {/* Circle */}
-                  <div className={cn(
-                    "absolute -left-[25px] top-[2px] w-8 h-8 rounded-full border-2 flex items-center justify-center z-10 transition-transform group-hover:scale-110",
-                    cfg.border, cfg.bg,
-                  )}>
-                    <Icon className={cn("w-3.5 h-3.5", cfg.color)} />
-                  </div>
-
-                  <div className="ml-2 space-y-0.5 font-mono">
-                    {/* Meta row */}
-                    <div className="flex items-center gap-2 flex-wrap text-xs">
-                      <span className="text-muted-foreground text-[10px]">{toHMS(item.ts)}</span>
-                      <span className="text-muted-foreground/50">→</span>
-                      <span className={cn("font-bold", cfg.color)}>{cfg.label}</span>
-                      <ModeBadge mode={item.decisionMode} />
-                    </div>
-                    {/* Note */}
-                    {item.note && (
-                      <p className="text-[11px] text-muted-foreground leading-relaxed pl-0">
-                        "{item.note}"
-                      </p>
-                    )}
-                  </div>
-                </div>
-              );
-            }
-
-            // Execution log
-            return (
-              <div key={i} className="relative mb-3">
-                <div className="absolute -left-[25px] top-[2px] w-8 h-8 rounded-full border-2 border-primary/40 bg-primary/10 flex items-center justify-center z-10">
-                  <span className="text-primary text-[9px] font-bold font-mono">LOG</span>
-                </div>
-                <div className="ml-2 space-y-0.5 font-mono">
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <span className="text-[10px]">{toHMS(item.ts)}</span>
-                  </div>
-                  <p className="text-xs text-foreground/80 break-all">
-                    {item.action}
-                  </p>
-                  {item.result && (
-                    <p className="text-[11px] text-muted-foreground/70 break-all whitespace-pre-wrap pl-2 border-l border-border/50">
-                      {item.result.length > 500 ? item.result.slice(0, 500) + "…" : item.result}
-                    </p>
-                  )}
-                </div>
-              </div>
-            );
-          })
-        )}
-
-        {/* ── Terminal status ── */}
-        {(incident.status === "RESOLVED" || incident.status === "FAILED") && (
-          <div className="relative mb-3">
-            <div className={cn(
-              "absolute -left-[25px] top-[2px] w-8 h-8 rounded-full border-2 flex items-center justify-center z-10",
-              incident.status === "RESOLVED"
-                ? "border-green-500 bg-green-500/15"
-                : "border-red-500 bg-red-500/15",
-            )}>
-              <span className={cn(
-                "text-[9px] font-bold font-mono",
-                incident.status === "RESOLVED" ? "text-green-400" : "text-red-400",
-              )}>
-                {incident.status === "RESOLVED" ? "OK" : "ERR"}
-              </span>
-            </div>
-            <div className="ml-2 font-mono text-xs">
-              <span className={incident.status === "RESOLVED" ? "text-green-400 font-bold" : "text-red-400 font-bold"}>
-                {incident.status}
-              </span>
-              {ctx.finalResponse && (
-                <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
-                  {String(ctx.finalResponse).slice(0, 300)}
-                </p>
-              )}
-            </div>
+        {incident && (
+          <div className="flex items-end gap-2 flex-wrap">
+            <StatusBadge status={incident.status} />
+            <span className="font-mono text-[10px] text-muted-foreground flex items-center gap-1">
+              <Clock className="w-3 h-3 inline" />
+              {fmtDate(incident.triggeredAt ?? incident.createdAt)}
+            </span>
+            <span className="font-mono text-[10px] text-muted-foreground">
+              {(logs as any[]).length} actions · {(handoffs as any[]).length} handoffs
+            </span>
           </div>
         )}
       </div>
+
+      {/* ── CockroachDB info bar ── */}
+      {incident && (
+        <div className="flex gap-2 flex-wrap text-[10px] font-mono text-muted-foreground bg-muted/10 border border-border/40 rounded-sm px-3 py-2">
+          <Database className="w-3 h-3 text-cyan-400 shrink-0 mt-px" />
+          <span>
+            <span className="text-cyan-400">CockroachDB</span>
+            {" — "}
+            incident_state (SERIALIZABLE lock) · execution_logs ({(logs as any[]).length} rows) · agent_handoffs ({(handoffs as any[]).length} rows) ·
+            {incident.contextJson?.strategyName
+              ? ` strategy "${incident.contextJson.strategyName}"`
+              : " strategy memory via VECTOR(1024) RAG"}
+          </span>
+        </div>
+      )}
+
+      {/* ── Empty states ── */}
+      {!activeId && !loadingList && (
+        <p className="font-mono text-sm text-muted-foreground text-center py-16">
+          No incidents yet — trigger one from the Controls panel.
+        </p>
+      )}
+      {activeId && isLoading && !incident && (
+        <div className="flex justify-center py-16">
+          <Loader className="w-6 h-6 text-muted-foreground/40 animate-spin" />
+        </div>
+      )}
+
+      {/* ── Timeline ── */}
+      {events.length > 0 && (
+        <div className="space-y-0 pt-2">
+          {events.map((ev, i) =>
+            ev.kind === "trigger"  ? <TriggerEvent  key={i} ev={ev} /> :
+            ev.kind === "handoff"  ? <HandoffEvent  key={i} ev={ev} /> :
+            ev.kind === "log"      ? <LogEvent      key={i} ev={ev} /> :
+            ev.kind === "resolve"  ? <ResolveEvent  key={i} ev={ev} /> :
+            null
+          )}
+        </div>
+      )}
     </div>
   );
 }
