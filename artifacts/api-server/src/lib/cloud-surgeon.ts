@@ -1669,13 +1669,6 @@ export async function runAgentLoop(
     const claimed = await claimIncidentForAgent(incident.incidentId, "diagnostician");
     if (!claimed) return current; // rare: already claimed
 
-    await logAgentHandoff(
-      incident.incidentId,
-      "diagnostician",
-      null,
-      "Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API",
-    );
-
     // Strategy-aware diagnostic tool selection:
     //   crdb_* strategies / cockroach-specific alerts → CockroachDB cluster health
     //   RDS strategies / rds-specific alerts          → aws_repair_service (RDS describe)
@@ -1721,6 +1714,25 @@ export async function runAgentLoop(
       diagToolName = "aws_repair_service";
       toolInput = { serviceName: diagServiceName, action: "ecs:diagnose" };
     }
+
+    // Build an accurate handoff note now that we know which tool will run.
+    const diagNote =
+      diagToolName === "execute_ccloud_command"
+        ? "Starting diagnostic phase — verifying cluster state via CockroachDB Cloud CLI (ccloud)"
+        : diagToolName === "crdb_cluster_health"
+        ? "Starting diagnostic phase — querying CockroachDB cluster health directly"
+        : diagToolName === "aws_repair_service" && (toolInput.action as string)?.startsWith("rds:")
+        ? "Starting diagnostic phase — inspecting RDS instance via AWS API"
+        : diagToolName === "aws_repair_service" && (toolInput.action as string)?.startsWith("lambda:")
+        ? "Starting diagnostic phase — inspecting Lambda function via AWS API"
+        : "Starting diagnostic phase — inspecting ECS service via AWS API";
+
+    await logAgentHandoff(
+      incident.incidentId,
+      "diagnostician",
+      null,
+      diagNote,
+    );
 
     const { thought, source: thoughtSource } = await invokeLLMThought(alertText, 0, null, { strategyName });
     const toolOutput = await callTool(diagToolName, toolInput);
