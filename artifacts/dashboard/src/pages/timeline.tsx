@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useLocation, useSearch } from "wouter";
 import { useListIncidents, customFetch } from "@workspace/api-client-react";
 import { useQuery } from "@tanstack/react-query";
-import { GitBranch, Database, AlertTriangle, Wrench, Zap, Check, X, Terminal, ArrowRight, Clock, Loader, History, ExternalLink } from "lucide-react";
+import { GitBranch, Database, AlertTriangle, Wrench, Zap, Check, X, Terminal, ArrowRight, Clock, Loader, History, ExternalLink, Brain, UserCheck, ShieldCheck, RefreshCw } from "lucide-react";
 import { IncidentPickerModal } from "@/components/ui/incident-picker-modal";
 import { cn } from "@/lib/utils";
 
@@ -85,24 +85,71 @@ function Ts({ ts }: { ts: string | null | undefined }) {
 
 // ── Event types ───────────────────────────────────────────────────────────────
 
+type TransitionReason = "human_approved" | "autonomous_reeval" | "feedback_corrected";
+
 type AnyEvent =
-  | { kind: "trigger"; ts: string; incident: any }
-  | { kind: "handoff"; ts: string; h: any }
-  | { kind: "log";     ts: string; l: any }
-  | { kind: "resolve"; ts: string; status: string; mttrMs: number | null };
+  | { kind: "trigger";    ts: string; incident: any }
+  | { kind: "handoff";    ts: string; h: any }
+  | { kind: "log";        ts: string; l: any }
+  | { kind: "transition"; ts: string; reason: TransitionReason; fromMode: string; toMode: string; agentName: string }
+  | { kind: "resolve";    ts: string; status: string; mttrMs: number | null; verdict?: string };
+
+function inferTransitionReason(autonomousNote: string): TransitionReason {
+  const n = autonomousNote.toLowerCase();
+  if (n.includes("human") || n.includes("approv")) return "human_approved";
+  if (n.includes("feedback") || n.includes("corrected"))  return "feedback_corrected";
+  return "autonomous_reeval";
+}
 
 function mergeEvents(incident: any, logs: any[], handoffs: any[]): AnyEvent[] {
-  // Collect middle events (logs + handoffs) and sort them by actual timestamp.
+  // Sort all handoffs and logs by timestamp.
+  const sortedHandoffs = [...handoffs].sort(
+    (a, b) => new Date(a.createdAt ?? a.handoffAt).getTime() - new Date(b.createdAt ?? b.handoffAt).getTime()
+  );
+  const sortedLogs = [...logs].sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+  );
+
   const middle: AnyEvent[] = [];
-  for (const h of handoffs) middle.push({ kind: "handoff", ts: h.createdAt ?? h.handoffAt, h });
-  for (const l of logs)     middle.push({ kind: "log",     ts: l.createdAt, l });
+
+  // Build handoff events and inject transition cards between PENDING_APPROVAL → AUTONOMOUS.
+  for (let i = 0; i < sortedHandoffs.length; i++) {
+    const h = sortedHandoffs[i];
+    const prev = sortedHandoffs[i - 1];
+    const ts = h.createdAt ?? h.handoffAt;
+
+    // Detect mode escalation: previous handoff was PENDING_APPROVAL, current is AUTONOMOUS
+    if (
+      prev &&
+      prev.agentName === h.agentName &&
+      prev.decisionMode === "PENDING_APPROVAL" &&
+      h.decisionMode === "AUTONOMOUS"
+    ) {
+      const reason = inferTransitionReason(h.note ?? "");
+      middle.push({
+        kind: "transition",
+        ts,
+        reason,
+        fromMode: "PENDING_APPROVAL",
+        toMode: "AUTONOMOUS",
+        agentName: h.agentName,
+      });
+    }
+
+    middle.push({ kind: "handoff", ts, h });
+  }
+
+  for (const l of sortedLogs) {
+    middle.push({ kind: "log", ts: l.createdAt, l });
+  }
+
+  // Sort all middle events together.
   middle.sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
 
-  // Derive the "started" timestamp from the earliest available signal so the
-  // trigger card shows a meaningful time even when triggeredAt is null.
+  // Use the earliest available timestamp as the trigger time.
   const candidateTs = [
     incident.triggeredAt,
-    middle[0]?.ts,           // first execution log / handoff is a reliable lower bound
+    middle[0]?.ts,
     incident.createdAt,
     incident.updatedAt,
   ].filter(Boolean) as string[];
@@ -111,8 +158,7 @@ function mergeEvents(incident: any, logs: any[], handoffs: any[]): AnyEvent[] {
     candidateTs[0],
   );
 
-  // trigger is always first; resolve (if any) is always last — regardless of
-  // DB timestamps which can reflect update times rather than event times.
+  // Trigger always first, resolve always last.
   const r: AnyEvent[] = [];
   r.push({ kind: "trigger", ts: triggerTs, incident });
   r.push(...middle);
@@ -123,7 +169,13 @@ function mergeEvents(incident: any, logs: any[], handoffs: any[]): AnyEvent[] {
     const mttrMs = incident.resolvedAt
       ? new Date(incident.resolvedAt).getTime() - new Date(triggerTs).getTime()
       : null;
-    r.push({ kind: "resolve", ts, status: incident.status, mttrMs });
+    // Extract verdict from last verify_resolution log if present.
+    const verifyLog = sortedLogs.findLast((l: any) => {
+      try { return JSON.parse(l.result ?? "{}").verdict; } catch { return false; }
+    });
+    let verdict: string | undefined;
+    try { verdict = verifyLog ? JSON.parse(verifyLog.result).verdict : undefined; } catch {}
+    r.push({ kind: "resolve", ts, status: incident.status, mttrMs, verdict });
   }
 
   return r;
@@ -133,6 +185,12 @@ function mergeEvents(incident: any, logs: any[], handoffs: any[]): AnyEvent[] {
 
 function TriggerEvent({ ev }: { ev: Extract<AnyEvent, { kind: "trigger" }> }) {
   const ctx = ev.incident.contextJson ?? {};
+  // Prefer a human-readable alert description from contextJson; fall back to
+  // a labelled truncation of the SHA fingerprint.
+  const alertText: string | undefined = ctx.alertText ?? ctx.alert ?? ctx.scenario;
+  const fp = ev.incident.alertFingerprint as string;
+  const fpShort = fp ? `${fp.slice(0, 12)}…${fp.slice(-8)}` : "";
+
   return (
     <div className="flex gap-3">
       <div className="flex flex-col items-center gap-1">
@@ -149,7 +207,13 @@ function TriggerEvent({ ev }: { ev: Extract<AnyEvent, { kind: "trigger" }> }) {
           </span>
         </div>
         <div className="bg-blue-500/5 border border-blue-500/20 rounded-sm p-3 space-y-2">
-          <p className="font-mono text-xs text-foreground/90 break-words">{ev.incident.alertFingerprint}</p>
+          {alertText ? (
+            <p className="font-mono text-xs text-foreground/90 break-words">{alertText}</p>
+          ) : (
+            <p className="font-mono text-xs text-muted-foreground/70 break-words">
+              <span className="text-muted-foreground/40 mr-1">fingerprint</span>{fpShort}
+            </p>
+          )}
           <div className="flex flex-wrap gap-3 text-[10px] font-mono text-muted-foreground">
             <span>ID: <span className="text-foreground/70">{ev.incident.incidentId.slice(0, 8)}</span></span>
             {ctx.strategyName && (
@@ -158,11 +222,49 @@ function TriggerEvent({ ev }: { ev: Extract<AnyEvent, { kind: "trigger" }> }) {
             {ctx.winRate != null && (
               <span>Win-rate: <span className="text-emerald-400">{(ctx.winRate * 100).toFixed(0)}%</span></span>
             )}
+            {ctx.ragDistance != null && (
+              <span>RAG dist: <span className="text-amber-400">{ctx.ragDistance.toFixed(3)}</span></span>
+            )}
             {ctx.stormDetected && (
               <span className="text-red-400">⚠ Storm detected</span>
             )}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function TransitionEvent({ ev }: { ev: Extract<AnyEvent, { kind: "transition" }> }) {
+  const labels: Record<TransitionReason, { text: string; sub: string; color: string }> = {
+    human_approved:      { text: "Human approval received",         sub: "Operator reviewed and approved the remediation plan.",            color: "text-violet-400" },
+    autonomous_reeval:   { text: "Autonomous re-evaluation",        sub: "Vector memory re-sampled — confidence threshold met. Agent proceeding without human gating.", color: "text-amber-400" },
+    feedback_corrected:  { text: "Feedback-corrected re-dispatch",  sub: "Previous strategy corrected by human signal. Agent replanning with updated win-rate.", color: "text-orange-400" },
+  };
+  const { text, sub, color } = labels[ev.reason];
+  const Icon = ev.reason === "human_approved" ? UserCheck : ev.reason === "feedback_corrected" ? RefreshCw : Brain;
+
+  return (
+    <div className="flex gap-3">
+      <div className="flex flex-col items-center gap-1">
+        <div className={cn("w-8 h-8 rounded-sm border flex items-center justify-center shrink-0",
+          ev.reason === "human_approved"     ? "bg-violet-500/10 border-violet-500/30" :
+          ev.reason === "feedback_corrected" ? "bg-orange-500/10 border-orange-500/30" :
+                                               "bg-amber-500/10 border-amber-500/30"
+        )}>
+          <Icon className={cn("w-3.5 h-3.5", color)} />
+        </div>
+        <div className="w-px flex-1 bg-border/30" />
+      </div>
+      <div className="pb-3 flex-1 min-w-0">
+        <div className="flex items-center gap-2 mb-1 flex-wrap">
+          <Ts ts={ev.ts} />
+          <span className={cn("font-mono text-[11px] font-bold uppercase tracking-wider", color)}>{text}</span>
+          <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-sm border bg-muted/20 text-muted-foreground border-border/50 uppercase">
+            {ev.fromMode} → {ev.toMode}
+          </span>
+        </div>
+        <p className="font-mono text-[10px] text-muted-foreground/70 italic pl-0.5">{sub}</p>
       </div>
     </div>
   );
@@ -203,25 +305,73 @@ function HandoffEvent({ ev }: { ev: Extract<AnyEvent, { kind: "handoff" }> }) {
   );
 }
 
+// Parse the result JSON once and surface meaningful verdicts as inline banners.
+function parseLogVerdict(raw: string | null | undefined): { verdict?: string; message?: string } {
+  if (!raw) return {};
+  try { return JSON.parse(raw); } catch { return {}; }
+}
+
 function LogEvent({ ev }: { ev: Extract<AnyEvent, { kind: "log" }> }) {
   const [expanded, setExpanded] = useState(false);
   const l = ev.l;
   const hasResult = l.result && l.result.trim().length > 0;
   const preview = l.result?.slice(0, 200) ?? "";
   const truncated = (l.result?.length ?? 0) > 200;
+
+  const { verdict, message } = parseLogVerdict(l.result);
+  const isNoAction    = verdict === "NO_ACTION_REQUIRED";
+  const isRepaired    = verdict === "REPAIRED" || verdict === "VERIFIED";
+  const isFeedback    = (l.actionTaken as string ?? "").toLowerCase().includes("feedback");
+
   return (
     <div className="flex gap-3">
       <div className="flex flex-col items-center gap-1">
-        <div className="w-8 h-8 rounded-sm bg-muted/20 border border-border/50 flex items-center justify-center shrink-0">
-          <Terminal className="w-3.5 h-3.5 text-muted-foreground/70" />
+        <div className={cn(
+          "w-8 h-8 rounded-sm border flex items-center justify-center shrink-0",
+          isNoAction || isRepaired ? "bg-emerald-500/10 border-emerald-500/30" :
+          isFeedback               ? "bg-violet-500/10 border-violet-500/30" :
+                                     "bg-muted/20 border-border/50"
+        )}>
+          {isNoAction || isRepaired
+            ? <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+            : isFeedback
+            ? <UserCheck className="w-3.5 h-3.5 text-violet-400" />
+            : <Terminal className="w-3.5 h-3.5 text-muted-foreground/70" />}
         </div>
         <div className="w-px flex-1 bg-border/30" />
       </div>
       <div className="pb-3 flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-1">
+        <div className="flex items-center gap-2 mb-1 flex-wrap">
           <Ts ts={ev.ts} />
           <span className="font-mono text-[11px] text-foreground/80 break-words">{l.actionTaken}</span>
         </div>
+
+        {/* Verdict banner — shown before the raw JSON block */}
+        {isNoAction && (
+          <div className="mb-1.5 flex items-center gap-2 px-3 py-1.5 rounded-sm bg-emerald-500/10 border border-emerald-500/25">
+            <ShieldCheck className="w-3 h-3 text-emerald-400 shrink-0" />
+            <span className="font-mono text-[10px] text-emerald-300">
+              Service self-healed — no infrastructure change required. Verification complete.
+            </span>
+          </div>
+        )}
+        {isRepaired && (
+          <div className="mb-1.5 flex items-center gap-2 px-3 py-1.5 rounded-sm bg-emerald-500/10 border border-emerald-500/25">
+            <ShieldCheck className="w-3 h-3 text-emerald-400 shrink-0" />
+            <span className="font-mono text-[10px] text-emerald-300">
+              {message ?? "Repair verified — incident closed and indexed in vector memory."}
+            </span>
+          </div>
+        )}
+        {isFeedback && (
+          <div className="mb-1.5 flex items-center gap-2 px-3 py-1.5 rounded-sm bg-violet-500/10 border border-violet-500/25">
+            <UserCheck className="w-3 h-3 text-violet-400 shrink-0" />
+            <span className="font-mono text-[10px] text-violet-300">
+              Human feedback recorded — win-rate updated in vector memory for future incidents.
+            </span>
+          </div>
+        )}
+
         {hasResult && (
           <div
             className="bg-muted/10 border border-border/30 rounded-sm px-3 py-2 cursor-pointer hover:bg-muted/20 transition-colors"
@@ -245,6 +395,15 @@ function LogEvent({ ev }: { ev: Extract<AnyEvent, { kind: "log" }> }) {
 function ResolveEvent({ ev }: { ev: Extract<AnyEvent, { kind: "resolve" }> }) {
   const ok = ev.status === "RESOLVED";
   const pending = ev.status === "PENDING_APPROVAL";
+
+  // Human-readable narrative for common verdict codes.
+  const narratives: Record<string, string> = {
+    NO_ACTION_REQUIRED: "Service recovered autonomously — agent verified health and closed incident without infrastructure changes.",
+    REPAIRED:           "Infrastructure repair applied and confirmed healthy. Incident closed.",
+    VERIFIED:           "Post-repair verification passed. System nominal.",
+  };
+  const narrative = ev.verdict ? narratives[ev.verdict] : undefined;
+
   return (
     <div className="flex gap-3">
       <div className="flex flex-col items-center">
@@ -269,6 +428,9 @@ function ResolveEvent({ ev }: { ev: Extract<AnyEvent, { kind: "resolve" }> }) {
             </span>
           )}
         </div>
+        {narrative && (
+          <p className="font-mono text-[10px] text-muted-foreground/70 italic pl-0.5 mt-0.5">{narrative}</p>
+        )}
       </div>
     </div>
   );
@@ -414,10 +576,11 @@ export default function IncidentTimeline() {
       {events.length > 0 && (
         <div className="space-y-0 pt-2">
           {events.map((ev, i) =>
-            ev.kind === "trigger"  ? <TriggerEvent  key={i} ev={ev} /> :
-            ev.kind === "handoff"  ? <HandoffEvent  key={i} ev={ev} /> :
-            ev.kind === "log"      ? <LogEvent      key={i} ev={ev} /> :
-            ev.kind === "resolve"  ? <ResolveEvent  key={i} ev={ev} /> :
+            ev.kind === "trigger"    ? <TriggerEvent    key={i} ev={ev} /> :
+            ev.kind === "transition" ? <TransitionEvent key={i} ev={ev} /> :
+            ev.kind === "handoff"    ? <HandoffEvent    key={i} ev={ev} /> :
+            ev.kind === "log"        ? <LogEvent        key={i} ev={ev} /> :
+            ev.kind === "resolve"    ? <ResolveEvent    key={i} ev={ev} /> :
             null
           )}
         </div>
