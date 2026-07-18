@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useLocation } from "wouter";
 import { useListIncidents, useApproveIncident, useRejectIncident, useCorrectIncident, getListIncidentsQueryKey } from "@workspace/api-client-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +25,7 @@ const PAGE_SIZE = 10;
 
 export default function Incidents() {
   const queryClient = useQueryClient();
+  const [, navigate] = useLocation();
   const { data: incidents, isLoading } = useListIncidents({ query: { refetchInterval: 5000 } });
 
   const approve = useApproveIncident();
@@ -158,7 +160,7 @@ export default function Incidents() {
               <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">No incidents found</TableCell></TableRow>
             ) : (
               paginated.map((inc) => (
-                <TableRow key={inc.incidentId} className="cursor-pointer hover:bg-muted/40 transition-colors">
+                <TableRow key={inc.incidentId} className="cursor-pointer hover:bg-muted/40 transition-colors" onClick={() => navigate(`/timeline?incidentId=${inc.incidentId}`)}>
                   <TableCell className="text-muted-foreground font-mono text-xs">{inc.incidentId.split("-")[0]}</TableCell>
                   <TableCell>
                     <Badge variant={inc.status.toLowerCase() as any}>{inc.status}</Badge>

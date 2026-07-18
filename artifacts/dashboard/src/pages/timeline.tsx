@@ -1,7 +1,8 @@
 import { useState } from "react";
+import { useLocation, useSearch } from "wouter";
 import { useListIncidents, customFetch } from "@workspace/api-client-react";
 import { useQuery } from "@tanstack/react-query";
-import { GitBranch, Database, AlertTriangle, Wrench, Zap, Check, X, Terminal, ArrowRight, Clock, Loader } from "lucide-react";
+import { GitBranch, Database, AlertTriangle, Wrench, Zap, Check, X, Terminal, ArrowRight, Clock, Loader, Search, ChevronDown, History, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // ── Utils ────────────────────────────────────────────────────────────────────
@@ -253,10 +254,23 @@ function ResolveEvent({ ev }: { ev: Extract<AnyEvent, { kind: "resolve" }> }) {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function IncidentTimeline() {
+  const [, navigate] = useLocation();
+  const search = useSearch();
+  const urlIncidentId = new URLSearchParams(search).get("incidentId");
+
   const { data: incidents = [], isLoading: loadingList } = useListIncidents();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerSearch, setPickerSearch] = useState("");
 
-  const activeId = selectedId ?? incidents[0]?.incidentId ?? null;
+  const activeId = selectedId ?? urlIncidentId ?? incidents[0]?.incidentId ?? null;
+
+  function selectIncident(id: string) {
+    setSelectedId(id);
+    setPickerOpen(false);
+    setPickerSearch("");
+    navigate(`/timeline?incidentId=${id}`);
+  }
 
   const { data: incident, isLoading: loadingIncident } = useQuery({
     queryKey: ["incident", activeId],
@@ -283,41 +297,108 @@ export default function IncidentTimeline() {
     <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in duration-500 pb-10">
 
       {/* ── Header ── */}
-      <div className="flex items-center justify-between border-b border-border pb-4">
-        <h1 className="text-2xl font-mono font-bold tracking-tighter uppercase text-foreground flex items-center gap-2">
-          <GitBranch className="h-5 w-5 text-primary" />
+      <div className="flex items-center justify-between border-b border-border pb-4 gap-3 flex-wrap">
+        <h1 className="text-xl sm:text-2xl font-mono font-bold tracking-tighter uppercase text-foreground flex items-center gap-2 shrink-0">
+          <History className="h-5 w-5 text-primary" />
           Incident Timeline
         </h1>
-        {isLoading && <Loader className="w-4 h-4 text-muted-foreground/50 animate-spin" />}
+        <div className="flex items-center gap-2">
+          {isLoading && <Loader className="w-4 h-4 text-muted-foreground/50 animate-spin" />}
+          <button
+            onClick={() => navigate(`/incidents`)}
+            className="flex items-center gap-1.5 h-8 px-3 border border-border rounded-sm bg-background text-xs font-mono text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors"
+          >
+            ← All Incidents
+          </button>
+          {activeId && (
+            <button
+              onClick={() => navigate(`/decision?incidentId=${activeId}`)}
+              className="flex items-center gap-1.5 h-8 px-3 border border-border rounded-sm bg-background text-xs font-mono text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors"
+            >
+              Decision Trace
+              <ExternalLink className="w-3 h-3 opacity-50" />
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* ── Incident selector + meta ── */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="flex-1">
-          <label className="block text-[10px] font-mono uppercase tracking-widest text-muted-foreground mb-1.5">
-            Incident
-          </label>
-          <select
-            value={activeId ?? ""}
-            onChange={e => setSelectedId(e.target.value || null)}
-            className={cn(
-              "w-full h-9 pl-3 pr-8 rounded-sm border font-mono text-xs appearance-none",
-              "bg-muted/10 border-border text-foreground",
-              "focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30",
-            )}
+      {/* ── Incident picker ── */}
+      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+        {/* Picker trigger */}
+        <div className="relative flex-1 min-w-0">
+          <button
+            onClick={() => { setPickerSearch(""); setPickerOpen(o => !o); }}
+            className="flex items-center gap-2 w-full h-9 px-3 border border-border rounded-sm bg-background text-left hover:border-primary/50 transition-colors group"
           >
-            {incidents.map(inc => (
-              <option key={inc.incidentId} value={inc.incidentId}>
-                [{inc.status}] {inc.alertFingerprint.slice(0, 60)}{inc.alertFingerprint.length > 60 ? "…" : ""} · {fmtDate(inc.updatedAt)}
-              </option>
-            ))}
-          </select>
+            <GitBranch className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+            <span className="flex-1 font-mono text-xs text-muted-foreground truncate">
+              {incident
+                ? `${incident.status} · ${incident.alertFingerprint.slice(0, 50)}${incident.alertFingerprint.length > 50 ? "…" : ""}`
+                : loadingList ? "Loading…" : "Select incident…"}
+            </span>
+            <ChevronDown className={cn("w-3.5 h-3.5 text-muted-foreground shrink-0 transition-transform", pickerOpen && "rotate-180")} />
+          </button>
+
+          {/* Dropdown */}
+          {pickerOpen && (
+            <div className="absolute top-full left-0 right-0 mt-1 z-50 border border-border rounded-sm bg-background shadow-xl">
+              <div className="p-2 border-b border-border/60">
+                <div className="flex items-center gap-2 px-2 py-1 bg-muted/30 rounded-sm border border-border/50">
+                  <Search className="w-3 h-3 text-muted-foreground shrink-0" />
+                  <input
+                    autoFocus
+                    value={pickerSearch}
+                    onChange={e => setPickerSearch(e.target.value)}
+                    placeholder="Search by fingerprint, ID or status…"
+                    className="flex-1 bg-transparent text-xs font-mono outline-none text-foreground placeholder:text-muted-foreground/50"
+                  />
+                  {pickerSearch && (
+                    <button onClick={() => setPickerSearch("")}>
+                      <X className="w-3 h-3 text-muted-foreground hover:text-foreground" />
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="max-h-64 overflow-y-auto">
+                {incidents
+                  .filter(i =>
+                    i.alertFingerprint.toLowerCase().includes(pickerSearch.toLowerCase()) ||
+                    i.incidentId.toLowerCase().includes(pickerSearch.toLowerCase()) ||
+                    i.status.toLowerCase().includes(pickerSearch.toLowerCase())
+                  )
+                  .map(inc => (
+                    <button
+                      key={inc.incidentId}
+                      onClick={() => selectIncident(inc.incidentId)}
+                      className={cn(
+                        "w-full text-left px-4 py-2.5 text-xs font-mono hover:bg-muted/40 transition-colors border-b border-border/30 last:border-0",
+                        inc.incidentId === activeId && "bg-primary/5 border-l-2 border-l-primary pl-3.5"
+                      )}
+                    >
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <StatusBadge status={inc.status} />
+                        <span className="text-primary/60 text-[10px]">#{inc.incidentId.slice(0, 8)}</span>
+                        <span className="text-muted-foreground/50 text-[10px] ml-auto">{fmtDate(inc.updatedAt)}</span>
+                      </div>
+                      <div className="text-foreground/70 mt-0.5 truncate">{inc.alertFingerprint}</div>
+                    </button>
+                  ))}
+              </div>
+              <button
+                onClick={() => setPickerOpen(false)}
+                className="w-full py-1.5 text-[10px] font-mono text-muted-foreground/50 hover:text-muted-foreground border-t border-border/60 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          )}
         </div>
+
+        {/* Meta */}
         {incident && (
-          <div className="flex items-end gap-2 flex-wrap">
-            <StatusBadge status={incident.status} />
+          <div className="flex items-center gap-3 flex-wrap shrink-0">
             <span className="font-mono text-[10px] text-muted-foreground flex items-center gap-1">
-              <Clock className="w-3 h-3 inline" />
+              <Clock className="w-3 h-3" />
               {fmtDate(incident.triggeredAt ?? incident.createdAt)}
             </span>
             <span className="font-mono text-[10px] text-muted-foreground">
