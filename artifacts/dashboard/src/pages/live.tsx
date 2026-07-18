@@ -37,7 +37,7 @@ export default function LiveDiagnostic() {
   useEffect(() => {
     const base = import.meta.env.BASE_URL?.replace(/\/$/, '') ?? '';
     // Pass the session JWT as ?token= — EventSource cannot set custom headers.
-    const jwt = sessionStorage.getItem('cs-dashboard-token') ?? '';
+    const jwt = localStorage.getItem('cs-dashboard-token') ?? '';
     const url = `${base}/api/stream/audit${jwt ? `?token=${encodeURIComponent(jwt)}` : ''}`;
     const eventSource = new EventSource(url);
 

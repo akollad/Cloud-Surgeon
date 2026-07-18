@@ -10,9 +10,9 @@ import './index.css';
 const apiBase = import.meta.env.VITE_API_BASE_URL;
 if (apiBase) setBaseUrl(apiBase);
 
-// Authenticate all API requests with the session JWT stored in sessionStorage.
+// Authenticate all API requests with the session JWT stored in localStorage.
 // The JWT is obtained by LoginGate via POST /api/auth/token (password exchange).
 // The long-lived CLOUD_SURGEON_API_KEY never reaches the browser bundle.
-setAuthTokenGetter(() => sessionStorage.getItem('cs-dashboard-token'));
+setAuthTokenGetter(() => localStorage.getItem('cs-dashboard-token'));
 
 createRoot(document.getElementById('root')!).render(<App />);

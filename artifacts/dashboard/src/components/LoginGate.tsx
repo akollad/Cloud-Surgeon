@@ -20,6 +20,15 @@ import { Logo } from '@/components/brand/Logo';
 const SESSION_KEY = 'cs-dashboard-token';
 
 function getStoredToken(): string | null {
+  // Migrate from sessionStorage if still present (users who logged in before
+  // the localStorage switch keep their session without re-entering the password).
+  try {
+    const legacy = sessionStorage.getItem(SESSION_KEY);
+    if (legacy) {
+      localStorage.setItem(SESSION_KEY, legacy);
+      sessionStorage.removeItem(SESSION_KEY);
+    }
+  } catch {}
   return localStorage.getItem(SESSION_KEY);
 }
 
