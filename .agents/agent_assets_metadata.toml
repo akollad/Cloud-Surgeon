@@ -18,3 +18,9 @@ id = "x1yc88YwFybwOtRkN4YbT"
 uri = "file://assets/logo-v3-watchful-eye.png"
 type = "image"
 title = "V3 — Watchful Eye"
+
+[[outputs]]
+id = "jLGpxBvgaIKnTIdZDtrA8"
+uri = "file://DEMO_SCRIPT.md"
+type = "text"
+title = "Cloud-Surgeon — Script de démo complet"
