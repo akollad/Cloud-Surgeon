@@ -1,5 +1,5 @@
 import { createRoot } from 'react-dom/client';
-import { setBaseUrl, setApiKey } from '@workspace/api-client-react';
+import { setBaseUrl, setAuthTokenGetter } from '@workspace/api-client-react';
 
 import App from './App';
 import './index.css';
@@ -10,8 +10,9 @@ import './index.css';
 const apiBase = import.meta.env.VITE_API_BASE_URL;
 if (apiBase) setBaseUrl(apiBase);
 
-// Authenticate all API requests with the shared key.
-const apiKey = import.meta.env.VITE_API_KEY ?? '';
-if (apiKey) setApiKey(apiKey);
+// Authenticate all API requests with the session JWT stored in sessionStorage.
+// The JWT is obtained by LoginGate via POST /api/auth/token (password exchange).
+// The long-lived CLOUD_SURGEON_API_KEY never reaches the browser bundle.
+setAuthTokenGetter(() => sessionStorage.getItem('cs-dashboard-token'));
 
 createRoot(document.getElementById('root')!).render(<App />);

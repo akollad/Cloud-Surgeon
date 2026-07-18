@@ -11,6 +11,8 @@ export * from './agentTurnThoughtSource';
 export * from './agentTurnToolInput';
 export * from './agentTurnToolOutput';
 export * from './alertInput';
+export * from './authTokenInput';
+export * from './authTokenResult';
 export * from './calibrationEntry';
 export * from './causalChainResult';
 export * from './causalChainResultChainItem';

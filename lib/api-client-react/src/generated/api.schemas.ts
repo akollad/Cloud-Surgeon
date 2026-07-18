@@ -5,6 +5,15 @@
  * Cloud-Surgeon Agent API
  * OpenAPI spec version: 0.2.0
  */
+export interface AuthTokenInput {
+  password: string;
+}
+
+export interface AuthTokenResult {
+  token: string;
+  expiresIn: number;
+}
+
 export interface HealthStatus {
   status: string;
 }

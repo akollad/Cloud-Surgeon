@@ -3,33 +3,57 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
-// Phase 1 auth gate (hackathon) — see MIGRATION_REACT.md "Gate d'auth".
-// A single shared password protects the dashboard UI. It is NOT a real
-// authentication system: there are no per-user accounts, and the password
-// travels in the client bundle's env var, so this only deters casual access,
-// not a motivated attacker. Phase 2 (post-hackathon) replaces this with
-// Cognito/Amplify without touching any other component, since the gate is
-// fully isolated here.
-const SESSION_KEY = 'cloud-surgeon-dashboard-unlocked';
-const PASSWORD = import.meta.env.VITE_DASHBOARD_PASSWORD as string | undefined;
+/**
+ * Dashboard auth gate.
+ *
+ * On submit the password is sent to POST /api/auth/token — the server
+ * validates it and returns a short-lived JWT (1 h).  The JWT is stored in
+ * sessionStorage and injected into every API request via setAuthTokenGetter
+ * (configured in main.tsx).  The long-lived CLOUD_SURGEON_API_KEY never
+ * reaches the browser.
+ *
+ * If DASHBOARD_PASSWORD is not set server-side the endpoint returns a token
+ * without checking the password (dev / demo no-op).
+ */
 
-function isUnlocked(): boolean {
-  // No password configured → gate is a no-op (dev / demo environments).
-  if (!PASSWORD) return true;
-  return sessionStorage.getItem(SESSION_KEY) === 'true';
+const SESSION_KEY = 'cs-dashboard-token';
+
+function getStoredToken(): string | null {
+  return sessionStorage.getItem(SESSION_KEY);
+}
+
+async function fetchToken(password: string): Promise<string | null> {
+  try {
+    const base = import.meta.env.BASE_URL?.replace(/\/$/, '') ?? '';
+    const res = await fetch(`${base}/api/auth/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return typeof data.token === 'string' ? data.token : null;
+  } catch {
+    return null;
+  }
 }
 
 export function LoginGate({ children }: { children: ReactNode }) {
-  const [unlocked, setUnlocked] = useState(isUnlocked);
+  const [unlocked, setUnlocked] = useState(() => Boolean(getStoredToken()));
   const [value, setValue] = useState('');
   const [error, setError] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   if (unlocked) return <>{children}</>;
 
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    if (value === PASSWORD) {
-      sessionStorage.setItem(SESSION_KEY, 'true');
+    setLoading(true);
+    setError(false);
+    const token = await fetchToken(value);
+    setLoading(false);
+    if (token) {
+      sessionStorage.setItem(SESSION_KEY, token);
       setUnlocked(true);
     } else {
       setError(true);
@@ -59,14 +83,15 @@ export function LoginGate({ children }: { children: ReactNode }) {
               }}
               placeholder="Password"
               data-testid="input-dashboard-password"
+              disabled={loading}
             />
             {error && (
               <p className="text-xs text-destructive font-mono" data-testid="text-password-error">
                 Incorrect password.
               </p>
             )}
-            <Button type="submit" className="w-full" data-testid="button-unlock">
-              Unlock
+            <Button type="submit" className="w-full" data-testid="button-unlock" disabled={loading}>
+              {loading ? 'Verifying…' : 'Unlock'}
             </Button>
           </form>
         </CardContent>

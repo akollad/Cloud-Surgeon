@@ -17,6 +17,19 @@ export const HealthCheckResponse = zod.object({
 
 
 /**
+ * @summary Exchange dashboard password for a short-lived JWT (1 h)
+ */
+export const GetAuthTokenBody = zod.object({
+  "password": zod.string()
+})
+
+export const GetAuthTokenResponse = zod.object({
+  "token": zod.string(),
+  "expiresIn": zod.number()
+})
+
+
+/**
  * @summary Trigger or resume the Cloud-Surgeon agent
  */
 
@@ -25,7 +38,7 @@ export const triggerIncidentBodySimulateCrashDefault = false;
 export const TriggerIncidentBody = zod.object({
   "alertText": zod.string().min(1),
   "simulateCrash": zod.boolean().default(triggerIncidentBodySimulateCrashDefault),
-  "chaosMode": zod.string().nullish()
+  "chaosMode": zod.string().optional()
 })
 
 export const TriggerIncidentResponse = zod.object({
@@ -270,6 +283,128 @@ export const RejectIncidentParams = zod.object({
 })
 
 export const RejectIncidentResponse = zod.object({
+  "incidentId": zod.string(),
+  "alertFingerprint": zod.string(),
+  "status": zod.enum(['TRIGGERED', 'DIAGNOSING', 'REPAIRING', 'RESOLVED', 'FAILED', 'PENDING_APPROVAL', 'PREDICTIVE']),
+  "currentStep": zod.string().nullable(),
+  "contextJson": zod.object({
+  "alertText": zod.string().optional(),
+  "strategyName": zod.string().optional(),
+  "routingMode": zod.enum(['AUTONOMOUS', 'PENDING_APPROVAL', 'EXPLORATORY', 'REJECTED']).optional(),
+  "routingDecisionComputed": zod.boolean().optional(),
+  "ragScore": zod.number().nullish(),
+  "ragStrategyHint": zod.string().nullish(),
+  "winRate": zod.number().nullish(),
+  "winRateSampleSize": zod.number().optional(),
+  "correctionFactor": zod.number().nullish(),
+  "effectiveWinRate": zod.number().nullish(),
+  "repairPlan": zod.object({
+  "strategy": zod.string().optional(),
+  "estimatedDuration": zod.string().optional(),
+  "riskLevel": zod.enum(['low', 'medium', 'high']).optional(),
+  "blastRadius": zod.string().optional(),
+  "steps": zod.array(zod.string()).optional(),
+  "preconditions": zod.array(zod.string()).optional(),
+  "expectedOutcome": zod.string().optional(),
+  "alternatives": zod.array(zod.string()).optional(),
+  "generatedBy": zod.enum(['llm', 'deterministic']).optional(),
+  "generatedAt": zod.string().optional()
+}).nullish(),
+  "rollbackInfo": zod.object({
+  "steps": zod.array(zod.string()).optional(),
+  "estimatedTime": zod.string().optional(),
+  "riskLevel": zod.enum(['low', 'medium', 'high']).optional(),
+  "commandsExecuted": zod.array(zod.string()).optional(),
+  "warnings": zod.array(zod.string()).optional(),
+  "generatedAt": zod.string().optional()
+}).nullish(),
+  "turns": zod.array(zod.object({
+  "turn": zod.number(),
+  "agent": zod.string().optional(),
+  "thought": zod.string(),
+  "thoughtSource": zod.enum(['anthropic', 'bedrock', 'simulated']).optional(),
+  "toolName": zod.string(),
+  "toolInput": zod.record(zod.string(), zod.unknown()),
+  "toolOutput": zod.record(zod.string(), zod.unknown())
+})).optional(),
+  "finalResponse": zod.string().nullish(),
+  "crashed": zod.boolean().optional()
+}),
+  "claimedByAgent": zod.string().nullish(),
+  "causedByIncidentId": zod.string().nullish(),
+  "updatedAt": zod.string()
+})
+
+
+/**
+ * @summary Retry a FAILED incident
+ */
+export const RetryIncidentParams = zod.object({
+  "incidentId": zod.coerce.string()
+})
+
+export const RetryIncidentResponse = zod.object({
+  "incidentId": zod.string(),
+  "alertFingerprint": zod.string(),
+  "status": zod.enum(['TRIGGERED', 'DIAGNOSING', 'REPAIRING', 'RESOLVED', 'FAILED', 'PENDING_APPROVAL', 'PREDICTIVE']),
+  "currentStep": zod.string().nullable(),
+  "contextJson": zod.object({
+  "alertText": zod.string().optional(),
+  "strategyName": zod.string().optional(),
+  "routingMode": zod.enum(['AUTONOMOUS', 'PENDING_APPROVAL', 'EXPLORATORY', 'REJECTED']).optional(),
+  "routingDecisionComputed": zod.boolean().optional(),
+  "ragScore": zod.number().nullish(),
+  "ragStrategyHint": zod.string().nullish(),
+  "winRate": zod.number().nullish(),
+  "winRateSampleSize": zod.number().optional(),
+  "correctionFactor": zod.number().nullish(),
+  "effectiveWinRate": zod.number().nullish(),
+  "repairPlan": zod.object({
+  "strategy": zod.string().optional(),
+  "estimatedDuration": zod.string().optional(),
+  "riskLevel": zod.enum(['low', 'medium', 'high']).optional(),
+  "blastRadius": zod.string().optional(),
+  "steps": zod.array(zod.string()).optional(),
+  "preconditions": zod.array(zod.string()).optional(),
+  "expectedOutcome": zod.string().optional(),
+  "alternatives": zod.array(zod.string()).optional(),
+  "generatedBy": zod.enum(['llm', 'deterministic']).optional(),
+  "generatedAt": zod.string().optional()
+}).nullish(),
+  "rollbackInfo": zod.object({
+  "steps": zod.array(zod.string()).optional(),
+  "estimatedTime": zod.string().optional(),
+  "riskLevel": zod.enum(['low', 'medium', 'high']).optional(),
+  "commandsExecuted": zod.array(zod.string()).optional(),
+  "warnings": zod.array(zod.string()).optional(),
+  "generatedAt": zod.string().optional()
+}).nullish(),
+  "turns": zod.array(zod.object({
+  "turn": zod.number(),
+  "agent": zod.string().optional(),
+  "thought": zod.string(),
+  "thoughtSource": zod.enum(['anthropic', 'bedrock', 'simulated']).optional(),
+  "toolName": zod.string(),
+  "toolInput": zod.record(zod.string(), zod.unknown()),
+  "toolOutput": zod.record(zod.string(), zod.unknown())
+})).optional(),
+  "finalResponse": zod.string().nullish(),
+  "crashed": zod.boolean().optional()
+}),
+  "claimedByAgent": zod.string().nullish(),
+  "causedByIncidentId": zod.string().nullish(),
+  "updatedAt": zod.string()
+})
+
+
+/**
+ * @summary Execute rollback for a RESOLVED incident
+ */
+export const RollbackIncidentParams = zod.object({
+  "incidentId": zod.coerce.string()
+})
+
+export const RollbackIncidentResponse = zod.object({
   "incidentId": zod.string(),
   "alertFingerprint": zod.string(),
   "status": zod.enum(['TRIGGERED', 'DIAGNOSING', 'REPAIRING', 'RESOLVED', 'FAILED', 'PENDING_APPROVAL', 'PREDICTIVE']),

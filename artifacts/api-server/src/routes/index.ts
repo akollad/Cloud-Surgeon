@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import healthRouter from "./health";
+import authRouter from "./auth";
 import chaosRouter from "./chaos";
 import incidentsRouter from "./incidents";
 import metricsRouter from "./metrics";
@@ -12,6 +13,9 @@ const router: IRouter = Router();
 router.use(healthRouter);
 router.use(setupRouter);
 
+// Auth endpoint — public, no apiKeyAuth wrapper.
+router.use(authRouter);
+
 // Webhook CloudWatch/SNS mounted BEFORE incidentsRouter — the latter applies
 // apiKeyAuth to everything that passes through it (no path prefix), so the
 // webhook would be blocked if mounted after. The webhook is secured by
@@ -19,7 +23,7 @@ router.use(setupRouter);
 router.use(webhookRouter);
 
 // streamRouter before incidentsRouter: SSE connections and CDC webhook receiver
-// need their own auth logic (SSE: X-API-Key header; CDC: shared-secret ?token= param).
+// need their own auth logic (SSE: Bearer JWT or x-api-key; CDC: shared-secret ?token= param).
 router.use(streamRouter);
 
 // metricsRouter and chaosRouter before incidentsRouter for the same reason

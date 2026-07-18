@@ -27,6 +27,30 @@ paths:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
 
+  # ── Auth ──────────────────────────────────────────────────────────────────
+  /auth/token:
+    post:
+      operationId: getAuthToken
+      tags: [auth]
+      summary: Exchange dashboard password for a short-lived JWT (1 h)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthTokenInput"
+      responses:
+        "200":
+          description: JWT token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthTokenResult"
+        "401":
+          description: Invalid password
+        "503":
+          description: SESSION_SECRET not configured
+
   # ── Incidents ─────────────────────────────────────────────────────────────
   /incidents/trigger:
     post:
@@ -122,6 +146,48 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Incident"
+
+  /incidents/{incidentId}/retry:
+    post:
+      operationId: retryIncident
+      tags: [incidents]
+      summary: Retry a FAILED incident
+      parameters:
+        - name: incidentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Retried
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Incident"
+        "404":
+          description: Not found
+
+  /incidents/{incidentId}/rollback:
+    post:
+      operationId: rollbackIncident
+      tags: [incidents]
+      summary: Execute rollback for a RESOLVED incident
+      parameters:
+        - name: incidentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Rollback initiated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Incident"
+        "404":
+          description: Not found
 
   /incidents/{incidentId}/correct:
     post:
@@ -443,6 +509,22 @@ paths:
 
 components:
   schemas:
+    AuthTokenInput:
+      type: object
+      required: [password]
+      properties:
+        password:
+          type: string
+
+    AuthTokenResult:
+      type: object
+      required: [token, expiresIn]
+      properties:
+        token:
+          type: string
+        expiresIn:
+          type: integer
+
     HealthStatus:
       type: object
       required: [status]

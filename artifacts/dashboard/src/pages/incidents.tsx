@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "wouter";
 import { useListIncidents, useApproveIncident, useRejectIncident, useCorrectIncident, getListIncidentsQueryKey } from "@workspace/api-client-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -7,7 +8,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Select } from "@/components/ui/input";
 import { Paginator } from "@/components/ui/paginator";
 import { useQueryClient } from "@tanstack/react-query";
-import { List, Check, X } from "lucide-react";
+import { List, Check, X, ExternalLink } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 
 const STRATEGIES = [
@@ -158,7 +159,7 @@ export default function Incidents() {
               <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">No incidents found</TableCell></TableRow>
             ) : (
               paginated.map((inc) => (
-                <TableRow key={inc.incidentId}>
+                <TableRow key={inc.incidentId} className="cursor-pointer hover:bg-muted/40 transition-colors">
                   <TableCell className="text-muted-foreground font-mono text-xs">{inc.incidentId.split("-")[0]}</TableCell>
                   <TableCell>
                     <Badge variant={inc.status.toLowerCase() as any}>{inc.status}</Badge>
@@ -179,7 +180,12 @@ export default function Incidents() {
                     </span>
                   </TableCell>
                   <TableCell className="text-right text-xs text-muted-foreground whitespace-nowrap">
-                    {formatDate(inc.updatedAt)}
+                    <div className="flex items-center justify-end gap-2">
+                      <span>{formatDate(inc.updatedAt)}</span>
+                      <Link href={`/incidents/${inc.incidentId}`}>
+                        <ExternalLink className="w-3 h-3 text-muted-foreground/50 hover:text-primary transition-colors" />
+                      </Link>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))

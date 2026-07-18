@@ -230,6 +230,9 @@ importers:
       helmet:
         specifier: ^8.2.0
         version: 8.2.0
+      jose:
+        specifier: ^6.2.3
+        version: 6.2.3
       pino:
         specifier: ^9.14.0
         version: 9.14.0

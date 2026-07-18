@@ -140,7 +140,7 @@ export default function StrategyMemory() {
               </div>
               <div className="flex justify-between items-center py-2 border-b border-border/40">
                 <span className="text-muted-foreground">Vector Dimension</span>
-                <span className="text-foreground">1536 (OpenAI)</span>
+                <span className="text-foreground">1024 (Voyage AI)</span>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-border/40">
                 <span className="text-muted-foreground">Stored Strategies</span>

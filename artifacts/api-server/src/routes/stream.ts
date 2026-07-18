@@ -5,13 +5,18 @@
  *                            Backed by CockroachDB CDC changefeed when
  *                            available, otherwise 2-second polling fallback.
  *
+ *   Auth: `Authorization: Bearer <jwt>` header  OR  `?token=<jwt>` query param.
+ *   EventSource (browser) cannot set custom headers, so the dashboard passes
+ *   the session JWT as ?token= in the URL instead.
+ *
  * POST /api/internal/cdc   — CDC webhook receiver. CockroachDB pushes
  *                            changefeed events here via the webhook-https://
- *                            sink. No API key auth (changefeed cannot send
- *                            custom headers in basic webhook mode).
+ *                            sink. Secured by shared-secret ?token= param
+ *                            (CDC_WEBHOOK_SECRET); no JWT auth here.
  */
 
 import { Router, type IRouter } from "express";
+import { jwtVerify } from "jose";
 import {
   addSseSubscriber,
   removeSseSubscriber,
@@ -22,17 +27,43 @@ import {
 
 const router: IRouter = Router();
 
-// ── SSE audit stream — GET /api/stream/audit ──────────────────────────────
-//
-// Auth: X-API-Key header (same shared key as all other endpoints).
-// The Streamlit dashboard's `requests` SSE consumer sends this header;
-// browser EventSource cannot, so the UI uses the requests library.
+function getSecret(): Uint8Array | null {
+  const s = process.env.SESSION_SECRET;
+  return s ? new TextEncoder().encode(s) : null;
+}
 
-router.get("/stream/audit", (req, res): void => {
-  // Accept key via header (server-side clients) or query param (browser EventSource).
-  const key = req.headers["x-api-key"] ?? req.query["apiKey"];
-  const expected = process.env.CLOUD_SURGEON_API_KEY;
-  if (expected && key !== expected) {
+// ── SSE audit stream — GET /api/stream/audit ──────────────────────────────
+
+router.get("/stream/audit", async (req, res): Promise<void> => {
+  const secret = getSecret();
+  const staticKey = process.env.CLOUD_SURGEON_API_KEY;
+
+  // Resolve credential: ?token= (browser EventSource) or Authorization: Bearer
+  const tokenParam = typeof req.query["token"] === "string" ? req.query["token"] : null;
+  const authHeader = req.headers["authorization"] ?? "";
+  const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  const jwt = tokenParam ?? bearerToken;
+
+  // Also accept x-api-key for server-side / legacy clients
+  const apiKey = req.headers["x-api-key"];
+
+  let authed = false;
+
+  if (staticKey && apiKey === staticKey) {
+    authed = true;
+  } else if (jwt && secret) {
+    try {
+      await jwtVerify(jwt, secret);
+      authed = true;
+    } catch {
+      // invalid JWT — fall through
+    }
+  } else if (!staticKey && !secret) {
+    // No auth configured — open in dev mode
+    authed = true;
+  }
+
+  if (!authed) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }

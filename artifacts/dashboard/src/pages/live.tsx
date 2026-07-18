@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useListIncidents } from "@workspace/api-client-react";
@@ -35,9 +35,11 @@ export default function LiveDiagnostic() {
   const maxEvents = 50;
 
   useEffect(() => {
-    const baseUrl = "/api";
-    const apiKey = import.meta.env.VITE_API_KEY ?? "";
-    const eventSource = new EventSource(`${baseUrl}/stream/audit?apiKey=${apiKey}`);
+    const base = import.meta.env.BASE_URL?.replace(/\/$/, '') ?? '';
+    // Pass the session JWT as ?token= — EventSource cannot set custom headers.
+    const jwt = sessionStorage.getItem('cs-dashboard-token') ?? '';
+    const url = `${base}/api/stream/audit${jwt ? `?token=${encodeURIComponent(jwt)}` : ''}`;
+    const eventSource = new EventSource(url);
 
     eventSource.onopen = () => setSseStatus("LIVE");
     eventSource.onerror = () => setSseStatus("OFFLINE");

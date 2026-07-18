@@ -21,6 +21,8 @@ import type {
 
 import type {
   AlertInput,
+  AuthTokenInput,
+  AuthTokenResult,
   CalibrationEntry,
   CausalChainResult,
   CcloudResult,
@@ -150,6 +152,77 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
 
 
 
+
+export const getGetAuthTokenUrl = () => {
+
+
+
+
+  return `/api/auth/token`
+}
+
+/**
+ * @summary Exchange dashboard password for a short-lived JWT (1 h)
+ */
+export const getAuthToken = async (authTokenInput: AuthTokenInput, options?: RequestInit): Promise<AuthTokenResult> => {
+
+  return customFetch<AuthTokenResult>(getGetAuthTokenUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(authTokenInput)
+  }
+);}
+
+
+
+
+
+export const getGetAuthTokenMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getAuthToken>>, TError,{data: BodyType<AuthTokenInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof getAuthToken>>, TError,{data: BodyType<AuthTokenInput>}, TContext> => {
+
+const mutationKey = ['getAuthToken'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof getAuthToken>>, {data: BodyType<AuthTokenInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  getAuthToken(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type GetAuthTokenMutationResult = NonNullable<Awaited<ReturnType<typeof getAuthToken>>>
+    export type GetAuthTokenMutationBody = BodyType<AuthTokenInput>
+    export type GetAuthTokenMutationError = ErrorType<void>
+
+    /**
+ * @summary Exchange dashboard password for a short-lived JWT (1 h)
+ */
+export const useGetAuthToken = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getAuthToken>>, TError,{data: BodyType<AuthTokenInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof getAuthToken>>,
+        TError,
+        {data: BodyType<AuthTokenInput>},
+        TContext
+      > => {
+      return useMutation(getGetAuthTokenMutationOptions(options));
+    }
 
 export const getTriggerIncidentUrl = () => {
 
@@ -516,6 +589,148 @@ export const useRejectIncident = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getRejectIncidentMutationOptions(options));
+    }
+
+export const getRetryIncidentUrl = (incidentId: string,) => {
+
+
+
+
+  return `/api/incidents/${incidentId}/retry`
+}
+
+/**
+ * @summary Retry a FAILED incident
+ */
+export const retryIncident = async (incidentId: string, options?: RequestInit): Promise<Incident> => {
+
+  return customFetch<Incident>(getRetryIncidentUrl(incidentId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getRetryIncidentMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retryIncident>>, TError,{incidentId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof retryIncident>>, TError,{incidentId: string}, TContext> => {
+
+const mutationKey = ['retryIncident'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof retryIncident>>, {incidentId: string}> = (props) => {
+          const {incidentId} = props ?? {};
+
+          return  retryIncident(incidentId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RetryIncidentMutationResult = NonNullable<Awaited<ReturnType<typeof retryIncident>>>
+
+    export type RetryIncidentMutationError = ErrorType<void>
+
+    /**
+ * @summary Retry a FAILED incident
+ */
+export const useRetryIncident = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retryIncident>>, TError,{incidentId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof retryIncident>>,
+        TError,
+        {incidentId: string},
+        TContext
+      > => {
+      return useMutation(getRetryIncidentMutationOptions(options));
+    }
+
+export const getRollbackIncidentUrl = (incidentId: string,) => {
+
+
+
+
+  return `/api/incidents/${incidentId}/rollback`
+}
+
+/**
+ * @summary Execute rollback for a RESOLVED incident
+ */
+export const rollbackIncident = async (incidentId: string, options?: RequestInit): Promise<Incident> => {
+
+  return customFetch<Incident>(getRollbackIncidentUrl(incidentId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getRollbackIncidentMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rollbackIncident>>, TError,{incidentId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof rollbackIncident>>, TError,{incidentId: string}, TContext> => {
+
+const mutationKey = ['rollbackIncident'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof rollbackIncident>>, {incidentId: string}> = (props) => {
+          const {incidentId} = props ?? {};
+
+          return  rollbackIncident(incidentId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RollbackIncidentMutationResult = NonNullable<Awaited<ReturnType<typeof rollbackIncident>>>
+
+    export type RollbackIncidentMutationError = ErrorType<void>
+
+    /**
+ * @summary Execute rollback for a RESOLVED incident
+ */
+export const useRollbackIncident = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rollbackIncident>>, TError,{incidentId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof rollbackIncident>>,
+        TError,
+        {incidentId: string},
+        TContext
+      > => {
+      return useMutation(getRollbackIncidentMutationOptions(options));
     }
 
 export const getCorrectIncidentUrl = (incidentId: string,) => {
