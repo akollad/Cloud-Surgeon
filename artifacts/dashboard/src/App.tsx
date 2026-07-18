@@ -11,6 +11,7 @@ import LiveDiagnostic from '@/pages/live';
 import DecisionTrace from '@/pages/decision';
 import Incidents from '@/pages/incidents';
 import IncidentTimeline from '@/pages/timeline';
+import TimelineLanding from '@/pages/timeline-landing';
 import StrategyMemory from '@/pages/memory';
 import Calibration from '@/pages/calibration';
 import Impact from '@/pages/impact';
@@ -24,6 +25,7 @@ function Router() {
       <Switch>
         <Route path="/" component={JudgeGuide} />
         <Route path="/live" component={LiveDiagnostic} />
+        <Route path="/timeline" component={TimelineLanding} />
         <Route path="/decision" component={DecisionTrace} />
         <Route path="/incidents" component={Incidents} />
         <Route path="/incidents/:incidentId" component={IncidentTimeline} />

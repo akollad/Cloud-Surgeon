@@ -1,18 +1,19 @@
 import { Link, useLocation } from "wouter";
-import { Activity, Zap, GitCommit, List, BarChart2, ShieldAlert, BookOpen, Terminal, X, ChevronLeft, ChevronRight } from "lucide-react";
+import { Activity, Zap, GitCommit, List, BarChart2, ShieldAlert, BookOpen, Terminal, GitBranch, X, ChevronLeft, ChevronRight } from "lucide-react";
 import { useHealthCheck } from "@workspace/api-client-react";
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/brand";
 
 const navItems = [
-  { href: "/",            label: "Guide",           icon: BookOpen  },
-  { href: "/live",        label: "Live Diagnostic",  icon: Activity  },
-  { href: "/decision",    label: "Decision Trace",   icon: GitCommit },
-  { href: "/incidents",   label: "All Incidents",    icon: List      },
-  { href: "/memory",      label: "Strategy Memory",  icon: Zap       },
-  { href: "/calibration", label: "Calibration",      icon: ShieldAlert },
-  { href: "/impact",      label: "Impact & Cost",    icon: BarChart2 },
-  { href: "/logs",        label: "Agent Logs",       icon: Terminal  },
+  { href: "/",            label: "Guide",             icon: BookOpen,   prefix: false },
+  { href: "/live",        label: "Live Diagnostic",   icon: Activity,   prefix: false },
+  { href: "/timeline",    label: "Incident Timeline", icon: GitBranch,  prefix: true  },
+  { href: "/decision",    label: "Decision Trace",    icon: GitCommit,  prefix: false },
+  { href: "/incidents",   label: "All Incidents",     icon: List,       prefix: false },
+  { href: "/memory",      label: "Strategy Memory",   icon: Zap,        prefix: false },
+  { href: "/calibration", label: "Calibration",       icon: ShieldAlert,prefix: false },
+  { href: "/impact",      label: "Impact & Cost",     icon: BarChart2,  prefix: false },
+  { href: "/logs",        label: "Agent Logs",        icon: Terminal,   prefix: false },
 ];
 
 interface LeftNavProps {
@@ -89,7 +90,9 @@ export function LeftNav({ open, onClose, collapsed, onToggleCollapse }: LeftNavP
       {/* ── Nav items ────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto py-2">
         {navItems.map((item) => {
-          const isActive = location === item.href;
+          const isActive = item.prefix
+            ? location === item.href || location.startsWith(item.href + "/") || location.startsWith("/incidents/")
+            : location === item.href;
           return (
             <Link key={item.href} href={item.href} onClick={onClose}>
               <div
