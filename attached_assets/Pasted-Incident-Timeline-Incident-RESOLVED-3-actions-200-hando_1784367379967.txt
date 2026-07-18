@@ -1,0 +1,824 @@
+Incident Timeline
+Incident
+RESOLVED—3 actions · 200 handoffs
+CockroachDB — incident_state (SERIALIZABLE lock) · execution_logs (3 rows) · agent_handoffs (200 rows) · strategy "ecs_service_restart"
+Invalid DateIncident Triggered
+
+95a6748d7dc561bfca9ab901cd11201b8a3236d397544e6154596b3ac1ade76f
+ID: a06bbc32Strategy: ecs_service_restartWin-rate: 77%
+13:47:19
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+13:47:22
+remediatorEXPLORATORY
+
+"Applying strategy 'rds_cpu_throttle' in EXPLORATORY mode. Unknown strategy — extended diagnostic mode active."
+13:47:24
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+13:47:26
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+13:47:29
+remediatorEXPLORATORY
+
+"Applying strategy 'default_repair' in EXPLORATORY mode. Unknown strategy — extended diagnostic mode active."
+13:47:30
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+13:51:34
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+13:51:37
+remediatorEXPLORATORY
+
+"Applying strategy 'jvm_heap_restart' in EXPLORATORY mode. Unknown strategy — extended diagnostic mode active."
+13:51:38
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+13:54:22
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+13:54:25
+remediatorAUTONOMOUS
+
+"Applying strategy 'disk_cleanup' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+13:54:26
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+13:54:29
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+13:54:31
+remediatorAUTONOMOUS
+
+"Applying strategy 'default_repair' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+13:54:33
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+13:54:37
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+13:54:39
+remediatorPENDING_APPROVAL
+
+"Confiance insuffisante pour agir en autonomie — RAG distance: 0.970, win-rate: 50% (2 samples). En attente d'approbation humaine."
+13:56:15
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+13:56:17
+remediatorAUTONOMOUS
+
+"Applying strategy 'lambda_concurrency_scale' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+13:56:19
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+13:56:21
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+13:56:24
+remediatorEXPLORATORY
+
+"Applying strategy 'default_repair' in EXPLORATORY mode. Unknown strategy — extended diagnostic mode active."
+13:56:25
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+13:56:28
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+13:56:29
+remediatorPENDING_APPROVAL
+
+"Confiance insuffisante pour agir en autonomie — RAG distance: 0.972, win-rate: 50% (2 samples). En attente d'approbation humaine."
+13:56:31
+remediatorAUTONOMOUS
+
+"Applying strategy 'iam_credential_rotation' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+13:56:33
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+13:56:54
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+13:56:56
+remediatorPENDING_APPROVAL
+
+"Confiance insuffisante pour agir en autonomie — RAG distance: 0.963, win-rate: 67% (3 samples). En attente d'approbation humaine."
+14:06:51
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+14:06:54
+remediatorAUTONOMOUS
+
+"Applying strategy 'jvm_heap_restart' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+14:06:56
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+14:18:25
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+14:18:29
+remediatorAUTONOMOUS
+
+"Applying strategy 'rds_cpu_throttle' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+14:18:30
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+14:18:33
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+14:18:36
+remediatorAUTONOMOUS
+
+"Applying strategy 'lambda_concurrency_scale' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+14:18:37
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+14:18:40
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+14:18:43
+remediatorAUTONOMOUS
+
+"Applying strategy 'ecs_service_restart' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+14:18:44
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+14:24:45
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+14:24:48
+remediatorAUTONOMOUS
+
+"Applying strategy 'rds_cpu_throttle' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+14:24:50
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+14:24:52
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+14:24:56
+remediatorAUTONOMOUS
+
+"Applying strategy 'ecs_service_restart' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+14:24:58
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+14:25:02
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+14:25:05
+remediatorAUTONOMOUS
+
+"Applying strategy 'lambda_concurrency_scale' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+14:25:07
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+14:29:39
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+14:29:43
+remediatorAUTONOMOUS
+
+"Applying strategy 'ecs_service_restart' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+14:29:45
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+14:29:49
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+14:29:53
+remediatorAUTONOMOUS
+
+"Applying strategy 'rds_cpu_throttle' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+14:29:55
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+14:36:37
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+14:38:15
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+14:38:19
+remediatorAUTONOMOUS
+
+"Applying strategy 'rds_cpu_throttle' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+14:38:20
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+14:38:24
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+14:38:27
+remediatorAUTONOMOUS
+
+"Applying strategy 'rds_cpu_throttle' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+14:38:28
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+14:38:31
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+14:38:34
+remediatorAUTONOMOUS
+
+"Applying strategy 'rds_cpu_throttle' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+14:38:36
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+14:38:39
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+14:38:42
+remediatorAUTONOMOUS
+
+"Applying strategy 'rds_cpu_throttle' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+14:38:43
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+14:48:39
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+14:48:43
+remediatorAUTONOMOUS
+
+"Applying strategy 'db_connection_pool_reset' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+14:48:44
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+14:49:16
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+14:49:18
+remediatorPENDING_APPROVAL
+
+"Confiance insuffisante pour agir en autonomie — RAG distance: 0.946, effective win-rate: 33% (raw: 33%, correction: ×1.00, 6 samples). En attente d'approbation humaine."
+14:50:11
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+14:50:13
+remediatorPENDING_APPROVAL
+
+"Confiance insuffisante pour agir en autonomie — RAG distance: 0.920, effective win-rate: 14% (raw: 31%, correction: ×0.46, 7 samples). En attente d'approbation humaine."
+15:27:57
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+15:28:00
+remediatorAUTONOMOUS
+
+"Applying strategy 'ecs_service_restart' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+15:28:02
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+15:28:05
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+15:28:09
+remediatorPENDING_APPROVAL
+
+"Confiance insuffisante pour agir en autonomie — RAG distance: 0.930, effective win-rate: 15% (raw: 29%, correction: ×0.52, 8 samples). En attente d'approbation humaine."
+15:28:30
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+15:28:33
+remediatorEXPLORATORY
+
+"Applying strategy 'default_repair' in EXPLORATORY mode. Unknown strategy — extended diagnostic mode active."
+15:28:34
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+15:29:14
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+15:29:19
+remediatorAUTONOMOUS
+
+"Applying strategy 'ecs_service_restart' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+15:29:22
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+15:32:02
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+15:32:07
+remediatorAUTONOMOUS
+
+"Applying strategy 'ecs_service_restart' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+15:32:10
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+15:32:15
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+15:32:19
+remediatorAUTONOMOUS
+
+"Applying strategy 'lambda_concurrency_scale' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+15:32:22
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+15:35:41
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+15:35:47
+remediatorAUTONOMOUS
+
+"Applying strategy 'ecs_service_restart' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+15:35:49
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+15:40:12
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+15:40:17
+remediatorAUTONOMOUS
+
+"Applying strategy 'ecs_service_restart' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+15:40:20
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+15:40:25
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+15:40:29
+remediatorAUTONOMOUS
+
+"Applying strategy 'lambda_concurrency_scale' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+15:40:33
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+15:41:40
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+15:41:46
+remediatorAUTONOMOUS
+
+"Applying strategy 'ecs_service_restart' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+15:41:48
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+15:44:36
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+15:44:41
+remediatorAUTONOMOUS
+
+"Applying strategy 'ecs_service_restart' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+15:44:44
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+15:44:48
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+15:44:53
+remediatorAUTONOMOUS
+
+"Applying strategy 'lambda_concurrency_scale' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+15:44:56
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+17:45:45
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+17:45:50
+remediatorAUTONOMOUS
+
+"Applying strategy 'ecs_service_restart' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+17:45:54
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+17:52:43
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+17:52:48
+remediatorPENDING_APPROVAL
+
+"Insufficient confidence to act autonomously — RAG distance: 0.927, effective win-rate: 17% (raw: 29%, correction: *0.59, 8 samples). Awaiting human approval."
+18:05:32
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+18:05:38
+remediatorAUTONOMOUS
+
+"Applying strategy 'disk_cleanup' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+18:05:42
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+18:39:42
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+18:39:48
+remediatorEXPLORATORY
+
+"Applying strategy 'default_repair' in EXPLORATORY mode. Unknown strategy — extended diagnostic mode active."
+18:39:51
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+18:41:02
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+18:41:08
+remediatorAUTONOMOUS
+
+"Applying strategy 'rds_cpu_throttle' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+18:41:11
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+19:46:39
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+19:46:51
+remediatorPENDING_APPROVAL
+
+"Insufficient confidence to act autonomously — RAG distance: 0.917, effective win-rate: 17% (raw: 29%, correction: *0.59, 8 samples). Awaiting human approval."
+19:49:13
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+19:49:18
+remediatorAUTONOMOUS
+
+"Applying strategy 'ecs_service_restart' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+19:49:21
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+19:51:08
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+19:51:12
+remediatorAUTONOMOUS
+
+"Applying strategy 'ecs_service_restart' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+19:51:16
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+19:51:19
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+19:51:25
+remediatorAUTONOMOUS
+
+"Applying strategy 'rds_cpu_throttle' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+19:51:28
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+23:16:36
+remediatorAUTONOMOUS
+
+"Applying strategy 'db_connection_pool_reset' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+23:16:41
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+14:38:07
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+14:38:10
+remediatorPENDING_APPROVAL
+
+"Insufficient confidence to act autonomously — RAG distance: 0.358, effective win-rate: 65% (raw: 80%, correction: *0.82, 15 samples). Awaiting human approval."
+15:16:24
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+15:16:28
+remediatorAUTONOMOUS
+
+"Applying strategy 'lambda_concurrency_scale' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+15:16:30
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+08:03:18
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+08:03:22
+remediatorPENDING_APPROVAL
+
+"Insufficient confidence to act autonomously — RAG distance: 0.592, effective win-rate: 65% (raw: 80%, correction: *0.82, 15 samples). Awaiting human approval."
+08:15:29
+remediatorAUTONOMOUS
+
+"Applying strategy 'ecs_service_restart' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+08:15:31
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+09:52:48
+remediatorAUTONOMOUS
+
+"Applying strategy 'ecs_service_restart' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+09:52:51
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+06:22:11
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+06:22:15
+remediatorPENDING_APPROVAL
+
+"Insufficient confidence to act autonomously — RAG distance: 0.147, effective win-rate: 53% (raw: 71%, correction: *0.74, 17 samples). Awaiting human approval."
+08:51:13
+remediatorAUTONOMOUS
+
+"Applying strategy 'ecs_service_restart' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+08:51:15
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+11:05:50
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+11:05:59
+remediatorPENDING_APPROVAL
+
+"Insufficient confidence to act autonomously — RAG distance: 0.936, effective win-rate: 71% (raw: 83%, correction: *0.85, 12 samples). Awaiting human approval."
+11:47:03
+remediatorAUTONOMOUS
+
+"Applying strategy 'rds_cpu_throttle' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+11:47:04
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+14:48:38
+remediatorAUTONOMOUS
+
+"Applying strategy 'db_connection_pool_reset' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+14:48:40
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+14:49:46
+remediatorAUTONOMOUS
+
+"Applying strategy 'db_connection_pool_reset' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+14:49:48
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+14:50:56
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+14:50:59
+remediatorEXPLORATORY
+
+"Applying strategy 'default_repair' in EXPLORATORY mode. Unknown strategy — extended diagnostic mode active."
+14:51:01
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+14:52:57
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+14:53:00
+remediatorAUTONOMOUS
+
+"Applying strategy 'network_route_failover' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+14:53:01
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+02:53:58
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+02:54:09
+remediatorEXPLORATORY
+
+"Applying strategy 'crdb_hotspot_resolution' in EXPLORATORY mode. Unknown strategy — extended diagnostic mode active."
+02:54:12
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+03:00:14
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+03:00:21
+remediatorEXPLORATORY
+
+"Applying strategy 'crdb_index_optimization' in EXPLORATORY mode. Unknown strategy — extended diagnostic mode active."
+03:00:23
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+11:09:21
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+11:09:23
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+11:09:23
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+11:09:23
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+11:09:23
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+11:09:23
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+11:09:27
+remediatorPENDING_APPROVAL
+
+"Insufficient confidence to act autonomously — RAG distance: 0.355, effective win-rate: 48% (raw: 67%, correction: *0.72, 18 samples). Awaiting human approval."
+11:09:27
+remediatorPENDING_APPROVAL
+
+"Insufficient confidence to act autonomously — RAG distance: 0.462, effective win-rate: 48% (raw: 67%, correction: *0.72, 18 samples). Awaiting human approval."
+11:09:27
+remediatorAUTONOMOUS
+
+"Applying strategy 'lambda_concurrency_scale' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+11:09:28
+remediatorEXPLORATORY
+
+"Applying strategy 'default_repair' in EXPLORATORY mode. Unknown strategy — extended diagnostic mode active."
+11:09:29
+remediatorEXPLORATORY
+
+"Applying strategy 'cloudwatch_alarm_triage' in EXPLORATORY mode. Unknown strategy — extended diagnostic mode active."
+11:09:29
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+11:09:30
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+11:09:31
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+11:09:31
+remediatorPENDING_APPROVAL
+
+"Insufficient confidence to act autonomously — RAG distance: 0.504, effective win-rate: 61% (raw: 77%, correction: *0.80, 13 samples). Awaiting human approval."
+11:26:31
+remediatorAUTONOMOUS
+
+"Applying strategy 'rds_cpu_throttle' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+11:26:34
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+11:26:54
+remediatorAUTONOMOUS
+
+"Applying strategy 'ecs_service_restart' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+11:26:56
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+11:27:07
+remediatorAUTONOMOUS
+
+"Applying strategy 'ecs_service_restart' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+11:27:09
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+12:54:36
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+12:54:39
+remediatorPENDING_APPROVAL
+
+"Insufficient confidence to act autonomously — RAG distance: 0.595, effective win-rate: 55% (raw: 70%, correction: *0.78, 20 samples). Awaiting human approval."
+12:55:44
+remediatorAUTONOMOUS
+
+"Applying strategy 'ecs_service_restart' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+12:55:47
+auditor
+
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+13:10:10
+diagnostician
+
+"Starting diagnostic phase — verifying cluster state via CockroachDB Cloud API"
+13:10:14
+remediatorPENDING_APPROVAL
+
+"Insufficient confidence to act autonomously — RAG distance: 0.445, effective win-rate: 33% (raw: 33%, correction: *1.00, 7 samples). Awaiting human approval."
+12:57:54aws_repair_service({"serviceName":"cloud-surgeon/api","action":"ecs:diagnose"})
+
+{"success":true,"simulated":false,"service":"ecs","actionTaken":"DESCRIBE_SERVICES","data":{"serviceArn":"arn:aws:ecs:us-east-1:153983052396:service/cloud-surgeon/api","status":"ACTIVE","runningCount"…
+
+▼ expand
+12:59:42aws_repair_service({"serviceName":"cloud-surgeon/api","action":"ecs:describe_and_remediate"})
+
+{"success":true,"simulated":false,"service":"ecs","actionTaken":"DESCRIBE_SERVICES","data":{"serviceArn":"arn:aws:ecs:us-east-1:153983052396:service/cloud-surgeon/api","status":"ACTIVE","runningCount"…
+
+▼ expand
+12:59:44verify_resolution({"incidentId":"a06bbc32-16e7-4662-bce1-7a0d5265d893","repairVerified":true,"actionPerformed":false,"actionTaken":"DESCRIBE_SERVICES","strategyUsed":"ecs_service_restart"})
+
+{"verified":true,"verdict":"NO_ACTION_REQUIRED","actionPerformed":false,"actionTaken":"DESCRIBE_SERVICES","auditTime":"2026-07-17T11:59:44.597Z","strategyUsed":"ecs_service_restart","message":"No infr…
+
+▼ expand
+12:59:45RESOLVED

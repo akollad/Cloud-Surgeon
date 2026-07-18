@@ -6,12 +6,13 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   useListIncidents, useGetIncident, useGetIncidentCausalChain,
   useGetIncidentHandoffs, useGetIncidentPlaybook, useGetIncidentRollbackPlan,
+  useListHandoffs,
 } from "@workspace/api-client-react";
 import type { Incident } from "@workspace/api-client-react";
 import {
   GitCommit, Search, Cpu, ArrowRight, Zap, RotateCcw, BookOpen,
   AlertTriangle, CheckCircle, XCircle, Clock, ShieldCheck, GitBranch, Layers,
-  X, ChevronDown,
+  X, ChevronDown, History, Terminal,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { cn } from "@/lib/utils";
@@ -337,7 +338,7 @@ type RollbackExecState = "idle" | "confirming" | "executing" | "done" | "error";
 export default function DecisionTrace() {
   const { data: incidents } = useListIncidents({ query: { refetchInterval: 5000 } });
   const [selectedId, setSelectedId] = useState<string>("");
-  const [activeTab, setActiveTab] = useState("execution");
+  const [activeTab, setActiveTab] = useState("timeline");
 
   // Rollback execution state
   const [rollbackState, setRollbackState] = useState<RollbackExecState>("idle");
@@ -355,6 +356,8 @@ export default function DecisionTrace() {
   const { data: handoffs } = useGetIncidentHandoffs(actualSelectedId, { query: { enabled: !!actualSelectedId } });
   const { data: playbook } = useGetIncidentPlaybook(actualSelectedId, { query: { enabled: !!actualSelectedId } });
   const { data: rollbackPlan, refetch: refetchRollbackPlan } = useGetIncidentRollbackPlan(actualSelectedId, { query: { enabled: !!actualSelectedId } });
+  // Global system timeline — all agent_handoffs across every incident (not filtered)
+  const { data: allHandoffs } = useListHandoffs({ query: { refetchInterval: 10000 } });
 
   const ctx = incident?.contextJson as Record<string, unknown> | undefined;
   const repairPlan = ctx?.repairPlan as RepairPlan | undefined;
@@ -451,7 +454,7 @@ export default function DecisionTrace() {
                 ) : paged.map((inc, idx) => (
                   <button
                     key={inc.incidentId}
-                    onClick={() => { setSelectedId(inc.incidentId); setActiveTab("execution"); setPickerOpen(false); }}
+                    onClick={() => { setSelectedId(inc.incidentId); setActiveTab("timeline"); setPickerOpen(false); }}
                     className={cn(
                       "w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-muted/30 transition-colors",
                       "animate-in fade-in duration-150",
@@ -557,6 +560,7 @@ export default function DecisionTrace() {
             <Tabs value={activeTab} onValueChange={setActiveTab}>
               <div className="overflow-x-auto">
                 <TabsList className="w-full min-w-max">
+                  <TabsTrigger value="timeline"><History className="w-3.5 h-3.5 sm:mr-1.5" /><span className="hidden sm:inline">Timeline</span></TabsTrigger>
                   <TabsTrigger value="execution"><Cpu className="w-3.5 h-3.5 sm:mr-1.5" /><span className="hidden sm:inline">Execution</span></TabsTrigger>
                   <TabsTrigger value="plan"><Zap className="w-3.5 h-3.5 sm:mr-1.5" /><span className="hidden sm:inline">Repair Plan</span></TabsTrigger>
                   <TabsTrigger value="graph"><GitBranch className="w-3.5 h-3.5 sm:mr-1.5" /><span className="hidden sm:inline">Causal Graph</span></TabsTrigger>
@@ -564,6 +568,176 @@ export default function DecisionTrace() {
                   <TabsTrigger value="rollback"><RotateCcw className="w-3.5 h-3.5 sm:mr-1.5" /><span className="hidden sm:inline">Rollback</span></TabsTrigger>
                 </TabsList>
               </div>
+
+              {/* ── Tab 0: Global System Timeline (recovered from prod) ── */}
+              <TabsContent value="timeline">
+                <Card>
+                  <CardHeader className="pb-3 border-b border-border/50 bg-muted/20">
+                    <CardTitle className="text-foreground flex items-center gap-2 flex-wrap">
+                      <History className="w-4 h-4 text-primary shrink-0" />
+                      Incident Timeline
+                      <span className="ml-auto text-[10px] font-mono text-muted-foreground shrink-0">
+                        agent_handoffs · execution_logs (CockroachDB)
+                      </span>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-4 space-y-4">
+
+                    {/* ── Incident summary header ── */}
+                    <div className="border border-border/60 bg-muted/20 rounded-sm p-3 space-y-2 font-mono">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Badge variant={incident.status?.toLowerCase() as any} className="text-xs shrink-0">
+                          {incident.status}
+                        </Badge>
+                        <span className="text-muted-foreground text-xs">—</span>
+                        <span className="text-foreground text-xs font-bold">
+                          {(ctx?.turns as unknown[])?.length ?? 0} actions
+                        </span>
+                        <span className="text-muted-foreground text-xs">·</span>
+                        <span className="text-foreground text-xs font-bold">
+                          {allHandoffs?.length ?? "…"} handoffs
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-muted-foreground/70 break-all">
+                        {incident.alertFingerprint}
+                      </div>
+                      <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-[11px]">
+                        <span className="text-muted-foreground">ID: <span className="text-foreground">{incident.incidentId.slice(0, 8)}</span></span>
+                        <span className="text-muted-foreground">Strategy: <span className="text-cyan-400">{(ctx?.strategyName as string) ?? "—"}</span></span>
+                        <span className="text-muted-foreground">Win-rate: <span className="text-foreground">
+                          {ctx?.winRate != null ? Math.round(Number(ctx.winRate) * 100) + "%" : "N/A"}
+                        </span></span>
+                      </div>
+                    </div>
+
+                    {/* ── Global handoffs stream ── */}
+                    {allHandoffs && allHandoffs.length > 0 ? (
+                      <div className="relative">
+                        {/* Vertical timeline line */}
+                        <div className="absolute left-[7px] top-0 bottom-0 w-px bg-border/40" />
+                        <div className="space-y-0">
+                          {allHandoffs.map((h, i) => {
+                            const isCurrent = h.incidentId === incident.incidentId;
+                            const agentColor =
+                              h.agentName === "diagnostician" ? "#a78bfa" :
+                              h.agentName === "remediator"    ? "#22d3ee" :
+                              h.agentName === "auditor"       ? "#4ade80" : "#94a3b8";
+                            const modeColor =
+                              h.decisionMode === "AUTONOMOUS"      ? "#22d3ee" :
+                              h.decisionMode === "PENDING_APPROVAL" ? "#facc15" :
+                              h.decisionMode === "EXPLORATORY"      ? "#a78bfa" : undefined;
+
+                            return (
+                              <div
+                                key={h.handoffId ?? i}
+                                className={cn(
+                                  "relative pl-6 pr-2 py-2 group",
+                                  isCurrent && "bg-primary/5 border-l-2 border-l-primary ml-px"
+                                )}
+                              >
+                                {/* Timeline dot */}
+                                <div
+                                  className="absolute left-[3px] top-[14px] w-[9px] h-[9px] rounded-full border-2 border-background"
+                                  style={{ backgroundColor: isCurrent ? agentColor : "hsl(var(--muted-foreground) / 0.4)" }}
+                                />
+
+                                <div className="flex items-start gap-2 flex-wrap min-w-0">
+                                  {/* Timestamp */}
+                                  <span className="text-[10px] font-mono text-muted-foreground/60 shrink-0 mt-0.5 w-14 tabular-nums">
+                                    {h.createdAt ? new Date(h.createdAt as string).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}
+                                  </span>
+
+                                  {/* Agent badge */}
+                                  <span
+                                    className="px-1.5 py-0.5 text-[10px] font-mono font-bold uppercase rounded-sm shrink-0"
+                                    style={{ color: agentColor, backgroundColor: agentColor + "18", border: `1px solid ${agentColor}40` }}
+                                  >
+                                    {String(h.agentName ?? "agent")}
+                                  </span>
+
+                                  {/* Decision mode */}
+                                  {h.decisionMode && (
+                                    <span
+                                      className="px-1.5 py-0.5 text-[10px] font-mono font-bold uppercase rounded-sm shrink-0"
+                                      style={{ color: modeColor ?? "#94a3b8", backgroundColor: (modeColor ?? "#94a3b8") + "18", border: `1px solid ${modeColor ?? "#94a3b8"}40` }}
+                                    >
+                                      {String(h.decisionMode)}
+                                    </span>
+                                  )}
+
+                                  {/* Incident ref — dim for foreign incidents */}
+                                  {!isCurrent && (
+                                    <span className="text-[10px] font-mono text-muted-foreground/40 shrink-0">
+                                      #{String(h.incidentId ?? "").slice(0, 8)}
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* Note */}
+                                {h.note && (
+                                  <div className={cn(
+                                    "mt-1 ml-16 text-[11px] font-mono leading-relaxed break-words",
+                                    isCurrent ? "text-foreground/90" : "text-muted-foreground/60"
+                                  )}>
+                                    "{String(h.note)}"
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-muted-foreground text-sm font-mono opacity-50 py-6 text-center">
+                        No handoffs recorded yet.
+                      </div>
+                    )}
+
+                    {/* ── Execution logs (tool calls for this incident) ── */}
+                    {(ctx?.turns as unknown[])?.length > 0 && (
+                      <div className="space-y-2 border-t border-border/40 pt-4">
+                        <div className="flex items-center gap-2 text-[10px] font-mono text-muted-foreground uppercase tracking-wide">
+                          <Terminal className="w-3.5 h-3.5" />
+                          Tool Calls — {incident.incidentId.slice(0, 8)}
+                        </div>
+                        {(ctx.turns as Array<Record<string, unknown>>).map((turn, i) => {
+                          const toolName = String(turn.toolName ?? "unknown");
+                          const toolInput = turn.toolInput as Record<string, unknown> | undefined;
+                          const toolOutput = turn.toolOutput as Record<string, unknown> | undefined;
+                          const simulated = Boolean((toolOutput as Record<string, unknown> | undefined)?.simulated);
+                          return (
+                            <div key={i} className="border border-border/50 rounded-sm overflow-hidden font-mono text-xs">
+                              <div className="flex items-center gap-2 px-3 py-1.5 bg-muted/30 border-b border-border/40 flex-wrap">
+                                <span className="text-green-400 font-bold shrink-0">{toolName}</span>
+                                {toolInput && (
+                                  <span className="text-muted-foreground/60 truncate min-w-0 text-[10px]">
+                                    ({JSON.stringify(toolInput).slice(0, 80)}{JSON.stringify(toolInput).length > 80 ? "…" : ""})
+                                  </span>
+                                )}
+                                {simulated && (
+                                  <span className="ml-auto shrink-0 px-1.5 py-0.5 text-[9px] bg-yellow-500/10 border border-yellow-500/30 text-yellow-500 rounded-sm uppercase">simulated</span>
+                                )}
+                              </div>
+                              {toolOutput && (
+                                <pre className="px-3 py-2 text-[10px] text-muted-foreground overflow-x-auto max-h-24 whitespace-pre-wrap bg-muted/10">
+                                  {JSON.stringify(toolOutput, null, 2).slice(0, 400)}
+                                  {JSON.stringify(toolOutput, null, 2).length > 400 ? "\n…" : ""}
+                                </pre>
+                              )}
+                            </div>
+                          );
+                        })}
+                        {/* Final resolution line */}
+                        <div className="flex items-center gap-2 px-3 py-1.5 border border-green-500/20 bg-green-500/5 rounded-sm text-[10px] font-mono text-green-400">
+                          <CheckCircle className="w-3 h-3 shrink-0" />
+                          {incident.status}
+                        </div>
+                      </div>
+                    )}
+
+                  </CardContent>
+                </Card>
+              </TabsContent>
 
               {/* ── Tab 1: Execution Trace ── */}
               <TabsContent value="execution">
