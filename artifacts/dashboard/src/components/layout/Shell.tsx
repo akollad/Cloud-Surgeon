@@ -4,11 +4,35 @@ import { Sidebar } from "./Sidebar";
 import { Menu, SlidersHorizontal } from "lucide-react";
 import { Logo } from "@/components/brand";
 
+const LS_LEFT_COLLAPSED  = "cs-left-collapsed";
+const LS_RIGHT_COLLAPSED = "cs-right-collapsed";
+
+function readBool(key: string, fallback = false): boolean {
+  try { const v = localStorage.getItem(key); return v === null ? fallback : v === "true"; }
+  catch { return fallback; }
+}
+
 export function Shell({ children }: { children: ReactNode }) {
   const [leftOpen,  setLeftOpen]  = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
-  const [leftCollapsed,  setLeftCollapsed]  = useState(false);
-  const [rightCollapsed, setRightCollapsed] = useState(false);
+  const [leftCollapsed,  setLeftCollapsed]  = useState(() => readBool(LS_LEFT_COLLAPSED));
+  const [rightCollapsed, setRightCollapsed] = useState(() => readBool(LS_RIGHT_COLLAPSED));
+
+  function toggleLeft() {
+    setLeftCollapsed(v => {
+      const next = !v;
+      try { localStorage.setItem(LS_LEFT_COLLAPSED, String(next)); } catch {}
+      return next;
+    });
+  }
+
+  function toggleRight() {
+    setRightCollapsed(v => {
+      const next = !v;
+      try { localStorage.setItem(LS_RIGHT_COLLAPSED, String(next)); } catch {}
+      return next;
+    });
+  }
 
   return (
     <div className="flex h-[100dvh] w-full overflow-hidden bg-background text-foreground
@@ -34,7 +58,7 @@ export function Shell({ children }: { children: ReactNode }) {
         open={leftOpen}
         onClose={() => setLeftOpen(false)}
         collapsed={leftCollapsed}
-        onToggleCollapse={() => setLeftCollapsed(v => !v)}
+        onToggleCollapse={toggleLeft}
       />
 
       {/* CENTER — main content */}
@@ -78,7 +102,7 @@ export function Shell({ children }: { children: ReactNode }) {
         open={rightOpen}
         onClose={() => setRightOpen(false)}
         collapsed={rightCollapsed}
-        onToggleCollapse={() => setRightCollapsed(v => !v)}
+        onToggleCollapse={toggleRight}
       />
     </div>
   );
