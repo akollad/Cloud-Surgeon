@@ -4,6 +4,7 @@ import {
   useIngestMetrics, useSeedVectorMemory,
 } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
+import { PanelSelect } from "@/components/ui/panel-select";
 import { Server, Activity, AlertTriangle, Zap, Terminal, X,
          ChevronLeft, ChevronRight, CheckCircle, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -47,46 +48,6 @@ interface SidebarProps {
   onClose: () => void;
   collapsed: boolean;
   onToggleCollapse: () => void;
-}
-
-// ── Styled select ─────────────────────────────────────────────────────────────
-function SidebarSelect({
-  value, onChange, options, className,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  options: { value: string; label: string }[];
-  className?: string;
-}) {
-  return (
-    <div className="relative">
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className={cn(
-          "w-full h-9 pl-3 pr-8 rounded-sm border appearance-none font-mono text-xs",
-          "bg-[hsl(214,50%,10%)] border-[hsl(214,45%,26%)] text-[hsl(210,35%,88%)]",
-          "focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30",
-          "hover:border-[hsl(214,45%,34%)] transition-colors cursor-pointer",
-          className,
-        )}
-      >
-        {options.map((o) => (
-          <option key={o.value} value={o.value}
-            className="bg-[hsl(214,50%,10%)] text-[hsl(210,35%,88%)]"
-          >
-            {o.label}
-          </option>
-        ))}
-      </select>
-      {/* chevron icon */}
-      <div className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center">
-        <svg className="w-3 h-3 text-[hsl(210,20%,55%)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-        </svg>
-      </div>
-    </div>
-  );
 }
 
 // ── Styled input ──────────────────────────────────────────────────────────────
@@ -350,7 +311,7 @@ export function Sidebar({ open, onClose, collapsed, onToggleCollapse }: SidebarP
             />
             <div>
               <FieldLabel>Scenario</FieldLabel>
-              <SidebarSelect
+              <PanelSelect
                 value={scenario}
                 onChange={setScenario}
                 options={PRESET_SCENARIOS.map((s) => ({ value: s, label: s }))}
@@ -366,7 +327,7 @@ export function Sidebar({ open, onClose, collapsed, onToggleCollapse }: SidebarP
             </div>
             <div>
               <FieldLabel>Chaos Engineering</FieldLabel>
-              <SidebarSelect
+              <PanelSelect
                 value={chaosMode}
                 onChange={setChaosMode}
                 options={CHAOS_OPTIONS}
@@ -401,7 +362,7 @@ export function Sidebar({ open, onClose, collapsed, onToggleCollapse }: SidebarP
               label="Predictive Injection"
               color="text-purple-400"
             />
-            <SidebarSelect
+            <PanelSelect
               value={predictiveScenario}
               onChange={setPredictiveScenario}
               options={PREDICTIVE_SCENARIOS.map((s) => ({ value: s, label: s }))}

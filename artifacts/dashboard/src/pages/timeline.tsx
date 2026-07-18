@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useLocation, useSearch } from "wouter";
 import { useListIncidents, customFetch } from "@workspace/api-client-react";
 import { useQuery } from "@tanstack/react-query";
-import { GitBranch, Database, AlertTriangle, Wrench, Zap, Check, X, Terminal, ArrowRight, Clock, Loader, Search, ChevronDown, History, ExternalLink } from "lucide-react";
+import { GitBranch, Database, AlertTriangle, Wrench, Zap, Check, X, Terminal, ArrowRight, Clock, Loader, History, ExternalLink } from "lucide-react";
+import { IncidentPickerModal } from "@/components/ui/incident-picker-modal";
 import { cn } from "@/lib/utils";
 
 // ── Utils ────────────────────────────────────────────────────────────────────
@@ -261,14 +262,11 @@ export default function IncidentTimeline() {
   const { data: incidents = [], isLoading: loadingList } = useListIncidents();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerSearch, setPickerSearch] = useState("");
 
   const activeId = selectedId ?? urlIncidentId ?? incidents[0]?.incidentId ?? null;
 
   function selectIncident(id: string) {
     setSelectedId(id);
-    setPickerOpen(false);
-    setPickerSearch("");
     navigate(`/timeline?incidentId=${id}`);
   }
 
@@ -327,7 +325,7 @@ export default function IncidentTimeline() {
         {/* Picker trigger */}
         <div className="relative flex-1 min-w-0">
           <button
-            onClick={() => { setPickerSearch(""); setPickerOpen(o => !o); }}
+            onClick={() => setPickerOpen(o => !o)}
             className="flex items-center gap-2 w-full h-9 px-3 border border-border rounded-sm bg-background text-left hover:border-primary/50 transition-colors group"
           >
             <GitBranch className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
@@ -336,62 +334,17 @@ export default function IncidentTimeline() {
                 ? `${incident.status} · ${incident.alertFingerprint.slice(0, 50)}${incident.alertFingerprint.length > 50 ? "…" : ""}`
                 : loadingList ? "Loading…" : "Select incident…"}
             </span>
-            <ChevronDown className={cn("w-3.5 h-3.5 text-muted-foreground shrink-0 transition-transform", pickerOpen && "rotate-180")} />
+            <X className={cn("w-3.5 h-3.5 text-muted-foreground shrink-0 transition-opacity", pickerOpen ? "opacity-100" : "opacity-0 pointer-events-none")} />
           </button>
 
-          {/* Dropdown */}
-          {pickerOpen && (
-            <div className="absolute top-full left-0 right-0 mt-1 z-50 border border-border rounded-sm bg-background shadow-xl">
-              <div className="p-2 border-b border-border/60">
-                <div className="flex items-center gap-2 px-2 py-1 bg-muted/30 rounded-sm border border-border/50">
-                  <Search className="w-3 h-3 text-muted-foreground shrink-0" />
-                  <input
-                    autoFocus
-                    value={pickerSearch}
-                    onChange={e => setPickerSearch(e.target.value)}
-                    placeholder="Search by fingerprint, ID or status…"
-                    className="flex-1 bg-transparent text-xs font-mono outline-none text-foreground placeholder:text-muted-foreground/50"
-                  />
-                  {pickerSearch && (
-                    <button onClick={() => setPickerSearch("")}>
-                      <X className="w-3 h-3 text-muted-foreground hover:text-foreground" />
-                    </button>
-                  )}
-                </div>
-              </div>
-              <div className="max-h-64 overflow-y-auto">
-                {incidents
-                  .filter(i =>
-                    i.alertFingerprint.toLowerCase().includes(pickerSearch.toLowerCase()) ||
-                    i.incidentId.toLowerCase().includes(pickerSearch.toLowerCase()) ||
-                    i.status.toLowerCase().includes(pickerSearch.toLowerCase())
-                  )
-                  .map(inc => (
-                    <button
-                      key={inc.incidentId}
-                      onClick={() => selectIncident(inc.incidentId)}
-                      className={cn(
-                        "w-full text-left px-4 py-2.5 text-xs font-mono hover:bg-muted/40 transition-colors border-b border-border/30 last:border-0",
-                        inc.incidentId === activeId && "bg-primary/5 border-l-2 border-l-primary pl-3.5"
-                      )}
-                    >
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <StatusBadge status={inc.status} />
-                        <span className="text-primary/60 text-[10px]">#{inc.incidentId.slice(0, 8)}</span>
-                        <span className="text-muted-foreground/50 text-[10px] ml-auto">{fmtDate(inc.updatedAt)}</span>
-                      </div>
-                      <div className="text-foreground/70 mt-0.5 truncate">{inc.alertFingerprint}</div>
-                    </button>
-                  ))}
-              </div>
-              <button
-                onClick={() => setPickerOpen(false)}
-                className="w-full py-1.5 text-[10px] font-mono text-muted-foreground/50 hover:text-muted-foreground border-t border-border/60 transition-colors"
-              >
-                Close
-              </button>
-            </div>
-          )}
+          <IncidentPickerModal
+            open={pickerOpen}
+            onClose={() => setPickerOpen(false)}
+            incidents={incidents as any[]}
+            selectedId={activeId}
+            onSelect={selectIncident}
+            loading={loadingList}
+          />
         </div>
 
         {/* Meta */}

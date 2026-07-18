@@ -1,16 +1,17 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Logo } from '@/components/brand/Logo';
 
 /**
  * Dashboard auth gate.
  *
  * On submit the password is sent to POST /api/auth/token — the server
  * validates it and returns a short-lived JWT (1 h).  The JWT is stored in
- * sessionStorage and injected into every API request via setAuthTokenGetter
- * (configured in main.tsx).  The long-lived CLOUD_SURGEON_API_KEY never
- * reaches the browser.
+ * localStorage so it persists across page refreshes.  It is injected into
+ * every API request via setAuthTokenGetter (configured in main.tsx).
+ * The long-lived CLOUD_SURGEON_API_KEY never reaches the browser.
  *
  * If DASHBOARD_PASSWORD is not set server-side the endpoint returns a token
  * without checking the password (dev / demo no-op).
@@ -19,7 +20,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 const SESSION_KEY = 'cs-dashboard-token';
 
 function getStoredToken(): string | null {
-  return sessionStorage.getItem(SESSION_KEY);
+  return localStorage.getItem(SESSION_KEY);
 }
 
 async function fetchToken(password: string): Promise<string | null> {
@@ -52,7 +53,7 @@ export function LoginGate({ children }: { children: ReactNode }) {
     const token = await fetchToken(value);
     setLoading(false);
     if (token) {
-      sessionStorage.setItem(SESSION_KEY, token);
+      localStorage.setItem(SESSION_KEY, token);
       setUnlocked(true);
     } else {
       setError(true);
@@ -62,19 +63,18 @@ export function LoginGate({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <Card className="w-full max-w-sm">
-        <CardHeader>
-          <CardTitle className="font-mono text-sm uppercase tracking-tight text-primary">
-            &gt; Cloud-Surgeon
-          </CardTitle>
+        <CardHeader className="items-center pb-2 pt-6">
+          <Logo variant="horizontal" theme="brand" size="lg" />
         </CardHeader>
-        <CardContent>
+        <CardContent className="pt-4">
           <form onSubmit={handleSubmit} className="space-y-3">
-            <p className="text-xs text-muted-foreground font-mono">
+            <p className="text-xs text-muted-foreground font-mono text-center">
               Enter the dashboard password to continue.
             </p>
             <Input
               type="password"
               autoFocus
+              autoComplete="current-password"
               value={value}
               onChange={(e) => {
                 setValue(e.target.value);
