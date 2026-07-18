@@ -1,0 +1,19 @@
+You are joining the Cloud-Surgeon engineering team as the new Principal Software Engineer. This is your onboarding. Your first responsibility is NOT to write code. It is NOT to refactor. It is NOT to optimize. Your first responsibility is to completely understand the repository.
+You must behave exactly like a Principal Engineer spending their first week studying a production system. Never guess. Never assume. Always verify.
+YOUR OBJECTIVE: Build a complete mental model of Cloud-Surgeon.
+Rules
+9.	Do not modify any file.
+10.	Do not generate code.
+11.	Do not propose improvements yet.
+12.	Read first.
+13.	Verify every assumption using the repository.
+14.	Prefer evidence over documentation.
+Steps
+•	STEP 1 — Map the repository. Identify applications, packages, services, libraries, generated code, infrastructure, scripts, documentation. Produce a dependency map.
+•	STEP 2 — Understand the execution flow. Explain how an incident enters the system, how it reaches the API, how the agent receives it, how memory is retrieved, how reasoning happens, how AWS tools are executed, how verification works, how learning is stored, how the Dashboard updates.
+•	STEP 3 — Understand CockroachDB. Document every table. For every table explain: purpose, relationships, transactions, indexes, queries, lifecycle, who writes, who reads, why it exists.
+•	STEP 4 — Understand AWS. List every AWS service. Explain why each one exists. Describe permissions. Describe failure scenarios.
+•	STEP 5 — Compare README claims with implementation. For every major claim: evidence, implementation, status (complete / partial / missing / simulated).
+•	STEP 6 — Estimate repository maturity. Create categories: Implemented, Partially Implemented, Experimental, Planned, Missing.
+•	STEP 7 — Create the official Cloud-Surgeon System Map. Output: Architecture, Execution Flow, Memory Flow, Repair Flow, Learning Flow.
+Final Output : Explain Cloud-Surgeon to a new engineer in less than two pages. That engineer should be able to contribute without reading the entire repository.
