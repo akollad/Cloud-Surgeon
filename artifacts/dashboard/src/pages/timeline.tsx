@@ -92,19 +92,41 @@ type AnyEvent =
   | { kind: "resolve"; ts: string; status: string; mttrMs: number | null };
 
 function mergeEvents(incident: any, logs: any[], handoffs: any[]): AnyEvent[] {
+  // Collect middle events (logs + handoffs) and sort them by actual timestamp.
+  const middle: AnyEvent[] = [];
+  for (const h of handoffs) middle.push({ kind: "handoff", ts: h.createdAt ?? h.handoffAt, h });
+  for (const l of logs)     middle.push({ kind: "log",     ts: l.createdAt, l });
+  middle.sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
+
+  // Derive the "started" timestamp from the earliest available signal so the
+  // trigger card shows a meaningful time even when triggeredAt is null.
+  const candidateTs = [
+    incident.triggeredAt,
+    middle[0]?.ts,           // first execution log / handoff is a reliable lower bound
+    incident.createdAt,
+    incident.updatedAt,
+  ].filter(Boolean) as string[];
+  const triggerTs = candidateTs.reduce(
+    (min, t) => new Date(t).getTime() < new Date(min).getTime() ? t : min,
+    candidateTs[0],
+  );
+
+  // trigger is always first; resolve (if any) is always last — regardless of
+  // DB timestamps which can reflect update times rather than event times.
   const r: AnyEvent[] = [];
-  r.push({ kind: "trigger", ts: incident.triggeredAt ?? incident.createdAt ?? incident.updatedAt, incident });
-  for (const h of handoffs) r.push({ kind: "handoff", ts: h.createdAt ?? h.handoffAt, h });
-  for (const l of logs)     r.push({ kind: "log",     ts: l.createdAt, l });
+  r.push({ kind: "trigger", ts: triggerTs, incident });
+  r.push(...middle);
+
   const terminal = ["RESOLVED", "FAILED", "PENDING_APPROVAL"];
   if (incident.resolvedAt || terminal.includes(incident.status)) {
     const ts = incident.resolvedAt ?? incident.updatedAt;
     const mttrMs = incident.resolvedAt
-      ? new Date(incident.resolvedAt).getTime() - new Date(incident.triggeredAt ?? incident.createdAt).getTime()
+      ? new Date(incident.resolvedAt).getTime() - new Date(triggerTs).getTime()
       : null;
     r.push({ kind: "resolve", ts, status: incident.status, mttrMs });
   }
-  return r.sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
+
+  return r;
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
