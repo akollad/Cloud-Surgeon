@@ -35,10 +35,12 @@ export default function LiveDiagnostic() {
   const maxEvents = 50;
 
   useEffect(() => {
-    const base = import.meta.env.BASE_URL?.replace(/\/$/, '') ?? '';
-    // Pass the session JWT as ?token= — EventSource cannot set custom headers.
+    // EventSource cannot set custom headers — pass the JWT as ?token= query param.
+    // Do NOT use import.meta.env.BASE_URL here: that is /dashboard/ (the Vite
+    // base path for assets) and would produce /dashboard/api/... which the
+    // Replit proxy does not route to the API server. API calls always use /api/.
     const jwt = localStorage.getItem('cs-dashboard-token') ?? '';
-    const url = `${base}/api/stream/audit${jwt ? `?token=${encodeURIComponent(jwt)}` : ''}`;
+    const url = `/api/stream/audit${jwt ? `?token=${encodeURIComponent(jwt)}` : ''}`;
     const eventSource = new EventSource(url);
 
     eventSource.onopen = () => setSseStatus("LIVE");
