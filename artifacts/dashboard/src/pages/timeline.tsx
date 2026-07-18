@@ -95,10 +95,12 @@ type AnyEvent =
   | { kind: "resolve";    ts: string; status: string; mttrMs: number | null; verdict?: string };
 
 function inferTransitionReason(autonomousNote: string): TransitionReason {
+  // PENDING_APPROVAL → AUTONOMOUS requires an explicit human /approve call —
+  // there is no automatic re-evaluation or timeout in the agent loop.
+  // The only exception is a feedback-corrected re-dispatch.
   const n = autonomousNote.toLowerCase();
-  if (n.includes("human") || n.includes("approv")) return "human_approved";
-  if (n.includes("feedback") || n.includes("corrected"))  return "feedback_corrected";
-  return "autonomous_reeval";
+  if (n.includes("feedback") || n.includes("corrected")) return "feedback_corrected";
+  return "human_approved"; // default: human used the Approve button
 }
 
 function mergeEvents(incident: any, logs: any[], handoffs: any[]): AnyEvent[] {
