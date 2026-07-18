@@ -40,7 +40,7 @@ infrastructure:
       # - default : true → used when alert mentions Lambda but no name found
       functions:
         - name: order-processor
-          description: "Order processing Lambda (nodejs20.x)"
+          description: "Order processing Lambda (nodejs22.x)"
           aliases: ["order", "processor", "order-handler"]
           default: true
 
