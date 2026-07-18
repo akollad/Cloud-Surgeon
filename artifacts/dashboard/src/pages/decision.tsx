@@ -6,7 +6,6 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   useListIncidents, useGetIncident, useGetIncidentCausalChain,
   useGetIncidentHandoffs, useGetIncidentPlaybook, useGetIncidentRollbackPlan,
-  useListHandoffs,
 } from "@workspace/api-client-react";
 import type { Incident } from "@workspace/api-client-react";
 import {
@@ -356,8 +355,6 @@ export default function DecisionTrace() {
   const { data: handoffs } = useGetIncidentHandoffs(actualSelectedId, { query: { enabled: !!actualSelectedId } });
   const { data: playbook } = useGetIncidentPlaybook(actualSelectedId, { query: { enabled: !!actualSelectedId } });
   const { data: rollbackPlan, refetch: refetchRollbackPlan } = useGetIncidentRollbackPlan(actualSelectedId, { query: { enabled: !!actualSelectedId } });
-  // Global system timeline — all agent_handoffs across every incident (not filtered)
-  const { data: allHandoffs } = useListHandoffs({ query: { refetchInterval: 10000 } });
 
   const ctx = incident?.contextJson as Record<string, unknown> | undefined;
   const repairPlan = ctx?.repairPlan as RepairPlan | undefined;
@@ -595,7 +592,7 @@ export default function DecisionTrace() {
                         </span>
                         <span className="text-muted-foreground text-xs">·</span>
                         <span className="text-foreground text-xs font-bold">
-                          {allHandoffs?.length ?? "…"} handoffs
+                          {handoffs?.length ?? "…"} handoffs
                         </span>
                       </div>
                       <div className="text-[11px] text-muted-foreground/70 break-all">
@@ -610,52 +607,39 @@ export default function DecisionTrace() {
                       </div>
                     </div>
 
-                    {/* ── Global handoffs stream ── */}
-                    {allHandoffs && allHandoffs.length > 0 ? (
+                    {/* ── Handoffs pour cet incident uniquement ── */}
+                    {handoffs && handoffs.length > 0 ? (
                       <div className="relative">
-                        {/* Vertical timeline line */}
                         <div className="absolute left-[7px] top-0 bottom-0 w-px bg-border/40" />
                         <div className="space-y-0">
-                          {allHandoffs.map((h, i) => {
-                            const isCurrent = h.incidentId === incident.incidentId;
+                          {handoffs.map((h, i) => {
                             const agentColor =
                               h.agentName === "diagnostician" ? "#a78bfa" :
                               h.agentName === "remediator"    ? "#22d3ee" :
                               h.agentName === "auditor"       ? "#4ade80" : "#94a3b8";
                             const modeColor =
-                              h.decisionMode === "AUTONOMOUS"      ? "#22d3ee" :
+                              h.decisionMode === "AUTONOMOUS"       ? "#22d3ee" :
                               h.decisionMode === "PENDING_APPROVAL" ? "#facc15" :
                               h.decisionMode === "EXPLORATORY"      ? "#a78bfa" : undefined;
 
                             return (
-                              <div
-                                key={h.handoffId ?? i}
-                                className={cn(
-                                  "relative pl-6 pr-2 py-2 group",
-                                  isCurrent && "bg-primary/5 border-l-2 border-l-primary ml-px"
-                                )}
-                              >
+                              <div key={h.handoffId ?? i} className="relative pl-6 pr-2 py-2">
                                 {/* Timeline dot */}
                                 <div
                                   className="absolute left-[3px] top-[14px] w-[9px] h-[9px] rounded-full border-2 border-background"
-                                  style={{ backgroundColor: isCurrent ? agentColor : "hsl(var(--muted-foreground) / 0.4)" }}
+                                  style={{ backgroundColor: agentColor }}
                                 />
 
                                 <div className="flex items-start gap-2 flex-wrap min-w-0">
-                                  {/* Timestamp */}
                                   <span className="text-[10px] font-mono text-muted-foreground/60 shrink-0 mt-0.5 w-14 tabular-nums">
                                     {h.createdAt ? new Date(h.createdAt as string).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}
                                   </span>
-
-                                  {/* Agent badge */}
                                   <span
                                     className="px-1.5 py-0.5 text-[10px] font-mono font-bold uppercase rounded-sm shrink-0"
                                     style={{ color: agentColor, backgroundColor: agentColor + "18", border: `1px solid ${agentColor}40` }}
                                   >
                                     {String(h.agentName ?? "agent")}
                                   </span>
-
-                                  {/* Decision mode */}
                                   {h.decisionMode && (
                                     <span
                                       className="px-1.5 py-0.5 text-[10px] font-mono font-bold uppercase rounded-sm shrink-0"
@@ -664,21 +648,9 @@ export default function DecisionTrace() {
                                       {String(h.decisionMode)}
                                     </span>
                                   )}
-
-                                  {/* Incident ref — dim for foreign incidents */}
-                                  {!isCurrent && (
-                                    <span className="text-[10px] font-mono text-muted-foreground/40 shrink-0">
-                                      #{String(h.incidentId ?? "").slice(0, 8)}
-                                    </span>
-                                  )}
                                 </div>
-
-                                {/* Note */}
                                 {h.note && (
-                                  <div className={cn(
-                                    "mt-1 ml-16 text-[11px] font-mono leading-relaxed break-words",
-                                    isCurrent ? "text-foreground/90" : "text-muted-foreground/60"
-                                  )}>
+                                  <div className="mt-1 ml-16 text-[11px] font-mono leading-relaxed break-words text-foreground/80">
                                     "{String(h.note)}"
                                   </div>
                                 )}
