@@ -90,11 +90,11 @@ function buildConverseEndpoint(modelId: string): string {
   return `https://bedrock-runtime.${REGION}.amazonaws.com/model/${encodeURIComponent(modelId)}/converse`;
 }
 
-function buildRequestBody(messages: ConverseTurn[], systemPrompt?: string): string {
+function buildRequestBody(messages: ConverseTurn[], systemPrompt?: string, maxTokens = 400): string {
   const body: Record<string, unknown> = {
     messages,
     toolConfig: { tools: [SEARCH_DOCS_TOOL] },
-    inferenceConfig: { maxTokens: 400 },
+    inferenceConfig: { maxTokens },
   };
   if (systemPrompt) body.system = [{ text: systemPrompt }];
   return JSON.stringify(body);
@@ -104,6 +104,7 @@ async function converseWithApiKey(
   messages: ConverseTurn[],
   modelId: string,
   systemPrompt?: string,
+  maxTokens?: number,
 ): Promise<{
   text: string | null;
   stopReason: string;
@@ -119,7 +120,7 @@ async function converseWithApiKey(
       Accept: "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
-    body: buildRequestBody(messages, systemPrompt),
+    body: buildRequestBody(messages, systemPrompt, maxTokens),
   });
 
   if (!res.ok) {
@@ -147,6 +148,7 @@ async function converseWithSigV4(
   messages: ConverseTurn[],
   modelId: string,
   systemPrompt?: string,
+  maxTokens = 400,
 ): Promise<{
   text: string | null;
   stopReason: string;
@@ -165,7 +167,7 @@ async function converseWithSigV4(
     ...(systemPrompt ? { system: [{ text: systemPrompt }] } : {}),
     messages: messages as Parameters<typeof ConverseCommand>[0]["messages"],
     toolConfig: { tools: [SEARCH_DOCS_TOOL] as Parameters<typeof ConverseCommand>[0]["toolConfig"]["tools"] },
-    inferenceConfig: { maxTokens: 400 },
+    inferenceConfig: { maxTokens },
   });
 
   const response = await client.send(command);
@@ -189,12 +191,13 @@ async function converseLoop(
   modelId: string,
   auth: "api-key" | "sigv4",
   systemPrompt?: string,
+  maxTokens?: number,
 ): Promise<string | null> {
   const converse = auth === "api-key" ? converseWithApiKey : converseWithSigV4;
   const messages: ConverseTurn[] = [{ role: "user", content: [{ text: prompt }] }];
 
   // Turn 1 — initial response
-  const turn1 = await converse(messages, modelId, systemPrompt);
+  const turn1 = await converse(messages, modelId, systemPrompt, maxTokens);
 
   if (turn1.stopReason !== "tool_use") {
     // No tool call — return text directly
@@ -220,7 +223,7 @@ async function converseLoop(
     toolResultTurn,
   ];
 
-  const turn2 = await converse(messages2, modelId, systemPrompt);
+  const turn2 = await converse(messages2, modelId, systemPrompt, maxTokens);
   return turn2.text ?? turn1.text; // fall back to partial text from turn 1 if turn 2 fails
 }
 
@@ -230,6 +233,7 @@ async function callNovaThin(
   prompt: string,
   logLabel: string,
   systemPrompt?: string,
+  maxTokens?: number,
 ): Promise<string | null> {
   const auth = bedrockAuthMethod();
   if (auth === "none") return null;
@@ -238,7 +242,7 @@ async function callNovaThin(
     // Try EU cross-region inference profile first
     let result: string | null = null;
     try {
-      result = await converseLoop(prompt, MODEL_ID_EU_PROFILE, auth, systemPrompt);
+      result = await converseLoop(prompt, MODEL_ID_EU_PROFILE, auth, systemPrompt, maxTokens);
       if (result !== null) {
         logger.info({ auth, region: REGION, modelId: MODEL_ID_EU_PROFILE, label: logLabel }, "Bedrock Nova Lite response");
         return result;
@@ -250,7 +254,7 @@ async function callNovaThin(
       );
     }
     // Fallback: direct on-demand model ID
-    result = await converseLoop(prompt, MODEL_ID_DIRECT, auth, systemPrompt);
+    result = await converseLoop(prompt, MODEL_ID_DIRECT, auth, systemPrompt, maxTokens);
     if (result !== null) {
       logger.info({ auth, region: REGION, modelId: MODEL_ID_DIRECT, label: logLabel }, "Bedrock Nova Lite response");
     }
@@ -285,6 +289,6 @@ export async function invokeBedrockThought(prompt: string, systemPrompt?: string
 }
 
 /** Generic text generation — plan/playbook enrichment. */
-export async function invokeBedrockText(prompt: string, systemPrompt?: string): Promise<string | null> {
-  return callNovaThin(prompt, "text", systemPrompt);
+export async function invokeBedrockText(prompt: string, systemPrompt?: string, maxTokens?: number): Promise<string | null> {
+  return callNovaThin(prompt, "text", systemPrompt, maxTokens);
 }

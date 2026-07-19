@@ -281,13 +281,13 @@ function fallbackThought(turnIndex: number): string {
 
 // ── Anthropic path ─────────────────────────────────────────────────────────
 
-async function callAnthropicLLM(prompt: string, systemPrompt: string): Promise<string | null> {
+async function callAnthropicLLM(prompt: string, systemPrompt: string, maxTokens = 300): Promise<string | null> {
   if (process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL) {
     try {
       const { anthropic } = await import("@workspace/integrations-anthropic-ai");
       const message = await anthropic.messages.create({
         model: "claude-haiku-4-5",
-        max_tokens: 300,
+        max_tokens: maxTokens,
         system: systemPrompt,
         messages: [{ role: "user", content: prompt }],
       });
@@ -305,7 +305,7 @@ async function callAnthropicLLM(prompt: string, systemPrompt: string): Promise<s
       const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
       const message = await client.messages.create({
         model: "claude-haiku-4-5",
-        max_tokens: 300,
+        max_tokens: maxTokens,
         system: systemPrompt,
         messages: [{ role: "user", content: prompt }],
       });
@@ -372,10 +372,12 @@ export async function invokeLLMThought(
 /**
  * Generic single-prompt LLM call — plan/playbook enrichment, expectedOutcome, etc.
  * Accepts an optional strategy name to inject the matching skill as system prompt.
+ * Pass maxTokens to override the default 300-token cap (e.g. for JSON plan generation).
  */
 export async function invokeLLMText(
   prompt: string,
   strategyName?: string,
+  maxTokens?: number,
 ): Promise<string | null> {
   const provider  = (process.env.AI_PROVIDER ?? "bedrock").toLowerCase();
   const docChunks = await findRelevantDocChunks(prompt.slice(0, 200), 1).catch(() => []);
@@ -383,8 +385,8 @@ export async function invokeLLMText(
   const systemPrompt = buildSystemPrompt(strategyName) + docContext;
 
   if (provider === "anthropic") {
-    return callAnthropicLLM(prompt, systemPrompt);
+    return callAnthropicLLM(prompt, systemPrompt, maxTokens ?? 300);
   }
 
-  return invokeBedrockText(prompt, systemPrompt);
+  return invokeBedrockText(prompt, systemPrompt, maxTokens ?? 400);
 }

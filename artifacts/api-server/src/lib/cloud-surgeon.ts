@@ -624,32 +624,92 @@ const STRATEGY_PLANS: Record<string, Omit<RepairPlan, "strategy" | "generatedBy"
   },
 };
 
+/**
+ * Strip markdown code fences and extract raw JSON from an LLM response.
+ * Handles ```json ... ```, ``` ... ```, and bare JSON objects.
+ */
+function extractJson(raw: string): string {
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenced) return fenced[1].trim();
+  const firstBrace = raw.indexOf("{");
+  const lastBrace  = raw.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace > firstBrace) return raw.slice(firstBrace, lastBrace + 1);
+  return raw.trim();
+}
+
+/**
+ * Validate that an LLM-generated object has all required RepairPlan fields
+ * with the expected types. Returns null if any field is missing or wrong type.
+ */
+function validateLLMPlan(obj: unknown): Omit<RepairPlan, "strategy" | "generatedBy" | "generatedAt"> | null {
+  if (typeof obj !== "object" || obj === null) return null;
+  const o = obj as Record<string, unknown>;
+  if (typeof o.estimatedDuration !== "string") return null;
+  if (!["low", "medium", "high"].includes(o.riskLevel as string)) return null;
+  if (typeof o.blastRadius !== "string") return null;
+  if (!Array.isArray(o.steps) || o.steps.length < 2) return null;
+  if (!Array.isArray(o.preconditions) || o.preconditions.length < 1) return null;
+  if (typeof o.expectedOutcome !== "string") return null;
+  if (!Array.isArray(o.alternatives)) return null;
+  return o as unknown as Omit<RepairPlan, "strategy" | "generatedBy" | "generatedAt">;
+}
+
 export async function generateRepairPlan(
   alertText: string,
   strategyName: string,
   serviceName: string,
+  diagOutput?: Record<string, unknown>,
 ): Promise<RepairPlan> {
-  const base = STRATEGY_PLANS[strategyName] ?? STRATEGY_PLANS.default_repair!;
-  const plan: RepairPlan = {
-    strategy: strategyName,
-    ...base,
-    generatedBy: "deterministic",
-    generatedAt: new Date().toISOString(),
-  };
+  const staticBase = STRATEGY_PLANS[strategyName] ?? STRATEGY_PLANS.default_repair!;
+  const generatedAt = new Date().toISOString();
 
-  // Enrich expected outcome with LLM — works with any configured provider (Nova Lite or Anthropic)
+  // Build a concise diagnostic summary for the LLM prompt (cap at 500 chars).
+  const diagSummary = diagOutput
+    ? JSON.stringify(diagOutput).slice(0, 500)
+    : "No diagnostic data available.";
+
+  const prompt =
+    `You are a DevOps expert generating a contextual repair plan.\n\n` +
+    `Alert: "${alertText.slice(0, 250)}"\n` +
+    `Strategy: ${strategyName}\n` +
+    `Target service: ${serviceName}\n` +
+    `Diagnostic findings: ${diagSummary}\n\n` +
+    `Return ONLY a valid JSON object — no markdown, no code blocks, no explanation — with exactly these fields:\n` +
+    `{\n` +
+    `  "estimatedDuration": "<X–Y seconds/minutes, specific to this alert>",\n` +
+    `  "riskLevel": "<low|medium|high>",\n` +
+    `  "blastRadius": "<specific scope of impact for ${serviceName}>",\n` +
+    `  "steps": ["<step 1 mentioning ${serviceName}>", "<step 2>", ...],\n` +
+    `  "preconditions": ["<precondition 1>", ...],\n` +
+    `  "expectedOutcome": "<one sentence: measurable metric or state after successful repair>",\n` +
+    `  "alternatives": ["<alt strategy (reason)>", ...]\n` +
+    `}\n\n` +
+    `Rules: steps 4–6 items, ordered and actionable; preconditions 2–4 items; ` +
+    `alternatives 2–3 items; riskLevel=low if no interruption, medium if brief downtime, high if full outage risk.`;
+
   try {
-    const outcomePrompt =
-      `You are a DevOps expert. Service '${serviceName}' triggered: "${alertText.slice(0, 200)}". ` +
-      `Repair strategy: ${strategyName}. ` +
-      `Write ONE sentence naming the specific measurable state expected within 90 seconds of a successful repair — ` +
-      `a metric dropping below a threshold, a count reaching zero, or a service reaching a target health state. ` +
-      `Respond with ONLY that sentence, no preamble.`;
-    const result = await invokeLLMText(outcomePrompt, strategyName);
-    if (result) { plan.expectedOutcome = result; plan.generatedBy = "llm"; }
-  } catch { /* non-fatal */ }
+    const raw = await invokeLLMText(prompt, strategyName, 1024);
+    if (raw) {
+      const parsed = JSON.parse(extractJson(raw)) as unknown;
+      const validated = validateLLMPlan(parsed);
+      if (validated) {
+        return {
+          strategy: strategyName,
+          ...validated,
+          generatedBy: "llm",
+          generatedAt,
+        };
+      }
+    }
+  } catch { /* fall through to static plan */ }
 
-  return plan;
+  // Fallback: static lookup table — always reliable, zero latency.
+  return {
+    strategy: strategyName,
+    ...staticBase,
+    generatedBy: "deterministic",
+    generatedAt,
+  };
 }
 
 // ── Feature 3: Rollback policy ─────────────────────────────────────────────
@@ -1859,13 +1919,16 @@ export async function runAgentLoop(
     // ── Feature 2: Generate pre-execution simulation plan ─────────────────
     // Before touching any infrastructure, the agent produces a structured plan
     // explaining exactly what it intends to do, the blast radius, and risk level.
-    const repairPlan = await generateRepairPlan(alertText, strategyName, serviceName);
+    // ── Feature 2: Generate pre-execution simulation plan ─────────────────
+    // Pass the Diagnostician's tool output so the LLM can reference actual
+    // findings (running counts, health status, etc.) in the plan.
+    const diagOutput = (context.turns[0]?.toolOutput ?? {}) as Record<string, unknown>;
+    const repairPlan = await generateRepairPlan(alertText, strategyName, serviceName, diagOutput);
     context.repairPlan = repairPlan;
 
     // ── Feature 3: Capture pre-repair state for rollback ──────────────────
     // Pull concrete infrastructure values from the Diagnostician's tool output
     // so the rollback_service tool can invert the exact change that was made.
-    const diagOutput = (context.turns[0]?.toolOutput ?? {}) as Record<string, unknown>;
     const diagData   = (diagOutput.data ?? {}) as Record<string, unknown>;
 
     const preRepairState: Record<string, unknown> = {
