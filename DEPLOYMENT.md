@@ -23,7 +23,7 @@
 Last verified (July 15 2026): `[BOOT] AI: anthropic 🟢 LIVE (direct API key) | AWS tools: 🟢 LIVE (region: us-east-1) | DB: connected | CDC: [CDC] Existing CockroachDB changefeed reused — streaming to webhook`.
 Demo dashboard password: `cloudsurgeon-demo`.
 
-**Task definition revision 12** (current — 2026-07-18): Docker image rebuilt and pushed to ECR following `order-processor` Lambda runtime migration `nodejs20.x` → `nodejs22.x`. ECS service force-redeployed. Previous revision 11: adds `ECS_DEFAULT_SERVICE=api` env var so `aws_repair_service` routes to the real ECS service (`cloud-surgeon/api`) instead of generic placeholders. Updates deprecated `claude-3-5-haiku-latest` → `claude-haiku-4-5`; rev 10 added `ECS_DEFAULT_CLUSTER=cloud-surgeon`; rev 6 added `curl` to runtime stage.
+**Task definition revision 12** (current — 2026-07-19 redeploy): Docker image rebuilt and pushed to ECR. Changes: diagnostician handoff message now generated dynamically after tool selection (reflects actual tool: CLI vs ECS API vs RDS API etc.); PENDING_APPROVAL→AUTONOMOUS transition card corrected to always show "Human approval received" (no automatic re-evaluation exists in the agent loop). Dashboard rebuilt and pushed to S3. CloudFront invalidation triggered (I15KA8XU3YGHQ4D2SO79Y64ZG7). Previous (2026-07-18): image rebuilt following `order-processor` Lambda runtime migration `nodejs20.x` → `nodejs22.x`. Rev 11: adds `ECS_DEFAULT_SERVICE=api`; rev 10 added `ECS_DEFAULT_CLUSTER=cloud-surgeon`; rev 6 added `curl` to runtime stage.
 
 **Live AWS repair note**: `src/lib/aws.ts` explicitly requires `AWS_ACCESS_KEY_ID` +
 `AWS_SECRET_ACCESS_KEY` as environment variables to enter LIVE mode — the ECS task role alone
