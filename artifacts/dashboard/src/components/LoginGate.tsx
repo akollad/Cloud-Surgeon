@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { useState, useEffect, type FormEvent, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -19,6 +19,26 @@ import { Logo } from '@/components/brand/Logo';
 
 const SESSION_KEY = 'cs-dashboard-token';
 
+/** Decode JWT payload without verifying signature (browser-side check only). */
+function jwtExpiry(token: string): number | null {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    return typeof payload.exp === 'number' ? payload.exp : null;
+  } catch {
+    return null;
+  }
+}
+
+function isTokenValid(token: string): boolean {
+  const exp = jwtExpiry(token);
+  if (exp === null) return true; // no exp claim → treat as valid
+  return exp * 1000 > Date.now();
+}
+
+export function clearStoredToken(): void {
+  try { localStorage.removeItem(SESSION_KEY); } catch {}
+}
+
 function getStoredToken(): string | null {
   // Migrate from sessionStorage if still present (users who logged in before
   // the localStorage switch keep their session without re-entering the password).
@@ -29,7 +49,13 @@ function getStoredToken(): string | null {
       sessionStorage.removeItem(SESSION_KEY);
     }
   } catch {}
-  return localStorage.getItem(SESSION_KEY);
+  const token = localStorage.getItem(SESSION_KEY);
+  if (token && !isTokenValid(token)) {
+    // Token exists but is expired — purge it so the login form shows.
+    clearStoredToken();
+    return null;
+  }
+  return token;
 }
 
 async function fetchToken(password: string): Promise<string | null> {
@@ -52,6 +78,16 @@ export function LoginGate({ children }: { children: ReactNode }) {
   const [value, setValue] = useState('');
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // Lock the gate whenever an API call returns 401 (e.g. expired JWT).
+  useEffect(() => {
+    function handleExpired() {
+      clearStoredToken();
+      setUnlocked(false);
+    }
+    window.addEventListener('cs-auth-expired', handleExpired);
+    return () => window.removeEventListener('cs-auth-expired', handleExpired);
+  }, []);
 
   if (unlocked) return <>{children}</>;
 
