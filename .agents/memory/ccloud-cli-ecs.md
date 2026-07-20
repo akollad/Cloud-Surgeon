@@ -1,25 +1,27 @@
 ---
 name: ccloud CLI headless auth in ECS
-description: ccloud v0.6.12 cannot authenticate headlessly — REST API fallback is the real working path; binary is present for cosmetic/demo value only.
+description: bootstrapCcloudCredentials() écrit le bon format snake_case api_key au démarrage — Layer-1 binary actif en dev et en prod (ECS). L'ancienne note REST-fallback était basée sur le bug camelCase.
 ---
 
-# ccloud CLI in ECS — what actually works
+# ccloud CLI in ECS — état post-fix (juillet 2026)
 
-## Confirmed behaviour (live test, July 2026)
-`COCKROACH_API_KEY` is set in the ECS task definition with the correct value, but ccloud v0.6.12
-still responds: `Error: not logged in. Use 'ccloud auth login' to login`.
+## Ce qui fonctionne maintenant
+`bootstrapCcloudCredentials()` dans `artifacts/api-server/src/index.ts` écrit au démarrage :
+- `credentials.json` → `{ "default": { "api_key": "..." } }` (snake_case — clé que ccloud v0.6.12 lit)
+- `profiles.json` → org metadata (organizationId, organizationLabel, organizationName, server, userFullName)
 
-**The binary cannot authenticate headlessly.** `ccloud-headless-auth.md` is the authoritative note.
+Ce format est identique en dev (Replit) et en prod (ECS). Le binaire s'authentifie headlessly sans browser OAuth dans les deux environnements.
 
-## Dockerfile requirements (still needed)
-- Use `node:24-slim` (Debian/glibc) — ccloud is a glibc binary; Alpine (musl) is incompatible.
-- Install `ca-certificates` via apt-get — Debian slim ships without the system CA bundle; the binary
-  needs it to reach `cockroachlabs.cloud` even if auth ultimately fails.
-- `curl` must also be installed for the ECS container health check.
+**Why the old note was wrong:** La mémoire précédente a été écrite quand `bootstrapCcloudCredentials()` utilisait `apiKey` (camelCase). Le binaire lisait `json:"api_key"` (snake_case) — le champ camelCase était silencieusement ignoré, `whoami` retournait "not logged in", le fallback REST prenait le relais. Fix : une lettre (`api_key` vs `apiKey`).
 
-## What actually runs
-`callCockroachCloudRestApi()` in `artifacts/api-server/src/mcp/server.ts` — calls the same REST API
-that ccloud wraps. Results are identical. Every response includes `cliMode: "rest"` and a
-`ccloudEquivalent` field showing the exact ccloud command for transparency.
+## Chemins en production (ECS)
+- Binaire : `/usr/local/bin/ccloud` (copié par le Dockerfile depuis le stage `ccloud`)
+- Config dir : `os.homedir() + "/.config/.cockroachdb/"` (`XDG_CONFIG_HOME` non défini dans le container → fallback homedir)
+- `COCKROACH_CLOUD_API_KEY` doit être injecté comme secret ECS
 
-**Why acceptable:** The REST API is the same data source. Documented explicitly in tool descriptions.
+## Dockerfile requirements (toujours valides)
+- Base image `node:24-slim` (Debian/glibc) — ccloud est un binaire glibc ; Alpine (musl) incompatible.
+- `ca-certificates` + `curl` installés via apt-get — nécessaires pour les appels TLS vers `cockroachlabs.cloud` et le health check ECS.
+
+## Fallback REST (toujours présent)
+`callCockroachCloudRestApi()` reste en place comme fallback si le binaire échoue pour une raison inattendue. Chaque réponse inclut `ccloudEquivalent` pour la transparence.
