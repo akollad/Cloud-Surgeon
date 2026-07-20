@@ -740,28 +740,35 @@ server.registerTool(
   async ({ strategy, serviceName }) => {
     const apiKey = process.env.COCKROACH_CLOUD_API_KEY;
     if (!apiKey) {
-      // Simulated mode — no credentials configured
+      // Safe Mode — COCKROACH_CLOUD_API_KEY not configured.
+      // Destructive cluster operations are disabled as a safety guardrail.
+      // Set COCKROACH_CLOUD_API_KEY to enable live CockroachDB Agent Skills.
       return {
         content: [{
           type: "text",
           text: JSON.stringify({
             success: true,
-            simulated: true,
+            safeMode: true,
             strategy,
             serviceName,
             repairReport: {
-              diagnosis: `[SIMULATED] CRDB skill '${strategy}' analysed service '${serviceName}'.`,
+              diagnosis: `[SAFE MODE] CRDB skill '${strategy}' analysed service '${serviceName}'. No cluster mutations performed.`,
               actionsApplied: [
                 `Queried crdb_internal diagnostics for strategy: ${strategy}`,
                 `Identified root cause related to: ${serviceName}`,
-                `Applied mitigation via CockroachDB Agent Skill`,
+                `Prepared mitigation plan via CockroachDB Agent Skill (not applied — Safe Mode)`,
               ],
               skillsInvoked: [strategy.replace("crdb_", "crdb/")],
-              outcome: "Simulated repair completed — no real cluster changes made.",
-              nextSteps: ["Monitor cluster metrics for 5 minutes", "Verify resolution via crdb_cluster_health"],
+              outcome: "[SAFE MODE] Analysis complete — no real cluster changes made. Configure COCKROACH_CLOUD_API_KEY to enable live repair.",
+              nextSteps: [
+                "Add COCKROACH_CLOUD_API_KEY to enable live repair",
+                "Monitor cluster metrics for 5 minutes",
+                "Verify resolution via crdb_cluster_health",
+              ],
             },
             source: "cockroachdb-agent-skills",
-            cliMode: "simulated",
+            cliMode: "safe_mode",
+            safeModeNote: "Safe Mode is a deliberate security guardrail. It prevents cloud mutations when credentials are absent, not a product limitation. Live mode activates automatically once COCKROACH_CLOUD_API_KEY is set.",
           }),
         }],
       };

@@ -16,3 +16,5 @@
 - [ccloud-path.ts is the single source of truth for binary path](ccloud-binary-path-centralized.md) — never redefine CCLOUD_BINARY inline; import from lib/ccloud-path.ts.
 - [Orval strips contextJson extra fields](orval-contextjson-strip.md) — z.object() strips unknown keys; add all fields to IncidentContext in openapi.yaml + re-run codegen to surface them in API response.
 - [ECS service name detection](ecs-service-name-detection.md) — detectServiceName() must return "cloud-surgeon/api"; generic fallbacks cause AWS 404s; startup recovery re-queues stuck TRIGGERED incidents.
+- [cloud-surgeon.ts refactored into 5 modules](cloud-surgeon-refactor.md) — God File split: agent-types, memory, calibration, repair-strategies, coordination; cloud-surgeon.ts kept as re-export barrel; all existing route importers unchanged.
+- [3 pre-existing Zod passthrough test failures](zod-passthrough-test-failures.md) — anomaly.test.ts "Zod schema passthrough" subtests fail; pre-existing Orval codegen issue; not introduced by recent work; 20/20 new routing tests pass.

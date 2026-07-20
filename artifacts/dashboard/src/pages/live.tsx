@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useListIncidents } from "@workspace/api-client-react";
@@ -32,7 +32,42 @@ export default function LiveDiagnostic() {
   
   const [events, setEvents] = useState<SSEEvent[]>([]);
   const [sseStatus, setSseStatus] = useState<"LIVE" | "OFFLINE">("OFFLINE");
+
+  // Track previous status per incident to detect transitions
+  const prevStatusRef = useRef<Map<string, string>>(new Map());
+  // Track which incidents are in a flash state: incidentId → "resolve" | "fail"
+  const [flashStates, setFlashStates] = useState<Map<string, "resolve" | "fail">>(new Map());
+
   const maxEvents = 50;
+
+  // Detect status transitions and trigger flash animations
+  useEffect(() => {
+    if (!incidents) return;
+    const newFlashes = new Map(flashStates);
+    let changed = false;
+
+    for (const inc of incidents) {
+      const prev = prevStatusRef.current.get(inc.incidentId);
+      if (prev && prev !== inc.status) {
+        if (inc.status === "RESOLVED") {
+          newFlashes.set(inc.incidentId, "resolve");
+          changed = true;
+        } else if (inc.status === "FAILED") {
+          newFlashes.set(inc.incidentId, "fail");
+          changed = true;
+        }
+      }
+      prevStatusRef.current.set(inc.incidentId, inc.status);
+    }
+
+    if (changed) {
+      setFlashStates(new Map(newFlashes));
+      // Clear flash state after animation completes (1.4s + small buffer)
+      setTimeout(() => {
+        setFlashStates(new Map());
+      }, 1600);
+    }
+  }, [incidents]);
 
   useEffect(() => {
     // EventSource cannot set custom headers — pass the JWT as ?token= query param.
@@ -66,6 +101,13 @@ export default function LiveDiagnostic() {
     ["TRIGGERED", "DIAGNOSING", "REPAIRING", "PENDING_APPROVAL", "PREDICTIVE"].includes(i.status)
   ) || [];
 
+  // Show recently resolved/failed incidents for a few seconds so the flash is visible
+  const recentlyFinished = incidents?.filter(i =>
+    (i.status === "RESOLVED" || i.status === "FAILED") && flashStates.has(i.incidentId)
+  ) || [];
+
+  const displayIncidents = [...activeIncidents, ...recentlyFinished];
+
   return (
     <div className="max-w-6xl mx-auto space-y-6 animate-in fade-in duration-500 pb-6">
       <div className="flex items-center justify-between border-b border-border pb-4">
@@ -80,19 +122,20 @@ export default function LiveDiagnostic() {
         </div>
       </div>
 
-      {activeIncidents.length > 0 ? (
+      {displayIncidents.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {activeIncidents.map((inc, idx) => {
+          {displayIncidents.map((inc, idx) => {
+            const flashState = flashStates.get(inc.incidentId);
             const statusStyle: Record<string, string> = {
               TRIGGERED:       "border-red-500/60 shadow-[0_0_24px_rgba(239,68,68,0.25)]",
               DIAGNOSING:      "border-yellow-500/60 shadow-[0_0_20px_rgba(234,179,8,0.2)]",
               REPAIRING:       "border-cyan-500/60 shadow-[0_0_20px_rgba(34,211,238,0.2)]",
               PENDING_APPROVAL:"border-orange-500/60 shadow-[0_0_22px_rgba(249,115,22,0.28)]",
               PREDICTIVE:      "border-purple-500/60 shadow-[0_0_20px_rgba(168,85,247,0.2)]",
+              RESOLVED:        "border-green-500/60",
+              FAILED:          "border-red-500/60",
             };
             const pulseStatus = ["TRIGGERED", "PENDING_APPROVAL"];
-            const scanStatus  = ["DIAGNOSING"];
-            const repairStatus = ["REPAIRING"];
 
             return (
               <div
@@ -100,19 +143,23 @@ export default function LiveDiagnostic() {
                 className={cn(
                   "animate-in fade-in slide-in-from-bottom-2 duration-300 rounded-sm border bg-card overflow-hidden",
                   statusStyle[inc.status] ?? "border-border",
-                  pulseStatus.includes(inc.status) && "animate-pulse"
+                  pulseStatus.includes(inc.status) && "animate-pulse",
+                  flashState === "resolve" && "animate-flash-resolve",
+                  flashState === "fail"    && "animate-flash-fail",
                 )}
                 style={{ animationDelay: `${idx * 60}ms`, animationFillMode: "both" }}
               >
                 {/* Phase progress bar */}
                 <div className="h-0.5 w-full overflow-hidden">
                   <div className={cn(
-                    "h-full",
+                    "h-full transition-all duration-700",
                     inc.status === "TRIGGERED"        && "w-1/5 bg-red-500",
                     inc.status === "DIAGNOSING"       && "w-2/5 bg-yellow-500 animate-[scan_2s_ease-in-out_infinite]",
                     inc.status === "REPAIRING"        && "w-3/5 bg-cyan-400 animate-[scan_1.5s_ease-in-out_infinite]",
                     inc.status === "PENDING_APPROVAL" && "w-4/5 bg-orange-400",
                     inc.status === "PREDICTIVE"       && "w-1/3 bg-purple-400 animate-pulse",
+                    inc.status === "RESOLVED"         && "w-full bg-green-500",
+                    inc.status === "FAILED"           && "w-full bg-red-500",
                   )} />
                 </div>
 

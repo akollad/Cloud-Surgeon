@@ -6,7 +6,15 @@
 
 Built for the **CockroachDB × AWS Hackathon 2026**.
 
-**🔗 Live demo:** https://d3ddnpg3hz3st4.cloudfront.net/ · password `cloudsurgeon-demo`
+---
+
+> ## 🔗 Live Demo
+>
+> **URL:** https://d3ddnpg3hz3st4.cloudfront.net/
+>
+> **Password:** `cloudsurgeon-demo`
+>
+> The live demo runs against a real CockroachDB Serverless cluster and real AWS infrastructure (ECS, RDS, Lambda). You can trigger incidents, watch the three-phase agent loop execute in real time, and see the self-calibrating memory update after every resolution.
 
 ---
 
@@ -17,10 +25,65 @@ Cloud-Surgeon receives infrastructure alerts (CloudWatch, webhooks, or manual in
 **Key properties:**
 
 - **Crash-resilient** — kill the agent mid-repair; the next invocation picks up from the exact last persisted turn, zero context loss
-- **Self-learning** — per-strategy success rates computed by pure SQL aggregation; the routing changes automatically as win-rates shift
-- **Pre-alarm healing** — anomaly detection ingests live metrics and opens predictive incidents *before* an outage triggers
-- **Human-in-the-loop** — low-confidence repairs pause for approval; human corrections feed back into the vector memory
-- **Real tools, real infra** — MCP server with live AWS ECS/RDS/Lambda repair + live CockroachDB Cloud REST API
+- **Fully automatic self-learning** — `indexResolvedIncident()` calls `recalibrateStrategy()` synchronously after every resolution; per-strategy `correction_factor` updates before the next routing decision, with no human trigger or scheduled job needed
+- **Pre-alarm healing** — anomaly detection ingests live metrics and opens predictive incidents *before* an outage triggers (see [✨ Pre-Alarm Healing](#-pre-alarm-healing) below)
+- **Human-in-the-loop** — low-confidence repairs pause for approval; human corrections feed back into the vector memory with weight=0.5 so they cannot erase a strong history of successes
+- **Real tools, real infra** — MCP server with live AWS ECS/RDS/Lambda repair + live CockroachDB Cloud REST API; Safe Mode activates automatically when credentials are absent (no silent failures)
+
+---
+
+## ✨ Pre-Alarm Healing
+
+> **Cloud-Surgeon can open an incident before any alert fires.**
+
+The anomaly detection subsystem (`anomaly.ts`) ingests live metric snapshots via `POST /api/metrics/ingest`. Each datapoint is stored in `metric_snapshots` (CockroachDB) and compared against a rolling baseline. When a metric is trending toward a threshold — CPU rising, latency degrading, changefeed lag growing — the engine opens a **PREDICTIVE** incident at a configurable forecast horizon (default: 15 minutes before breach).
+
+### How it works
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  POST /api/metrics/ingest                               │
+│  { metricName, value, namespace, dimensionName, ... }   │
+└─────────────────────────┬───────────────────────────────┘
+                          │
+                          ▼
+              metric_snapshots (CockroachDB)
+              rolling baseline (last 20 samples)
+                          │
+                    deviation > 2σ?
+                          │
+              ┌───────────┴──────────┐
+             Yes                     No
+              │                      │
+   open PREDICTIVE incident        do nothing
+   → agent loop starts             (healthy baseline)
+   → repair BEFORE alarm fires
+```
+
+### Why this matters for the hackathon
+
+Most autonomic systems react: they wait for an alarm, then repair. Cloud-Surgeon detects the *slope* of degradation and intervenes during the approach phase, before any user-visible impact. For example:
+
+- **CockroachDB changefeed lag growing** → opens predictive incident → Remediator `RESUME JOB` while lag is still recoverable, before the consumer falls too far behind
+- **ECS CPU trending to 85%** → opens predictive incident → Remediator force-redeploy while the service is still healthy, preventing the task from crashing
+
+### Dashboard
+
+The **Predictive Anomaly** page on the dashboard visualises the metric timeline, deviation bands, and all active PREDICTIVE incidents. You can inject a metric spike live:
+
+```bash
+curl -X POST http://localhost:8080/api/metrics/ingest \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $CLOUD_SURGEON_API_KEY" \
+  -d '{
+    "metricName": "CPUUtilization",
+    "value": 88,
+    "namespace": "AWS/ECS",
+    "dimensionName": "ServiceName",
+    "dimensionValue": "checkout-service",
+    "unit": "Percent"
+  }'
+```
 
 ---
 
@@ -426,6 +489,17 @@ cloud-surgeon/
 └── scripts/
     └── post-merge.sh                  ← post-merge setup (pnpm install + build)
 ```
+
+> **Agent core modules** — the 2 200-line God File was refactored into focused modules:
+>
+> | Module | Responsibility |
+> |---|---|
+> | `lib/agent-types.ts` | Shared TypeScript types (RoutingMode, IncidentContext, RepairPlan …) |
+> | `lib/memory.ts` | Layer 1 — fingerprint, strategy/service detection, C-SPANN vector RAG, storm detection |
+> | `lib/calibration.ts` | Layer 1+2 — contextual bandit, correction factor, computeRoutingMode, human feedback |
+> | `lib/repair-strategies.ts` | Feature 2+3+4 — repair plans, rollback policy, AI playbooks (all 15 strategies) |
+> | `lib/coordination.ts` | Layer 3 — serializable multi-agent locking via CockroachDB |
+> | `lib/cloud-surgeon.ts` | Main 3-phase agent loop + CRUD helpers + re-exports (~700 lines vs 2 200) |
 
 ---
 

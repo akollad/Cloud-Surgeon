@@ -8,7 +8,7 @@
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test src/lib/anomaly.test.ts src/lib/prompt-guard.test.ts",
+    "test": "tsx --test src/lib/anomaly.test.ts src/lib/prompt-guard.test.ts src/lib/cloud-surgeon.routing.test.ts",
     "test:cdc-recovery": "tsx --test src/lib/cdc-recovery.test.ts"
   },
   "dependencies": {
