@@ -1,8 +1,8 @@
-# 🩺 Cloud-Surgeon
+<img src="artifacts/dashboard/public/logo.svg" alt="Cloud-Surgeon" width="180" />
+
+# Cloud-Surgeon
 
 > **Autonomous AI DevOps agent** — detects, diagnoses, and repairs cloud infrastructure incidents using a three-layer CockroachDB memory system that learns from every repair.
-
-<img src="artifacts/dashboard/public/logo.svg" alt="Cloud-Surgeon" width="180" />
 
 Built for the **CockroachDB × AWS Hackathon 2026**.
 
@@ -126,7 +126,7 @@ curl -X POST http://localhost:8080/api/metrics/ingest \
 │                                     │  │  MCP Tool Server             │  │  │
 │                                     │  │                              │  │  │
 │                                     │  │  • execute_ccloud_command   │  │  │
-│                                     │  │    (CRDB Cloud REST API)    │  │  │
+│                                     │  │    (REST API + ccloud CLI)  │  │  │
 │                                     │  │  • aws_repair_service       │  │  │
 │                                     │  │    (ECS / RDS / Lambda)     │  │  │
 │                                     │  │  • crdb_cluster_health      │  │  │
@@ -195,7 +195,7 @@ graph TB
     end
 
     subgraph MCP["MCP Tool Server (stdio subprocess)"]
-        H[execute_ccloud_command<br/>CRDB Cloud REST API]
+        H[execute_ccloud_command<br/>REST API + ccloud CLI]
         I[aws_repair_service<br/>ECS · RDS · Lambda]
         J[crdb_cluster_health<br/>crdb_query · slow_queries]
     end
@@ -234,7 +234,7 @@ graph TB
 
 ### Prerequisites
 
-- Node.js 20+ and pnpm 9+
+- Node.js 20+ and pnpm 10+
 - A [CockroachDB Serverless](https://cockroachlabs.cloud) cluster (free tier works)
 - AWS credentials with Bedrock access **and** a `BEDROCK_API_KEY` (`bdak-…`) for bedrock-mantle (Mistral Large 3). Anthropic is supported as an alternative via `AI_PROVIDER=anthropic`.
 
@@ -381,13 +381,13 @@ Cloud-Surgeon exposes its tools via the [Model Context Protocol](https://modelco
 
 | Tool | Description | Live / Simulated |
 |---|---|---|
-| `execute_ccloud_command` | CockroachDB Cloud REST API wrapper. Actions: `cluster:status`, `cluster:list`, `cluster:sql-users`, `cluster:backups`, `cluster:version`, `cluster:sql-dns`. Each response includes `ccloudEquivalent` (exact ccloud command). | 🟢 **Live** (with `COCKROACH_CLOUD_API_KEY`) |
+| `execute_ccloud_command` | CockroachDB Cloud CLI + REST API. Actions: `cluster:status`, `cluster:list`, `cluster:sql-users`, `cluster:backups`, `cluster:version`, `cluster:sql-dns`. Uses the `ccloud` binary (layer-1) when authenticated, falls back to the REST API otherwise. Each response includes `ccloudEquivalent` (exact ccloud command). | 🟢 **Live** (with `COCKROACH_CLOUD_API_KEY`) |
 | `aws_repair_service` | Live ECS force-redeploy, RDS connection scaling, Lambda concurrency scale-up. Infers service type from name. | 🟢 **Live** (with AWS creds) · 🔵 Simulated fallback |
 | `crdb_cluster_health` | Official CockroachDB Cloud MCP — `get_cluster` + `show_running_queries` | 🟢 **Live** (with `COCKROACH_CLOUD_API_KEY`) |
 | `crdb_list_slow_queries` | Official CockroachDB Cloud MCP — slow query diagnostics | 🟢 **Live** |
 | `crdb_query` | Official CockroachDB Cloud MCP — run diagnostic SQL | 🟢 **Live** |
 
-> **Note on ccloud CLI**: `ccloud v0.6.12` (the latest binary) requires browser-based OAuth and cannot authenticate headlessly in containerised environments. Cloud-Surgeon calls the same CockroachDB Cloud REST API that ccloud wraps, authenticated via service-account API key. The `ccloudEquivalent` field in every response documents the exact ccloud command that would produce identical output.
+> **Note on ccloud CLI**: `ccloud v0.6.12` is bundled and authenticated at startup via `bootstrapCcloudCredentials()`, which writes the three credential files the binary requires (`credentials.json`, `profiles.json`, `configuration.json`) from the `COCKROACH_CLOUD_API_KEY` service-account key — no browser OAuth needed. When authenticated, the binary is used as layer-1; the REST API is the fallback when it is not. The `ccloudEquivalent` field in every response documents the exact ccloud command that would produce identical output.
 
 ---
 
