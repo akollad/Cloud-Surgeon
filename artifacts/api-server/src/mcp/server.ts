@@ -750,47 +750,145 @@ server.registerTool(
       actionsApplied: [] as string[],
     };
 
+    // Detect whether a query was rejected because crdb_internal is restricted on
+    // CockroachDB Serverless / Basic plan.  The MCP select_query tool returns
+    // { success: false, error: "query references a restricted schema: access to
+    // \"crdb_internal\" is blocked for security reasons" } — it does NOT throw.
+    const isCrdbInternalBlocked = (r: Record<string, unknown>): boolean =>
+      r.success === false &&
+      /restricted schema|crdb_internal.*blocked|blocked for security/i.test(String(r.error ?? ""));
+
+    // Generic error check (any kind of query failure).
+    const isQueryError = (r: Record<string, unknown>): boolean => r.success === false;
+
     try {
       if (strategy === "crdb_hotspot_resolution") {
         (report.skillsInvoked as string[]).push("crdb/performance/diagnose-hotspots");
-        const hotspots = await crdbMcp.query(
+
+        // Primary: crdb_internal (Standard plan / dedicated).
+        let hotspots = await crdbMcp.query(
           `SELECT table_name, index_name, num_contention_events, ROUND(cumulative_contention_time::DECIMAL/1e9,2) AS contention_s
            FROM crdb_internal.cluster_contention_events ORDER BY num_contention_events DESC LIMIT 5`,
           "defaultdb",
         );
+        // Fallback: pg_stat_activity is always readable on Basic/Serverless.
+        if (isCrdbInternalBlocked(hotspots)) {
+          report.planNote = "crdb_internal restricted on this cluster plan — using pg_stat_activity fallback";
+          hotspots = await crdbMcp.query(
+            `SELECT pid, usename, application_name, state,
+                    now() - query_start AS duration,
+                    LEFT(query, 200) AS query_preview
+             FROM pg_stat_activity
+             WHERE state != 'idle' AND query_start IS NOT NULL
+             ORDER BY query_start
+             LIMIT 10`,
+            "defaultdb",
+          );
+        }
         report.hotspotDiagnosis = hotspots;
+
         (report.skillsInvoked as string[]).push("crdb/schema/index-advisor");
-        const indexes = await crdbMcp.query(
+
+        // Primary: crdb_internal.index_recommendations.
+        let indexes = await crdbMcp.query(
           `SELECT type, object_name, index_name, LEFT(create_statement,200) AS recommended_ddl
            FROM crdb_internal.index_recommendations LIMIT 5`,
           "defaultdb",
         );
+        // Fallback: existing index catalogue from information_schema (always readable).
+        if (isCrdbInternalBlocked(indexes)) {
+          indexes = await crdbMcp.query(
+            `SELECT table_name, index_name, non_unique, column_name, seq_in_index
+             FROM information_schema.statistics
+             WHERE table_schema = 'public'
+             ORDER BY table_name, index_name, seq_in_index
+             LIMIT 20`,
+            "defaultdb",
+          );
+          report.indexAdvisorNote = "index_recommendations unavailable on this plan — showing existing indexes from information_schema";
+        }
         report.indexRecommendations = indexes;
-        (report.actionsApplied as string[]).push("Diagnosed hot contention ranges", "Retrieved index advisor recommendations");
-        report.outcome = "Hot-spot diagnosed. Index recommendations surfaced. Apply DDL during maintenance window.";
+
+        const hotspotsOk = !isQueryError(hotspots);
+        const indexesOk  = !isQueryError(indexes);
+
+        if (!hotspotsOk && !indexesOk) {
+          report.success    = false;
+          report.actionTaken = "";
+          report.outcome    = "Diagnostic failed — hotspot analysis and index advisor both returned errors. Check cluster connectivity and permissions.";
+        } else {
+          (report.actionsApplied as string[]).push(
+            hotspotsOk ? "Diagnosed active contention / active sessions" : "Hotspot query failed — skipped",
+            indexesOk  ? "Retrieved index information"                   : "Index advisor query failed — skipped",
+          );
+          report.actionTaken = "CRDB_HOTSPOT_DIAGNOSED";
+          report.outcome = report.planNote
+            ? "Partial diagnosis via pg_stat_activity and information_schema (crdb_internal is restricted on the Basic/Serverless plan). Review active sessions and existing indexes. For crdb_internal.cluster_contention_events and index_recommendations, upgrade to Standard plan."
+            : "Hot-spot diagnosed. Index recommendations surfaced. Apply DDL during maintenance window.";
+        }
 
       } else if (strategy === "crdb_index_optimization") {
         (report.skillsInvoked as string[]).push("crdb/schema/index-advisor");
-        const indexes = await crdbMcp.query(
+
+        let indexes = await crdbMcp.query(
           `SELECT type, object_name, index_name, details, LEFT(create_statement,300) AS recommended_ddl
            FROM crdb_internal.index_recommendations LIMIT 10`,
           "defaultdb",
         );
+        if (isCrdbInternalBlocked(indexes)) {
+          report.planNote = "crdb_internal restricted — showing existing indexes from information_schema";
+          indexes = await crdbMcp.query(
+            `SELECT table_name, index_name, non_unique, column_name, seq_in_index
+             FROM information_schema.statistics
+             WHERE table_schema = 'public'
+             ORDER BY table_name, index_name, seq_in_index
+             LIMIT 30`,
+            "defaultdb",
+          );
+        }
         report.indexRecommendations = indexes;
-        (report.actionsApplied as string[]).push("Retrieved full index advisor recommendations");
-        report.outcome = "Index recommendations ready to apply. Review DDL before executing.";
+
+        if (isQueryError(indexes)) {
+          report.success    = false;
+          report.actionTaken = "";
+          report.outcome    = "Index advisor query failed. Check cluster connectivity.";
+        } else {
+          (report.actionsApplied as string[]).push("Retrieved index information");
+          report.actionTaken = "CRDB_INDEX_DIAGNOSED";
+          report.outcome = report.planNote
+            ? "Existing index catalogue retrieved via information_schema (crdb_internal.index_recommendations unavailable on Basic/Serverless plan). Review for missing or redundant indexes manually."
+            : "Index recommendations ready to apply. Review DDL before executing.";
+        }
 
       } else if (strategy === "crdb_slow_query_termination") {
         (report.skillsInvoked as string[]).push("crdb/operations/cancel-query");
-        const slowQueries = await crdbMcp.listSlowQueries(30);
+
+        // listSlowQueries uses crdb_internal.cluster_queries internally via select_query.
+        let slowQueries = await crdbMcp.listSlowQueries(30);
+        if (isCrdbInternalBlocked(slowQueries)) {
+          report.planNote = "crdb_internal restricted — using show_running_queries MCP tool";
+          slowQueries = await crdbMcp.callTool("show_running_queries", {});
+        }
         report.slowQueryDiagnosis = slowQueries;
-        (report.actionsApplied as string[]).push("Listed queries running > 30s (dry-run — no cancellations)");
-        report.outcome = "Slow query candidates identified. Set dryRun=false on crdb_cancel_query to terminate.";
+
+        if (isQueryError(slowQueries)) {
+          report.success    = false;
+          report.actionTaken = "";
+          report.outcome    = "Slow query listing failed. Check cluster connectivity.";
+        } else {
+          (report.actionsApplied as string[]).push("Listed long-running queries (dry-run — no cancellations)");
+          report.actionTaken = "CRDB_SLOW_QUERY_LISTED";
+          report.outcome = "Slow query candidates identified. Use crdb_cancel_query with dryRun=false to terminate.";
+        }
 
       } else if (strategy === "crdb_replication_recovery") {
         (report.skillsInvoked as string[]).push("crdb/observability/job-status");
+
+        // Cluster health via Cloud MCP (always works — no crdb_internal dependency).
         const health = await crdbMcp.clusterHealth();
         report.clusterHealth = health;
+
+        // Under-replicated ranges: crdb_internal.ranges_no_leases.
         const underReplicated = await crdbMcp.query(
           `SELECT range_id, start_pretty, replicas, lease_holder
            FROM crdb_internal.ranges_no_leases
@@ -798,38 +896,70 @@ server.registerTool(
            LIMIT 10`,
           "defaultdb",
         );
-        report.underReplicatedRanges = underReplicated;
-        (report.actionsApplied as string[]).push("Checked cluster health", "Queried under-replicated ranges");
-        report.outcome = "Replication health assessed. Node recovery required if under-replicated ranges persist > 5 min.";
+        if (isCrdbInternalBlocked(underReplicated)) {
+          report.planNote = "crdb_internal.ranges_no_leases restricted on this plan — range-level diagnosis unavailable; cluster health checked via Cloud MCP only";
+          report.underReplicatedRanges = { available: false, reason: "crdb_internal restricted on Basic/Serverless plan" };
+        } else {
+          report.underReplicatedRanges = underReplicated;
+        }
+
+        (report.actionsApplied as string[]).push(
+          "Checked cluster health via CockroachDB Cloud MCP",
+          isCrdbInternalBlocked(underReplicated) ? "Range-level query skipped (plan restriction)" : "Queried under-replicated ranges",
+        );
+        report.actionTaken = "CRDB_REPLICATION_ASSESSED";
+        report.outcome = report.planNote
+          ? "Cluster health checked. Under-replicated range query unavailable on Basic/Serverless plan — upgrade to Standard for range-level diagnostics."
+          : "Replication health assessed. Node recovery required if under-replicated ranges persist > 5 min.";
 
       } else if (strategy === "crdb_changefeed_restart") {
         (report.skillsInvoked as string[]).push("crdb/observability/job-status");
-        const jobs = await crdbMcp.query(
+
+        // Primary: crdb_internal.jobs.
+        let jobs = await crdbMcp.query(
           `SELECT id, job_type, status, description, LEFT(error,200) AS last_error
            FROM crdb_internal.jobs WHERE job_type ILIKE 'changefeed%' AND status IN ('paused','failed')
            LIMIT 10`,
           "defaultdb",
         );
+        // Fallback: Cloud MCP check_job_health tool (no crdb_internal dependency).
+        if (isCrdbInternalBlocked(jobs)) {
+          report.planNote = "crdb_internal.jobs restricted — using Cloud MCP check_job_health tool";
+          jobs = await crdbMcp.callTool("check_job_health", {});
+        }
         report.pausedChangefeeds = jobs;
-        (report.actionsApplied as string[]).push("Identified paused/failed changefeeds");
-        report.outcome = "Paused changefeeds identified. Execute RESUME JOB <id> for each paused changefeed.";
-        report.resumeCommands = "RESUME JOB <job_id>; -- repeat for each paused changefeed";
+
+        if (isQueryError(jobs)) {
+          report.success    = false;
+          report.actionTaken = "";
+          report.outcome    = "Changefeed job listing failed. Check cluster connectivity.";
+        } else {
+          (report.actionsApplied as string[]).push("Identified paused/failed changefeeds");
+          report.actionTaken = "CRDB_CHANGEFEED_LISTED";
+          report.outcome = "Paused changefeeds identified. Execute RESUME JOB <id> for each paused changefeed.";
+          report.resumeCommands = "RESUME JOB <job_id>; -- repeat for each paused changefeed";
+        }
 
       } else {
         const health = await crdbMcp.clusterHealth();
         report.clusterHealth = health;
         (report.actionsApplied as string[]).push("General cluster health check via CockroachDB Cloud MCP");
+        report.actionTaken = "CRDB_HEALTH_CHECKED";
         report.outcome = "General CRDB health check completed.";
       }
 
-      report.success = true;
+      // Only mark success=true if it was not already set to false by a branch above.
+      if (report.success !== false) {
+        report.success = true;
+      }
       report.cliMode = "live";
       report.fetchedAt = new Date().toISOString();
 
     } catch (err) {
-      report.success = false;
-      report.error = err instanceof Error ? err.message : String(err);
-      report.cliMode = "live-error";
+      report.success    = false;
+      report.actionTaken = "";
+      report.error      = err instanceof Error ? err.message : String(err);
+      report.cliMode    = "live-error";
     }
 
     return { content: [{ type: "text", text: JSON.stringify(report) }] };

@@ -478,16 +478,26 @@ export async function runAgentLoop(
     if (routingMode === "PENDING_APPROVAL") {
       const stormInfo = stormDetected
         ? `STORM DETECTED (${(context as Record<string, unknown>).stormRelatedCount ?? "?"} related incidents in ${(context as Record<string, unknown>).stormWindowMinutes ?? 10} min window) — autonomous repair disabled`
-        : ragHit
-          ? `RAG distance: ${ragHit.distance.toFixed(3)}, effective win-rate: ${(effectiveWinRate * 100).toFixed(0)}% (raw: ${(winRateResult.winRate * 100).toFixed(0)}%, correction: *${correctionFactor.toFixed(2)}, ${winRateResult.count} samples)`
-          : "no RAG match";
+        : (() => {
+            // Show the actual reason PENDING_APPROVAL was chosen, not a generic "low confidence".
+            // effectiveWinRate = rawWinRate × correctionFactor and can exceed 1.0 when the
+            // strategy outperforms its prediction — cap the displayed value at 100%.
+            const cappedPct = Math.min(effectiveWinRate * 100, 100).toFixed(0);
+            const pendingReason =
+              winRateResult.count < 3
+                ? `only ${winRateResult.count} sample(s) in memory — ${3 - winRateResult.count} more needed to unlock autonomous mode`
+                : `effective win-rate ${cappedPct}% below the 80% autonomous threshold`;
+            return ragHit
+              ? `RAG distance: ${ragHit.distance.toFixed(3)}, ${pendingReason} (raw win-rate: ${(winRateResult.winRate * 100).toFixed(0)}%, correction: ×${correctionFactor.toFixed(2)}, ${winRateResult.count} sample(s))`
+              : `no RAG match — ${pendingReason}`;
+          })();
       await logAgentHandoff(
         incident.incidentId,
         "remediator",
         "PENDING_APPROVAL",
         stormDetected
           ? `Incident storm detected — ${stormInfo}. Awaiting human approval before any repair.`
-          : `Insufficient confidence to act autonomously — ${stormInfo}. Awaiting human approval.`,
+          : `Routing to PENDING_APPROVAL — ${stormInfo}. Awaiting human approval.`,
       );
       return await persistIncidentState(
         incident.incidentId,
