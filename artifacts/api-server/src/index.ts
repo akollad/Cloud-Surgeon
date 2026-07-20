@@ -1,6 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { seedVectorMemory } from "./lib/seed";
+import { seedDemoIncidents } from "./lib/seed-demo-incidents";
 import { pool } from "@workspace/db";
 import { bedrockIsConfigured, bedrockAuthMethod } from "./lib/bedrock";
 import { createMetricSnapshotsTable } from "./lib/anomaly";
@@ -219,6 +220,13 @@ app.listen(port, async (err) => {
     // without preventing the service from starting.
     logger.warn({ err: seedErr }, "Vector memory seed failed (non-fatal)");
   }
+
+  // Seed demo incidents so judges see a populated dashboard on first visit (idempotent)
+  seedDemoIncidents()
+    .then(({ seeded, count }) => {
+      if (seeded) logger.info({ count }, "[DEMO] Seeded demo incidents for first-visit experience");
+    })
+    .catch((err) => logger.warn({ err }, "[DEMO] seedDemoIncidents failed (non-fatal)"));
 
   // Create metric_snapshots table for proactive anomaly detection (idempotent)
   try {

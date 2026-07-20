@@ -88,7 +88,7 @@ export const TriggerIncidentResponse = zod.object({
 })).optional(),
   "finalResponse": zod.string().nullish(),
   "crashed": zod.boolean().optional()
-}),
+}).passthrough(),
   "claimedByAgent": zod.string().nullish(),
   "causedByIncidentId": zod.string().nullish(),
   "updatedAt": zod.string()
@@ -145,7 +145,7 @@ export const ListIncidentsResponseItem = zod.object({
 })).optional(),
   "finalResponse": zod.string().nullish(),
   "crashed": zod.boolean().optional()
-}),
+}).passthrough(),
   "claimedByAgent": zod.string().nullish(),
   "causedByIncidentId": zod.string().nullish(),
   "updatedAt": zod.string()
@@ -207,7 +207,7 @@ export const GetIncidentResponse = zod.object({
 })).optional(),
   "finalResponse": zod.string().nullish(),
   "crashed": zod.boolean().optional()
-}),
+}).passthrough(),
   "claimedByAgent": zod.string().nullish(),
   "causedByIncidentId": zod.string().nullish(),
   "updatedAt": zod.string()

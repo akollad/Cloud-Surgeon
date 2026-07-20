@@ -114,7 +114,14 @@ export function LoginGate({ children }: { children: ReactNode }) {
         <CardContent className="pt-4">
           <form onSubmit={handleSubmit} className="space-y-3">
             <p className="text-xs text-muted-foreground font-mono text-center">
-              Enter the dashboard password to continue.
+              Password:{" "}
+              <button
+                type="button"
+                className="font-semibold text-primary underline-offset-2 hover:underline cursor-pointer"
+                onClick={() => { setValue("cloudsurgeon-demo"); setError(false); }}
+              >
+                cloudsurgeon-demo
+              </button>
             </p>
             <Input
               type="password"
@@ -125,7 +132,7 @@ export function LoginGate({ children }: { children: ReactNode }) {
                 setValue(e.target.value);
                 setError(false);
               }}
-              placeholder="Password"
+              placeholder="cloudsurgeon-demo"
               data-testid="input-dashboard-password"
               disabled={loading}
             />
