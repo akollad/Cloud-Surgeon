@@ -267,16 +267,50 @@ docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/cloud-surgeon-api:l
 
 ```bash
 cd artifacts/dashboard
-VITE_API_KEY=<CLOUD_SURGEON_API_KEY> \
-VITE_DASHBOARD_PASSWORD=<demo-password> \
 PORT=23183 BASE_PATH=/ pnpm run build
+```
 
-aws s3 mb s3://cloud-surgeon-dashboard-<unique-suffix>
-aws s3 sync dist/public/ s3://cloud-surgeon-dashboard-<unique-suffix>/ --delete
+### ⚠️ Safe S3 deploy order — do NOT skip this
+
+Vite generates content-hashed filenames (e.g. `assets/index-C4ib8eU3.css`). Every build
+produces new hashes. If you run `aws s3 sync --delete` before CloudFront finishes invalidating
+its `index.html` cache, edge nodes still serve the old HTML pointing to the old asset hashes,
+but those files are already gone from S3. CloudFront then returns the S3 "not found" fallback
+(which is `index.html` — an HTML document), so browsers reject the response with:
+
+```
+The stylesheet … was not loaded because its MIME type, "text/html", is not "text/css"
+Loading module … was blocked because of a disallowed MIME type ("text/html")
+```
+
+**Always follow this order:**
+
+```bash
+# 1. Upload NEW assets first — no --delete yet; old files stay alive during the transition
+aws s3 sync dist/public/ s3://cloud-surgeon-dashboard-153983052396/ --region us-east-1
+
+# 2. Invalidate CloudFront and WAIT for completion (typically 30–90 s)
+INVALIDATION_ID=$(aws cloudfront create-invalidation \
+  --distribution-id E2PQU895O3WVQ2 \
+  --paths "/*" \
+  --query 'Invalidation.Id' --output text)
+
+aws cloudfront wait invalidation-completed \
+  --distribution-id E2PQU895O3WVQ2 \
+  --id "$INVALIDATION_ID"
+echo "Invalidation complete — old HTML is no longer served by any edge node"
+
+# 3. NOW clean up old hashed assets — safe because all edges serve the new index.html
+aws s3 sync dist/public/ s3://cloud-surgeon-dashboard-153983052396/ \
+  --delete --region us-east-1
 ```
 
 The bucket stays **private**; CloudFront accesses it via Origin Access Control (OAC), no direct
 public bucket access.
+
+> **Why old files don't conflict:** Vite content-hash filenames are unique per build, so keeping
+> old files alive during the invalidation window costs a few hundred KB at most and causes zero
+> functional issues. The `--delete` pass in step 3 removes them once it's safe.
 
 ---
 
@@ -344,7 +378,7 @@ Task definition (current revision: **4**):
     "environment": [
       { "name": "PORT",                 "value": "8080" },
       { "name": "NODE_ENV",             "value": "production" },
-      { "name": "AI_PROVIDER",          "value": "anthropic" },
+      { "name": "AI_PROVIDER",          "value": "mistral" },
       { "name": "AWS_REGION",           "value": "us-east-1" },
       { "name": "ECS_DEFAULT_CLUSTER",  "value": "cloud-surgeon" },
       { "name": "ECS_DEFAULT_SERVICE",  "value": "api" },
@@ -355,14 +389,18 @@ Task definition (current revision: **4**):
       }
     ],
     "secrets": [
-      { "name": "COCKROACHDB_URL",          "valueFrom": "arn:aws:secretsmanager:...:cloud-surgeon/prod:COCKROACHDB_URL::" },
-      { "name": "CLOUD_SURGEON_API_KEY",    "valueFrom": "arn:aws:secretsmanager:...:cloud-surgeon/prod:CLOUD_SURGEON_API_KEY::" },
-      { "name": "ANTHROPIC_API_KEY",        "valueFrom": "arn:aws:secretsmanager:...:cloud-surgeon/prod:ANTHROPIC_API_KEY::" },
-      { "name": "COCKROACH_CLOUD_API_KEY",  "valueFrom": "arn:aws:secretsmanager:...:cloud-surgeon/prod:COCKROACH_CLOUD_API_KEY::" },
-      { "name": "COCKROACH_CLOUD_CLUSTER_ID","valueFrom": "arn:aws:secretsmanager:...:cloud-surgeon/prod:COCKROACH_CLOUD_CLUSTER_ID::" },
-      { "name": "SESSION_SECRET",           "valueFrom": "arn:aws:secretsmanager:...:cloud-surgeon/prod:SESSION_SECRET::" },
-      { "name": "AWS_ACCESS_KEY_ID",        "valueFrom": "arn:aws:secretsmanager:...:cloud-surgeon/prod:AWS_ACCESS_KEY_ID::" },
-      { "name": "AWS_SECRET_ACCESS_KEY",    "valueFrom": "arn:aws:secretsmanager:...:cloud-surgeon/prod:AWS_SECRET_ACCESS_KEY::" }
+      { "name": "COCKROACHDB_URL",            "valueFrom": "arn:aws:secretsmanager:...:cloud-surgeon/prod:COCKROACHDB_URL::" },
+      { "name": "CLOUD_SURGEON_API_KEY",      "valueFrom": "arn:aws:secretsmanager:...:cloud-surgeon/prod:CLOUD_SURGEON_API_KEY::" },
+      { "name": "BEDROCK_API_KEY",            "valueFrom": "arn:aws:secretsmanager:...:cloud-surgeon/prod:BEDROCK_API_KEY::" },
+      { "name": "COCKROACH_CLOUD_API_KEY",    "valueFrom": "arn:aws:secretsmanager:...:cloud-surgeon/prod:COCKROACH_CLOUD_API_KEY::" },
+      { "name": "COCKROACH_CLOUD_CLUSTER_ID", "valueFrom": "arn:aws:secretsmanager:...:cloud-surgeon/prod:COCKROACH_CLOUD_CLUSTER_ID::" },
+      { "name": "SESSION_SECRET",             "valueFrom": "arn:aws:secretsmanager:...:cloud-surgeon/prod:SESSION_SECRET::" },
+      { "name": "AWS_ACCESS_KEY_ID",          "valueFrom": "arn:aws:secretsmanager:...:cloud-surgeon/prod:AWS_ACCESS_KEY_ID::" },
+      { "name": "AWS_SECRET_ACCESS_KEY",      "valueFrom": "arn:aws:secretsmanager:...:cloud-surgeon/prod:AWS_SECRET_ACCESS_KEY::" },
+      { "name": "COCKROACH_API_KEY",          "valueFrom": "arn:aws:secretsmanager:...:cloud-surgeon/prod:COCKROACH_API_KEY::" },
+      { "name": "CDC_WEBHOOK_SECRET",         "valueFrom": "arn:aws:secretsmanager:...:cloud-surgeon/prod:CDC_WEBHOOK_SECRET::" },
+      { "name": "VOYAGE_API_KEY",             "valueFrom": "arn:aws:secretsmanager:...:cloud-surgeon/prod:VOYAGE_API_KEY::" },
+      { "name": "DASHBOARD_PASSWORD",         "valueFrom": "arn:aws:secretsmanager:...:cloud-surgeon/prod:DASHBOARD_PASSWORD::" }
     ],
     "healthCheck": {
       "command": ["CMD-SHELL", "curl -f http://localhost:8080/api/healthz || exit 1"],
@@ -386,9 +424,33 @@ falls back to 2-second polling because `REPLIT_DEV_DOMAIN` is not set in ECS. Wi
 existing changefeed is reused automatically on every container restart: `[CDC] Existing
 CockroachDB changefeed reused — streaming to webhook`.
 
-**`AI_PROVIDER=anthropic`**: Bedrock quotas are currently disabled on the demo account.
-`src/lib/llm.ts` switches automatically to the direct Anthropic API when `AI_PROVIDER=anthropic`.
-Switching back to `AI_PROVIDER=bedrock` when the quota is reactivated requires no code change.
+**`AI_PROVIDER=mistral`** (current default): routes `invokeLLMThought()` / `invokeLLMText()`
+through `src/lib/bedrock-mantle.ts` which calls
+`https://bedrock-mantle.us-east-1.api.aws/v1/chat/completions` with a Bearer `BEDROCK_API_KEY`
+(no SigV4). If mantle returns null (network error, quota exceeded), the code automatically
+falls back to Nova Lite via Bedrock Converse API. To switch models without a redeploy, set the
+`BEDROCK_MANTLE_MODEL` environment variable (e.g. `deepseek.v3.2`).
+
+**`AI_PROVIDER=bedrock`**: uses Amazon Nova Lite via Bedrock Converse API with SigV4
+(`AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY`). No BEDROCK_API_KEY required.
+
+**`AI_PROVIDER=anthropic`**: calls Claude via `ANTHROPIC_API_KEY` or the Replit AI
+Integrations proxy. Kept as an alternative but not the default — Anthropic is geo-restricted
+from Replit's server IP ranges (ECS is unaffected).
+
+**IAM note**: `ecsTaskExecutionRole` requires an inline policy granting
+`secretsmanager:GetSecretValue` on the `cloud-surgeon/prod` secret ARN. The managed
+`AmazonECSTaskExecutionRolePolicy` does **not** include this. Without it, ECS fails at
+container start with `ResourceInitializationError: AccessDeniedException`. Apply:
+```bash
+aws iam put-role-policy \
+  --role-name ecsTaskExecutionRole \
+  --policy-name cloud-surgeon-secrets-access \
+  --policy-document '{
+    "Version":"2012-10-17",
+    "Statement":[{"Effect":"Allow","Action":["secretsmanager:GetSecretValue"],
+    "Resource":"arn:aws:secretsmanager:us-east-1:153983052396:secret:cloud-surgeon/prod-k366bu"}]}'
+```
 
 ```bash
 aws ecs create-service \

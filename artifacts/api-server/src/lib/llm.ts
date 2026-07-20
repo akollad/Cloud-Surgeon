@@ -364,17 +364,24 @@ export async function invokeLLMThought(
   }
 
   if (provider === "mistral") {
+    // Primary: Mistral Large 3 (675B) via bedrock-mantle OpenAI-compat endpoint.
+    // bedrock-mantle uses a Bearer BEDROCK_API_KEY — no SigV4, no region wiring required.
+    // invokeMantleText() returns null on any error (network, quota, empty response)
+    // so the fallback chain below is always safe to execute.
     const text = await invokeMantleText(prompt, systemPrompt, 400);
     if (text) {
       logger.info({ turnIndex, provider: "mistral", docChunks: docChunks.length }, "LLM thought generated");
       return { thought: text, source: "mistral" };
     }
-    // Fallback to Nova Lite if mantle fails
+    // Tier-2 fallback: Amazon Nova Lite via Bedrock Converse API (SigV4).
+    // Activates automatically — no operator action required.
     const bedrockFallback = await invokeBedrockThought(prompt, systemPrompt);
     if (bedrockFallback) return { thought: bedrockFallback, source: "bedrock" };
+    // Tier-3 fallback: deterministic template — never throws, always produces a usable thought.
     return { thought: fallbackThought(turnIndex), source: "simulated" };
   }
 
+  // AI_PROVIDER=bedrock: Nova Lite primary, no mantle.
   const bedrockThought = await invokeBedrockThought(prompt, systemPrompt);
   if (bedrockThought) {
     return { thought: bedrockThought, source: "bedrock" };
@@ -403,11 +410,13 @@ export async function invokeLLMText(
   }
 
   if (provider === "mistral") {
+    // Mistral Large 3 via bedrock-mantle. Returns null on any error → falls through to Nova Lite.
     const text = await invokeMantleText(prompt, systemPrompt, maxTokens ?? 400);
     if (text) return text;
-    // Fallback to Nova Lite
+    // Nova Lite fallback — transparent, no caller change needed.
     return invokeBedrockText(prompt, systemPrompt, maxTokens ?? 400);
   }
 
+  // AI_PROVIDER=bedrock: Nova Lite only.
   return invokeBedrockText(prompt, systemPrompt, maxTokens ?? 400);
 }

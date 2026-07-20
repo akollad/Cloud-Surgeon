@@ -8,7 +8,7 @@ Autonomous AI DevOps agent that detects, diagnoses, and repairs cloud infrastruc
 - **`artifacts/dashboard`** — React 19 + Vite frontend (live incident dashboard with CDC stream). Runs on port 23183 at `/dashboard/`.
 - **`lib/db`** — Drizzle ORM schema + CockroachDB connection pool.
 - **`lib/api-zod`** — Generated Zod schemas from OpenAPI spec.
-- **`lib/integrations-anthropic-ai`** — Anthropic SDK client wrapper.
+- **`lib/integrations-anthropic-ai`** — Anthropic SDK client wrapper (used only when `AI_PROVIDER=anthropic`).
 
 ## How to Run
 
@@ -38,8 +38,8 @@ Optional secrets (enable live AWS tool calls):
 ## Pre-configured Env Vars (shared)
 
 - `CLOUD_SURGEON_API_KEY` — API key for all `/api/*` endpoints
-- `AI_PROVIDER=bedrock` — LLM provider (AWS Bedrock Nova Lite)
-- `BEDROCK_REGION=eu-west-1` — Bedrock region
+- `AI_PROVIDER=mistral` — LLM provider (Mistral Large 3 via bedrock-mantle; Nova Lite is automatic fallback)
+- `BEDROCK_REGION=eu-west-1` — Bedrock region (used by Nova Lite fallback)
 - `AWS_REGION=us-east-1` — AWS region for ECS/RDS/Lambda calls
 - `VITE_API_KEY` — Dashboard API key (matches `CLOUD_SURGEON_API_KEY`)
 - `VITE_API_BASE_URL` — leave unset; the generated client already includes `/api/` in every path
@@ -55,6 +55,21 @@ All endpoints require `X-API-Key: <CLOUD_SURGEON_API_KEY>` header.
 - `GET /api/incidents` — List incidents
 - `GET /api/audit` — Audit log (SSE stream)
 - `POST /api/chaos/sigkill` — Simulate crash for chaos demo
+
+## LLM Provider Architecture
+
+The LLM layer (`artifacts/api-server/src/lib/llm.ts`) routes all reasoning calls through the `AI_PROVIDER` env var:
+
+| `AI_PROVIDER` | Module | Auth | Notes |
+|---|---|---|---|
+| `mistral` (default) | `bedrock-mantle.ts` | `BEDROCK_API_KEY` Bearer | Mistral Large 3 (675B), OpenAI-compat, no SigV4 |
+| `bedrock` | `bedrock.ts` | SigV4 (`AWS_ACCESS_KEY_ID`) | Nova Lite via Converse API |
+| `anthropic` | Anthropic SDK | `ANTHROPIC_API_KEY` | Geo-restricted from Replit IPs |
+
+**Fallback chain for `AI_PROVIDER=mistral`**: bedrock-mantle → Nova Lite → simulated template.
+Any error from mantle (network, quota) drops to Nova Lite silently; any error from Nova Lite produces a deterministic fallback thought. The `source` field on every `LLMThought` always records which tier actually responded.
+
+To switch models without a code change: set `BEDROCK_MANTLE_MODEL=deepseek.v3.2` (or any other bedrock-mantle-compatible model).
 
 ## Known Pitfalls — Do Not Repeat
 
@@ -91,6 +106,19 @@ Ne jamais recalculer le chemin inline — c'est ce qui causait des échecs silen
 3. `configuration.json` — clés SDK non-sensibles
 
 Sans les 3 fichiers, `ccloud auth whoami` renvoie "not logged in" même si la clé est correcte. En dev Replit, le fallback REST est actif donc le manque d'auth ccloud est non-bloquant.
+
+### ⚠️ S3 + CloudFront dashboard deploy — toujours dans cet ordre
+
+Vite génère des filenames hashés (`assets/index-C4ib8eU3.css`). Si tu lances `aws s3 sync --delete` avant que l'invalidation CloudFront soit terminée, les edge nodes servent encore l'ancien `index.html` (avec les anciens hashes) mais les anciens fichiers sont déjà supprimés de S3. CloudFront renvoie alors `index.html` comme fallback, le browser le rejette avec `MIME type "text/html" is not "text/css"`.
+
+**Ordre correct :**
+1. `aws s3 sync dist/public/ s3://... --region us-east-1` ← pas de `--delete`
+2. `aws cloudfront create-invalidation --paths "/*"` + attendre `aws cloudfront wait invalidation-completed`
+3. `aws s3 sync dist/public/ s3://... --delete` ← maintenant safe
+
+### ⚠️ `ecsTaskExecutionRole` — inline policy Secrets Manager requise
+
+`AmazonECSTaskExecutionRolePolicy` (policy AWS managée) ne donne **pas** accès à `secretsmanager:GetSecretValue`. Sans la policy inline `cloud-surgeon-secrets-access`, ECS échoue au démarrage avec `ResourceInitializationError: AccessDeniedException`. Voir DEPLOYMENT.md Step 6 pour la commande exacte.
 
 ## User Preferences
 

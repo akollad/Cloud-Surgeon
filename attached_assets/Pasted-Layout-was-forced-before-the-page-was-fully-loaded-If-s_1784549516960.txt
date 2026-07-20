@@ -1,0 +1,42 @@
+Layout was forced before the page was fully loaded. If stylesheets are not yet loaded this may cause a flash of unstyled content. contentscript.js:14083:433814
+Window.fullScreen attribute is deprecated and will be removed in the future. contentscript.js:14083:433814
+InstallTrigger is deprecated and will be removed in the future. contentscript.js:14083:433814
+onmozfullscreenchange is deprecated. contentscript.js:14083:433814
+onmozfullscreenerror is deprecated. contentscript.js:14083:433814
+MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 close listeners added. Use emitter.setMaxListeners() to increase limit
+    u moz-extension://b7d8f0c5-b3f8-4baa-ac35-27569697d6bd/scripts/contentscript.js:14083
+    addListener moz-extension://b7d8f0c5-b3f8-4baa-ac35-27569697d6bd/scripts/contentscript.js:14083
+    on moz-extension://b7d8f0c5-b3f8-4baa-ac35-27569697d6bd/scripts/contentscript.js:14082
+    once moz-extension://b7d8f0c5-b3f8-4baa-ac35-27569697d6bd/scripts/contentscript.js:14083
+    pipe moz-extension://b7d8f0c5-b3f8-4baa-ac35-27569697d6bd/scripts/contentscript.js:14063
+    B moz-extension://b7d8f0c5-b3f8-4baa-ac35-27569697d6bd/scripts/contentscript.js:14063
+    D moz-extension://b7d8f0c5-b3f8-4baa-ac35-27569697d6bd/scripts/contentscript.js:14063
+    P moz-extension://b7d8f0c5-b3f8-4baa-ac35-27569697d6bd/scripts/contentscript.js:14063
+    M moz-extension://b7d8f0c5-b3f8-4baa-ac35-27569697d6bd/scripts/contentscript.js:14063
+    I moz-extension://b7d8f0c5-b3f8-4baa-ac35-27569697d6bd/scripts/contentscript.js:14063
+    <anonymous> moz-extension://b7d8f0c5-b3f8-4baa-ac35-27569697d6bd/scripts/contentscript.js:14083
+    <anonymous> moz-extension://b7d8f0c5-b3f8-4baa-ac35-27569697d6bd/scripts/contentscript.js:14083
+    <anonymous> moz-extension://b7d8f0c5-b3f8-4baa-ac35-27569697d6bd/scripts/contentscript.js:14083
+    <anonymous> moz-extension://b7d8f0c5-b3f8-4baa-ac35-27569697d6bd/scripts/contentscript.js:14083
+contentscript.js:14083:34218
+MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 end listeners added. Use emitter.setMaxListeners() to increase limit
+    u moz-extension://b7d8f0c5-b3f8-4baa-ac35-27569697d6bd/scripts/contentscript.js:14083
+    addListener moz-extension://b7d8f0c5-b3f8-4baa-ac35-27569697d6bd/scripts/contentscript.js:14083
+    on moz-extension://b7d8f0c5-b3f8-4baa-ac35-27569697d6bd/scripts/contentscript.js:14082
+    O moz-extension://b7d8f0c5-b3f8-4baa-ac35-27569697d6bd/scripts/contentscript.js:14083
+    B moz-extension://b7d8f0c5-b3f8-4baa-ac35-27569697d6bd/scripts/contentscript.js:14063
+    D moz-extension://b7d8f0c5-b3f8-4baa-ac35-27569697d6bd/scripts/contentscript.js:14063
+    P moz-extension://b7d8f0c5-b3f8-4baa-ac35-27569697d6bd/scripts/contentscript.js:14063
+    M moz-extension://b7d8f0c5-b3f8-4baa-ac35-27569697d6bd/scripts/contentscript.js:14063
+    I moz-extension://b7d8f0c5-b3f8-4baa-ac35-27569697d6bd/scripts/contentscript.js:14063
+    <anonymous> moz-extension://b7d8f0c5-b3f8-4baa-ac35-27569697d6bd/scripts/contentscript.js:14083
+    <anonymous> moz-extension://b7d8f0c5-b3f8-4baa-ac35-27569697d6bd/scripts/contentscript.js:14083
+    <anonymous> moz-extension://b7d8f0c5-b3f8-4baa-ac35-27569697d6bd/scripts/contentscript.js:14083
+    <anonymous> moz-extension://b7d8f0c5-b3f8-4baa-ac35-27569697d6bd/scripts/contentscript.js:14083
+contentscript.js:14083:34218
+ObjectMultiplex - orphaned data for stream "background-liveness" 2 contentscript.js:14083:435290
+ObjectMultiplex - orphaned data for stream "metamask-multichain-provider" 4 inpage.js;:1:28380
+The stylesheet https://d3ddnpg3hz3st4.cloudfront.net/assets/index-B-TNfJNF.css was not loaded because its MIME type, “text/html”, is not “text/css”. d3ddnpg3hz3st4.cloudfront.net
+Loading module from “https://d3ddnpg3hz3st4.cloudfront.net/assets/index-CEmqoHR1.js” was blocked because of a disallowed MIME type (“text/html”). d3ddnpg3hz3st4.cloudfront.net
+Loading failed for the module with source “https://d3ddnpg3hz3st4.cloudfront.net/assets/index-CEmqoHR1.js”. d3ddnpg3hz3st4.cloudfront.net:24:71
+

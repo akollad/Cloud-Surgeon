@@ -20,7 +20,7 @@ Built for the **CockroachDB × AWS Hackathon 2026**.
 
 ## What it does
 
-Cloud-Surgeon receives infrastructure alerts (CloudWatch, webhooks, or manual injection), runs a multi-agent reasoning loop powered by Claude (Anthropic / AWS Bedrock), and executes targeted repairs against live AWS services — all while storing every thought, tool call, and outcome transactionally in CockroachDB Serverless.
+Cloud-Surgeon receives infrastructure alerts (CloudWatch, webhooks, or manual injection), runs a multi-agent reasoning loop powered by **Mistral Large 3 (675 B) via AWS bedrock-mantle** (with Amazon Nova Lite as automatic fallback), and executes targeted repairs against live AWS services — all while storing every thought, tool call, and outcome transactionally in CockroachDB Serverless.
 
 **By the numbers (measured on the live demo stack):**
 
@@ -236,7 +236,7 @@ graph TB
 
 - Node.js 20+ and pnpm 9+
 - A [CockroachDB Serverless](https://cockroachlabs.cloud) cluster (free tier works)
-- An [Anthropic API key](https://console.anthropic.com) **or** AWS credentials with Bedrock access
+- AWS credentials with Bedrock access **and** a `BEDROCK_API_KEY` (`bdak-…`) for bedrock-mantle (Mistral Large 3). Anthropic is supported as an alternative via `AI_PROVIDER=anthropic`.
 
 ### 1. Clone and install
 
@@ -302,14 +302,15 @@ Copy `.env.example` to `.env` and fill in these values:
 |---|---|---|
 | `COCKROACHDB_URL` | ✅ | CockroachDB connection string. Format: `postgresql://user:pass@host:26257/db?sslmode=verify-full` |
 | `CLOUD_SURGEON_API_KEY` | ✅ | Shared secret between dashboard and API server. Generate: `openssl rand -hex 32` |
-| `AI_INTEGRATIONS_ANTHROPIC_API_KEY` | ✅ | Anthropic Claude API key (Replit AI Integration) |
-| `AI_INTEGRATIONS_ANTHROPIC_BASE_URL` | ✅ | Anthropic base URL (Replit AI Integration) |
+| `BEDROCK_API_KEY` | ✅ | AWS bedrock-mantle API key (`bdak-…`). Powers **Mistral Large 3** reasoning via `https://bedrock-mantle.us-east-1.api.aws/v1` (OpenAI-compat, Bearer token — no SigV4). |
+| `AI_PROVIDER` | Optional | LLM backend selector. `mistral` (default) → bedrock-mantle; `bedrock` → Nova Lite (SigV4); `anthropic` → Claude. Nova Lite is always the automatic fallback when the primary fails. |
 | `COCKROACH_CLOUD_API_KEY` | ⭐ Recommended | CockroachDB Cloud service-account key. Enables live `execute_ccloud_command` tool calls. [Generate here](https://cockroachlabs.cloud/access-management) |
 | `COCKROACH_CLOUD_CLUSTER_ID` | ⭐ Recommended | UUID of the cluster (visible in the Cloud Console URL) |
-| `AWS_ACCESS_KEY_ID` | Optional | AWS credentials for live ECS/RDS/Lambda repair. Without these, the agent uses safe simulated mode |
-| `AWS_SECRET_ACCESS_KEY` | Optional | (paired with above) |
+| `AWS_ACCESS_KEY_ID` | ⭐ Recommended | AWS credentials for live ECS/RDS/Lambda repair. Without these, the agent uses safe simulated mode |
+| `AWS_SECRET_ACCESS_KEY` | ⭐ Recommended | (paired with above) |
 | `AWS_REGION` | Optional | AWS region (default: `us-east-1`) |
-| `BEDROCK_API_KEY` | Optional | AWS Bedrock API key (`bdak-…`). Takes priority over `AWS_ACCESS_KEY_ID` for LLM calls |
+| `AI_INTEGRATIONS_ANTHROPIC_API_KEY` | Optional | Anthropic Claude API key (Replit AI Integration). Only used when `AI_PROVIDER=anthropic`. |
+| `AI_INTEGRATIONS_ANTHROPIC_BASE_URL` | Optional | Anthropic base URL (Replit AI Integration). Only used when `AI_PROVIDER=anthropic`. |
 | `VOYAGE_API_KEY` | Optional | Voyage AI key for semantic embeddings. Without it, the agent uses deterministic hash embeddings |
 | `SESSION_SECRET` | Optional | Cookie signing secret for express-session |
 | `CALIBRATION_THRESHOLD` | Optional | Win-rate deviation that triggers calibration (default: `0.15` = 15%) |
@@ -463,7 +464,9 @@ cloud-surgeon/
 │   │       ├── lib/
 │   │       │   ├── cloud-surgeon.ts   ← 3-phase agent loop (1 000+ lines)
 │   │       │   ├── aws.ts             ← ECS / RDS / Lambda repair
-│   │       │   ├── llm.ts             ← LLM client (Anthropic / Bedrock)
+│   │       │   ├── llm.ts             ← LLM dispatcher (AI_PROVIDER router: mistral / bedrock / anthropic)
+│   │       │   ├── bedrock-mantle.ts  ← Mistral Large 3 via bedrock-mantle (OpenAI-compat, Bearer token)
+│   │       │   ├── bedrock.ts         ← Amazon Nova Lite via Bedrock Converse API (fallback)
 │   │       │   ├── anomaly.ts         ← predictive anomaly detection
 │   │       │   ├── cdc.ts             ← CockroachDB changefeed + SSE (CDC_WEBHOOK_URL in prod)
 │   │       │   ├── crdbMcp.ts         ← official CockroachDB Cloud MCP client
@@ -551,7 +554,7 @@ curl -X POST http://localhost:8080/api/incidents/trigger \
 # Same fingerprint → same incident row → picks up from DIAGNOSING / REPAIRING
 ```
 
-The entire conversation history (Claude messages + tool calls + tool results) is stored in `incident_state.context_json` as a JSONB array. The agent reconstitutes its Bedrock conversation exactly, with no context loss.
+The entire conversation history (agent thoughts + tool calls + tool results) is stored in `incident_state.context_json` as a JSONB array. The agent reconstitutes its full reasoning context exactly, with no context loss.
 
 ---
 
