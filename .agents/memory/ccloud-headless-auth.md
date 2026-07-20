@@ -1,28 +1,30 @@
 ---
 name: ccloud CLI headless auth
-description: ccloud v0.6.12 cannot authenticate non-interactively in containers — call the REST API directly instead.
+description: ccloud v0.6.12 credentials.json must use snake_case "api_key", not camelCase "apiKey"; bootstrapCcloudCredentials writes the correct format at startup.
 ---
 
 # ccloud CLI headless auth
 
 ## The rule
-ccloud v0.6.12 (latest binary available at `binaries.cockroachdb.com`) requires browser-based OAuth. No `--token` flag, no env var support. It cannot be used headlessly in Replit/container environments.
+ccloud v0.6.12 reads `credentials.json` as `{ "default": { "api_key": "..." } }` (snake_case). Writing camelCase `apiKey` is silently ignored — `ccloud auth whoami` returns "not logged in" even though the file exists and has the correct value.
 
-**Why:** The binary opens a browser callback on a local port (`cliPort`) — impossible without a display.
+**Why:** The Go config struct tag is `json:"api_key"` (confirmed via `strings` on the binary). A previous version of `bootstrapCcloudCredentials()` wrote `apiKey` which the binary never parsed.
 
 ## How to apply
-Call the CockroachDB Cloud REST API directly with the `COCKROACH_CLOUD_API_KEY` Bearer token. This is what ccloud wraps internally. Results are identical.
+In `bootstrapCcloudCredentials()` (`artifacts/api-server/src/index.ts`), write:
+```json
+{ "default": { "api_key": "<COCKROACH_CLOUD_API_KEY>" } }
+```
+Also write `profiles.json` with org coordinates (organizationId, organizationLabel, organizationName, server, userFullName) — without it, whoami also fails.
 
-Key endpoints used:
-- `GET /api/v1/clusters` → `ccloud cluster list`
-- `GET /api/v1/clusters/{id}` → `ccloud cluster get`
-- `GET /api/v1/clusters/{id}/sql-users` → `ccloud cluster sql-user list`
-- `GET /api/v1/clusters/{id}/backups` → `ccloud cluster backup list`
+With both files correct, `ccloud auth whoami` authenticates headlessly at boot. No browser OAuth needed in Replit dev.
 
-Implementation lives in:
-- `artifacts/api-server/src/mcp/server.ts` → `callCockroachCloudApi()` (MCP tool handler)
-- `artifacts/api-server/src/routes/metrics.ts` → `GET /api/metrics/ccloud?action=...` (dashboard endpoint)
+## Files required for headless auth
+1. `credentials.json` — `{ "default": { "api_key": "..." } }` — from `COCKROACH_CLOUD_API_KEY`
+2. `profiles.json` — `{ "default": { organizationId, organizationLabel, organizationName, server, userFullName } }`
+3. `configuration.json` — `{ "publishableKeys": { "segmentCCloudAPIKey": "..." }, "flags": {} }`
 
-Always include `ccloudEquivalent` field in responses to document the exact ccloud command.
+All three go in `$XDG_CONFIG_HOME/.cockroachdb/` (resolves to `/home/runner/workspace/.config/.cockroachdb/` on Replit).
 
-**Why acceptable for hackathon:** Each response includes the equivalent ccloud command. The REST API is the same data source. Documented explicitly in the tool description.
+## REST fallback (still valid)
+If ccloud binary auth fails in ECS/production, call the CockroachDB Cloud REST API directly with the `COCKROACH_CLOUD_API_KEY` Bearer token — same data source as what ccloud wraps.

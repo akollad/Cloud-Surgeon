@@ -50,10 +50,10 @@ async function bootstrapCcloudCredentials(): Promise<void> {
     fs.mkdirSync(dir, { recursive: true });
     process.stdout.write(`[CCLOUD-BOOT] mkdir OK\n`);
 
-    // 1. credentials.json — always written from env var
+    // 1. credentials.json — ccloud v0.6.12 expects snake_case "api_key" (not camelCase "apiKey")
     fs.writeFileSync(
       path.join(dir, "credentials.json"),
-      JSON.stringify({ default: { apiKey } }, null, 2),
+      JSON.stringify({ default: { api_key: apiKey } }, null, 2),
       { mode: 0o600 },
     );
     process.stdout.write(`[CCLOUD-BOOT] credentials.json written\n`);
