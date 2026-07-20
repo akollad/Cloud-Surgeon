@@ -13,6 +13,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import fs from "node:fs";
 import os from "node:os";
+import path from "node:path";
 import { CCLOUD_BINARY } from "./lib/ccloud-path";
 import { initSurgeonConfig, getConfigPath } from "./lib/surgeon-config";
 
@@ -42,10 +43,9 @@ async function bootstrapCcloudCredentials(): Promise<void> {
     return;
   }
 
-  const configHome = process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config");
-  const dir = path.join(configHome, ".cockroachdb");
-
   try {
+    const configHome = process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config");
+    const dir = path.join(configHome, ".cockroachdb");
     process.stdout.write(`[CCLOUD-BOOT] dir=${dir}\n`);
     fs.mkdirSync(dir, { recursive: true });
     process.stdout.write(`[CCLOUD-BOOT] mkdir OK\n`);
