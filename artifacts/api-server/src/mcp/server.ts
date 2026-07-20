@@ -41,17 +41,19 @@ logAwsToolMode();
 //
 // Two-layer architecture:
 //
-// LAYER 1 — Real ccloud binary (when pre-authenticated via --no-redirect)
+// LAYER 1 — Real ccloud binary (headless, service-account authenticated)
 //   The ccloud CLI binary lives at <workspace-root>/.tools/ccloud (committed
 //   to the repo so it is available in every environment). execCcloud() runs
 //   the binary via execFile with a 15 s timeout.
 //
-//   Authentication note (v0.6.12):
-//     ccloud v0.6.12 does NOT support headless API-key auth via env var —
-//     it requires browser OAuth. In containerised environments (ECS, Replit)
-//     use `ccloud auth login --no-redirect` once interactively to store a
-//     session token in ~/.config/ccloud/. See POST /api/setup/ccloud-auth.
-//     Once authenticated, Layer 1 succeeds and cliMode = "ccloud_binary".
+//   Authentication (v0.6.12):
+//     bootstrapCcloudCredentials() runs at server startup and writes the three
+//     files the ccloud binary requires for headless auth:
+//       ~/.config/ccloud/credentials.json  — service-account API key
+//       ~/.config/ccloud/profiles.json     — org/cluster metadata (REST fetch)
+//       ~/.config/ccloud/configuration.json — non-sensitive SDK settings
+//     No browser OAuth is needed. Once the files are in place Layer 1
+//     succeeds immediately and cliMode = "ccloud_binary".
 //
 // LAYER 2 — CockroachDB Cloud REST API fallback
 //   If the binary is not found, not authenticated, or returns a non-JSON
@@ -73,14 +75,14 @@ const COCKROACH_API_BASE = "https://cockroachlabs.cloud/api/v1";
 import { CCLOUD_BINARY } from "../lib/ccloud-path";
 
 /**
- * Executes a real `ccloud` CLI command.
+ * Executes a real `ccloud` CLI command (headless, service-account auth).
  *
- * Authentication: ccloud v0.6.12 does NOT support API-key env var auth —
- * it requires browser OAuth. Use POST /api/setup/ccloud-auth to complete the
- * one-time `--no-redirect` login (stores a session token in ~/.config/ccloud/).
- * Once authenticated, this function succeeds and cliMode = "ccloud_binary".
+ * Authentication is handled at server startup by bootstrapCcloudCredentials(),
+ * which writes credentials.json / profiles.json / configuration.json from
+ * COCKROACH_CLOUD_API_KEY — no browser OAuth required.
  *
- * Falls back gracefully if the binary is not found or not authenticated.
+ * Falls back gracefully if the binary is not found or the credentials files
+ * are absent (Layer 2 REST API takes over).
  */
 async function execCcloud(
   args: string[],

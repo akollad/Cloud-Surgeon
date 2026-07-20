@@ -2,19 +2,74 @@
 
 # Cloud-Surgeon
 
-> **Autonomous AI DevOps agent** — detects, diagnoses, and repairs cloud infrastructure incidents using a three-layer CockroachDB memory system that learns from every repair.
+> **Autonomous AI DevOps agent** — detects, diagnoses, and repairs cloud infrastructure incidents. CockroachDB is not just the storage layer — it **makes the repair decisions**, learns from every outcome, and coordinates multi-agent execution with zero external dependencies.
 
 Built for the **CockroachDB × AWS Hackathon 2026**.
 
 ---
 
-> ## 🔗 Live Demo
+## How the memory makes decisions
+
+Most autonomous agents use a database to store state. Cloud-Surgeon uses CockroachDB as its **decision engine**:
+
+```
+Alert received
+  │
+  ▼
+incident_vectors (VECTOR 1024 · C-SPANN cosine ANN)
+  → find the 3 most similar past incidents
+  → retrieve their strategy_name + outcome_success
+  │
+  ▼
+strategy_calibration (contextual bandit — pure SQL)
+  → SELECT avg(outcome_success) per candidate strategy
+  → apply correction_factor WHERE predicted ≠ observed win-rate
+  → pick the strategy with the highest adjusted win-rate
+  │
+  ▼
+Agent executes repair · commits every thought to incident_state (JSONB)
+  │
+  ▼
+indexResolvedIncident() → recalibrateStrategy()
+  → UPDATE strategy_calibration SET observed_win_rate = ...
+  → INSERT INTO incident_vectors (new embedding + outcome)
+  → next incident benefits immediately — no scheduled job, no human trigger
+```
+
+**The result:** after 8 resolved incidents the win-rate reaches 81 %+. The agent gets better with every repair, backed entirely by SQL aggregations in CockroachDB — no external ML service, no Python training loop, no reindexing.
+
+### CockroachDB tools used
+
+| Tool | How Cloud-Surgeon uses it |
+|---|---|
+| **Distributed Vector Indexing** | `VECTOR(1024)` + `CREATE VECTOR INDEX … USING C-SPANN` — cosine ANN similarity search for RAG and storm detection |
+| **Cloud Managed MCP Server** | `crdbMcp.ts` → `cockroachlabs.cloud/mcp` — `get_cluster`, `show_running_queries`, `select_query` live during Diagnostician phase |
+| **ccloud CLI (Agent-Ready)** | Bundled `ccloud v0.6.12` binary authenticated headlessly via `bootstrapCcloudCredentials()` — Layer 1 of `execute_ccloud_command`; REST API is Layer 2 fallback |
+| **Agent Skills Repo** | 5 machine-executable skills from `github.com/cockroachdb/agent-skills` registered as MCP tools: `crdb_diagnose_hotspots`, `crdb_index_advisor`, `crdb_cancel_slow_queries`, `crdb_job_monitor`, `crdb_skill_repair` |
+
+### AWS services used
+
+| Service | Role |
+|---|---|
+| **Amazon Bedrock** | Mistral Large 3 (675 B) via bedrock-mantle · Amazon Nova Lite automatic fallback |
+| **Amazon ECS** | Primary repair target — force-redeploy via `UpdateService` |
+| **AWS Lambda** | Repair target — concurrency scaling via `PutFunctionConcurrency` |
+| **Amazon RDS** | Repair target — connection scaling via parameter group modification |
+| **Amazon CloudWatch** | Alert ingestion via SNS webhook · metric snapshots for anomaly detection |
+
+---
+
+> ## 🔗 Live Demo & Submission
 >
-> **URL:** https://d3ddnpg3hz3st4.cloudfront.net/
+> **Demo app:** https://d3ddnpg3hz3st4.cloudfront.net/ — Password: `cloudsurgeon-demo`
 >
-> **Password:** `cloudsurgeon-demo`
+> **Demo video (< 3 min):** <!-- TODO: paste YouTube/Vimeo URL here before submission -->
 >
 > The live demo runs against a real CockroachDB Serverless cluster and real AWS infrastructure (ECS, RDS, Lambda). You can trigger incidents, watch the three-phase agent loop execute in real time, and see the self-calibrating memory update after every resolution.
+>
+> **CockroachDB tools used:** Distributed Vector Indexing · Cloud Managed MCP Server · ccloud CLI · Agent Skills Repo
+>
+> **AWS services used:** Amazon Bedrock (Mistral Large 3) · Amazon ECS · AWS Lambda · Amazon RDS · Amazon CloudWatch
 
 ---
 
@@ -125,13 +180,24 @@ curl -X POST http://localhost:8080/api/metrics/ingest \
 │                                     │  ┌──────────▼──────────────────┐  │  │
 │                                     │  │  MCP Tool Server             │  │  │
 │                                     │  │                              │  │  │
+│                                     │  │  CockroachDB Cloud           │  │  │
 │                                     │  │  • execute_ccloud_command   │  │  │
-│                                     │  │    (REST API + ccloud CLI)  │  │  │
-│                                     │  │  • aws_repair_service       │  │  │
-│                                     │  │    (ECS / RDS / Lambda)     │  │  │
+│                                     │  │    Layer 1: ccloud binary   │  │  │
+│                                     │  │    Layer 2: REST fallback   │  │  │
 │                                     │  │  • crdb_cluster_health      │  │  │
 │                                     │  │  • crdb_list_slow_queries   │  │  │
 │                                     │  │  • crdb_query               │  │  │
+│                                     │  │                              │  │  │
+│                                     │  │  Agent Skills Repo           │  │  │
+│                                     │  │  • crdb_diagnose_hotspots   │  │  │
+│                                     │  │  • crdb_index_advisor       │  │  │
+│                                     │  │  • crdb_cancel_slow_queries │  │  │
+│                                     │  │  • crdb_job_monitor         │  │  │
+│                                     │  │  • crdb_skill_repair        │  │  │
+│                                     │  │                              │  │  │
+│                                     │  │  AWS Repair                  │  │  │
+│                                     │  │  • aws_repair_service       │  │  │
+│                                     │  │    (ECS / RDS / Lambda)     │  │  │
 │                                     │  └─────────────────────────────┘  │  │
 │                                     └──────────────────┬─────────────────┘  │
 │                                                        │ SQL (TLS)           │
@@ -195,9 +261,10 @@ graph TB
     end
 
     subgraph MCP["MCP Tool Server (stdio subprocess)"]
-        H[execute_ccloud_command<br/>REST API + ccloud CLI]
+        H[execute_ccloud_command<br/>Layer 1: ccloud binary · Layer 2: REST]
         I[aws_repair_service<br/>ECS · RDS · Lambda]
         J[crdb_cluster_health<br/>crdb_query · slow_queries]
+        K2[Agent Skills Repo<br/>crdb_diagnose_hotspots · crdb_index_advisor<br/>crdb_cancel_slow_queries · crdb_job_monitor<br/>crdb_skill_repair]
     end
 
     subgraph CRDB["CockroachDB Serverless"]
@@ -379,15 +446,30 @@ Cloud-Surgeon exposes its tools via the [Model Context Protocol](https://modelco
 
 ### Registered tools
 
+**CockroachDB Cloud tools (ccloud CLI + MCP)**
+
 | Tool | Description | Live / Simulated |
 |---|---|---|
-| `execute_ccloud_command` | CockroachDB Cloud CLI + REST API. Actions: `cluster:status`, `cluster:list`, `cluster:sql-users`, `cluster:backups`, `cluster:version`, `cluster:sql-dns`. Uses the `ccloud` binary (layer-1) when authenticated, falls back to the REST API otherwise. Each response includes `ccloudEquivalent` (exact ccloud command). | 🟢 **Live** (with `COCKROACH_CLOUD_API_KEY`) |
-| `aws_repair_service` | Live ECS force-redeploy, RDS connection scaling, Lambda concurrency scale-up. Infers service type from name. | 🟢 **Live** (with AWS creds) · 🔵 Simulated fallback |
-| `crdb_cluster_health` | Official CockroachDB Cloud MCP — `get_cluster` + `show_running_queries` | 🟢 **Live** (with `COCKROACH_CLOUD_API_KEY`) |
+| `execute_ccloud_command` | Two-layer CockroachDB Cloud access. **Layer 1:** `ccloud v0.6.12` binary authenticated headlessly via `bootstrapCcloudCredentials()` (writes `credentials.json` / `profiles.json` / `configuration.json` from `COCKROACH_CLOUD_API_KEY` — no browser OAuth). **Layer 2:** CockroachDB Cloud REST API fallback. Actions: `cluster:status`, `cluster:list`, `cluster:sql-users`, `cluster:backups`, `cluster:version`, `cluster:sql-dns`. Every response includes `cliMode` (`"ccloud_binary"` \| `"rest"`) and `ccloudEquivalent`. | 🟢 **Live** (with `COCKROACH_CLOUD_API_KEY`) |
+| `crdb_cluster_health` | Official CockroachDB Cloud MCP (`cockroachlabs.cloud/mcp`) — `get_cluster` + `show_running_queries` | 🟢 **Live** |
 | `crdb_list_slow_queries` | Official CockroachDB Cloud MCP — slow query diagnostics | 🟢 **Live** |
 | `crdb_query` | Official CockroachDB Cloud MCP — run diagnostic SQL | 🟢 **Live** |
 
-> **Note on ccloud CLI**: `ccloud v0.6.12` is bundled and authenticated at startup via `bootstrapCcloudCredentials()`, which writes the three credential files the binary requires (`credentials.json`, `profiles.json`, `configuration.json`) from the `COCKROACH_CLOUD_API_KEY` service-account key — no browser OAuth needed. When authenticated, the binary is used as layer-1; the REST API is the fallback when it is not. The `ccloudEquivalent` field in every response documents the exact ccloud command that would produce identical output.
+**CockroachDB Agent Skills** ([`github.com/cockroachdb/agent-skills`](https://github.com/cockroachdb/agent-skills))
+
+| Tool | Skill ID | Description | Live / Simulated |
+|---|---|---|---|
+| `crdb_diagnose_hotspots` | `crdb/performance/diagnose-hotspots` | Queries `crdb_internal.cluster_contention_events` + `ranges_no_leases` — returns top-N hot tables, contention seconds, and the SQL causing the bottleneck | 🟢 **Live** |
+| `crdb_index_advisor` | `crdb/schema/index-advisor` | Analyses `crdb_internal.node_statement_statistics` for full-table scans; returns missing-index recommendations with estimated row impact | 🟢 **Live** |
+| `crdb_cancel_slow_queries` | `crdb/operations/cancel-query` | Lists queries running > N seconds via `crdb_internal.cluster_queries`; cancels them with `CANCEL QUERY` | 🟢 **Live** |
+| `crdb_job_monitor` | `crdb/observability/job-status` | Checks changefeed and backup job health; surfaces PAUSED/FAILED jobs with last error | 🟢 **Live** |
+| `crdb_skill_repair` | Orchestrator | Selects and sequences the appropriate skill combination based on the detected strategy (hotspot → diagnose\_hotspots + index\_advisor; slow queries → cancel\_slow\_queries; changefeed → job\_monitor) | 🟢 **Live** |
+
+**AWS repair tools**
+
+| Tool | Description | Live / Simulated |
+|---|---|---|
+| `aws_repair_service` | Live ECS force-redeploy, RDS connection scaling, Lambda concurrency scale-up. Infers service type from name. | 🟢 **Live** (with AWS creds) · 🔵 Simulated fallback |
 
 ---
 
