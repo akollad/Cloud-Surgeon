@@ -6,7 +6,8 @@
  *  - invokeLLMText()     — generic single prompt → string (plan enrichment, playbook generation, etc.)
  *
  * AI_PROVIDER=anthropic  → Anthropic Claude (Replit AI Integrations proxy or direct API key).
- * AI_PROVIDER=bedrock    → Amazon Nova Lite via Bedrock Converse API (default; geo-unrestricted).
+ * AI_PROVIDER=mistral    → Mistral Large 3 (675B) via bedrock-mantle OpenAI-compat endpoint.
+ * AI_PROVIDER=bedrock    → Amazon Nova Lite via Bedrock Converse API (fallback).
  *
  * Every call receives a strategy-specific system prompt ("skill") that gives the model
  * real domain knowledge — metric names, success criteria, key diagnostic fields — so its
@@ -14,6 +15,7 @@
  */
 
 import { invokeBedrockThought, invokeBedrockText } from "./bedrock";
+import { invokeMantleText, mantleIsConfigured, mantleModel } from "./bedrock-mantle";
 import { findRelevantDocChunks, formatDocChunksForPrompt } from "./doc-rag";
 import { logger } from "./logger";
 
@@ -323,7 +325,7 @@ async function callAnthropicLLM(prompt: string, systemPrompt: string, maxTokens 
 
 // ── Public API ─────────────────────────────────────────────────────────────
 
-export type ThoughtSource = "anthropic" | "bedrock" | "simulated";
+export type ThoughtSource = "anthropic" | "bedrock" | "mistral" | "simulated";
 
 export interface LLMThought {
   thought: string;
@@ -361,6 +363,18 @@ export async function invokeLLMThought(
     return { thought: fallbackThought(turnIndex), source: "simulated" };
   }
 
+  if (provider === "mistral") {
+    const text = await invokeMantleText(prompt, systemPrompt, 400);
+    if (text) {
+      logger.info({ turnIndex, provider: "mistral", docChunks: docChunks.length }, "LLM thought generated");
+      return { thought: text, source: "mistral" };
+    }
+    // Fallback to Nova Lite if mantle fails
+    const bedrockFallback = await invokeBedrockThought(prompt, systemPrompt);
+    if (bedrockFallback) return { thought: bedrockFallback, source: "bedrock" };
+    return { thought: fallbackThought(turnIndex), source: "simulated" };
+  }
+
   const bedrockThought = await invokeBedrockThought(prompt, systemPrompt);
   if (bedrockThought) {
     return { thought: bedrockThought, source: "bedrock" };
@@ -386,6 +400,13 @@ export async function invokeLLMText(
 
   if (provider === "anthropic") {
     return callAnthropicLLM(prompt, systemPrompt, maxTokens ?? 300);
+  }
+
+  if (provider === "mistral") {
+    const text = await invokeMantleText(prompt, systemPrompt, maxTokens ?? 400);
+    if (text) return text;
+    // Fallback to Nova Lite
+    return invokeBedrockText(prompt, systemPrompt, maxTokens ?? 400);
   }
 
   return invokeBedrockText(prompt, systemPrompt, maxTokens ?? 400);

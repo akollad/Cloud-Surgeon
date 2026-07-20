@@ -4,6 +4,7 @@ import { seedVectorMemory } from "./lib/seed";
 import { seedDemoIncidents } from "./lib/seed-demo-incidents";
 import { pool } from "@workspace/db";
 import { bedrockIsConfigured, bedrockAuthMethod } from "./lib/bedrock";
+import { mantleIsConfigured, mantleModel } from "./lib/bedrock-mantle";
 import { createMetricSnapshotsTable } from "./lib/anomaly";
 import { createRollbackPlansTable, releaseIncidentClaim, runAgentLoop } from "./lib/cloud-surgeon";
 import { seedDocChunks } from "./lib/doc-rag";
@@ -139,6 +140,9 @@ app.listen(port, async (err) => {
     process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL
   );
   const anthropicViaDirectKey = !!process.env.ANTHROPIC_API_KEY;
+  const mantleStatus = mantleIsConfigured()
+    ? `🟢 LIVE (${mantleModel()})`
+    : "⚠️ no BEDROCK_API_KEY";
   const aiProviderLabel =
     provider === "anthropic"
       ? anthropicViaProxy
@@ -146,7 +150,9 @@ app.listen(port, async (err) => {
         : anthropicViaDirectKey
           ? "anthropic 🟢 LIVE (direct API key)"
           : "anthropic ⚠️ no API key"
-      : `bedrock — ${bedrockStatus}`;
+      : provider === "mistral"
+        ? `mistral — ${mantleStatus}`
+        : `bedrock — ${bedrockStatus}`;
 
   const awsRegion = process.env.AWS_REGION ?? "(not set)";
   const awsStatus = process.env.AWS_ACCESS_KEY_ID

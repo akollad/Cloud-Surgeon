@@ -62,7 +62,7 @@ channel = "stable-25_05"
 [userenv]
 
 [userenv.shared]
-AI_PROVIDER = "bedrock"
+AI_PROVIDER = "mistral"
 BEDROCK_REGION = "eu-west-1"
 AWS_REGION = "us-east-1"
 ECS_DEFAULT_CLUSTER = "cloud-surgeon"
