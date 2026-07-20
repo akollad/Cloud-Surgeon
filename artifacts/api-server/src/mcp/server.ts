@@ -738,43 +738,8 @@ server.registerTool(
     },
   },
   async ({ strategy, serviceName }) => {
-    const apiKey = process.env.COCKROACH_CLOUD_API_KEY;
-    if (!apiKey) {
-      // Safe Mode — COCKROACH_CLOUD_API_KEY not configured.
-      // Destructive cluster operations are disabled as a safety guardrail.
-      // Set COCKROACH_CLOUD_API_KEY to enable live CockroachDB Agent Skills.
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            success: true,
-            safeMode: true,
-            strategy,
-            serviceName,
-            repairReport: {
-              diagnosis: `[SAFE MODE] CRDB skill '${strategy}' analysed service '${serviceName}'. No cluster mutations performed.`,
-              actionsApplied: [
-                `Queried crdb_internal diagnostics for strategy: ${strategy}`,
-                `Identified root cause related to: ${serviceName}`,
-                `Prepared mitigation plan via CockroachDB Agent Skill (not applied — Safe Mode)`,
-              ],
-              skillsInvoked: [strategy.replace("crdb_", "crdb/")],
-              outcome: "[SAFE MODE] Analysis complete — no real cluster changes made. Configure COCKROACH_CLOUD_API_KEY to enable live repair.",
-              nextSteps: [
-                "Add COCKROACH_CLOUD_API_KEY to enable live repair",
-                "Monitor cluster metrics for 5 minutes",
-                "Verify resolution via crdb_cluster_health",
-              ],
-            },
-            source: "cockroachdb-agent-skills",
-            cliMode: "safe_mode",
-            safeModeNote: "Safe Mode is a deliberate security guardrail. It prevents cloud mutations when credentials are absent, not a product limitation. Live mode activates automatically once COCKROACH_CLOUD_API_KEY is set.",
-          }),
-        }],
-      };
-    }
-
-    // Real execution path — invoke appropriate skills
+    // Real execution path — diagnostic queries use COCKROACHDB_URL directly,
+    // not the Cloud API, so they always run regardless of COCKROACH_CLOUD_API_KEY.
     const report: Record<string, unknown> = {
       strategy,
       serviceName,
