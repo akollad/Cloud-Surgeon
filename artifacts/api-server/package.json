@@ -9,6 +9,7 @@
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "tsx --test src/lib/anomaly.test.ts src/lib/prompt-guard.test.ts src/lib/cloud-surgeon.routing.test.ts",
+    "test:e2e": "TEST_API_URL=http://localhost:8080/api TEST_API_PASSWORD=cloudsurgeon-demo tsx --test src/lib/agent-loop.e2e.test.ts",
     "test:cdc-recovery": "tsx --test src/lib/cdc-recovery.test.ts"
   },
   "dependencies": {

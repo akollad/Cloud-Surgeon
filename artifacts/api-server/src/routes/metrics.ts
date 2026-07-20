@@ -266,10 +266,10 @@ router.post("/metrics/calibration/recalibrate", async (_req, res): Promise<void>
 // GET /api/metrics/ccloud?action=cluster:status
 //
 // Calls the CockroachDB Cloud REST API directly — the same underlying API
-// that the ccloud CLI wraps. ccloud v0.6.12 requires browser-based OAuth
-// and cannot run headlessly in containers; we authenticate via the
-// service-account API key. The `ccloudEquivalent` field shows the exact
-// ccloud command that would produce identical output.
+// that the ccloud CLI wraps, authenticated via the service-account API key.
+// The `ccloudEquivalent` field shows the exact ccloud command that would
+// produce identical output. ccloud binary (Layer 1) is also available when
+// bootstrapCcloudCredentials() has written the credential files at startup.
 
 router.get("/metrics/ccloud", async (req, res): Promise<void> => {
   const action = String(req.query.action ?? "cluster:status");
@@ -317,7 +317,7 @@ router.get("/metrics/ccloud", async (req, res): Promise<void> => {
       regionCount: regions.length, createdAt: c.created_at,
       summary: `Cluster '${c.name}' (${c.plan}) — state: ${c.state}, region: ${regions[0]?.name}, version: ${c.cockroach_version}`,
       ccloudEquivalent: `ccloud cluster get ${clusterId} -o json`,
-      note: "ccloud v0.6.12 requires browser OAuth — Cloud-Surgeon calls the same REST API headlessly via service-account API key.",
+      note: "ccloud binary (Layer 1) active when bootstrapCcloudCredentials() has authenticated at startup; REST API is Layer 2 fallback.",
     });
   } catch (err) {
     res.status(500).json({ live: false, action, error: err instanceof Error ? err.message : String(err) });

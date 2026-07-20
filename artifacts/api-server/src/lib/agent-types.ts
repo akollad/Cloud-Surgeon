@@ -12,7 +12,7 @@ export interface AgentTurn {
   turn: number;
   agent: AgentName;
   thought: string;
-  thoughtSource: "anthropic" | "bedrock" | "simulated";
+  thoughtSource: "anthropic" | "bedrock" | "mistral" | "simulated";
   toolName: string;
   toolInput: Record<string, unknown>;
   toolOutput: Record<string, unknown>;

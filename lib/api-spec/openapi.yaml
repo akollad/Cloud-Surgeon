@@ -601,7 +601,7 @@ components:
           type: string
         thoughtSource:
           type: string
-          enum: [anthropic, bedrock, simulated]
+          enum: [anthropic, bedrock, mistral, simulated]
         toolName:
           type: string
         toolInput:

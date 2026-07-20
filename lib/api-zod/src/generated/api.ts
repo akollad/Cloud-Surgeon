@@ -81,7 +81,7 @@ export const TriggerIncidentResponse = zod.object({
   "turn": zod.number(),
   "agent": zod.string().optional(),
   "thought": zod.string(),
-  "thoughtSource": zod.enum(['anthropic', 'bedrock', 'simulated']).optional(),
+  "thoughtSource": zod.enum(['anthropic', 'bedrock', 'mistral', 'simulated']).optional(),
   "toolName": zod.string(),
   "toolInput": zod.record(zod.string(), zod.unknown()),
   "toolOutput": zod.record(zod.string(), zod.unknown())
@@ -138,7 +138,7 @@ export const ListIncidentsResponseItem = zod.object({
   "turn": zod.number(),
   "agent": zod.string().optional(),
   "thought": zod.string(),
-  "thoughtSource": zod.enum(['anthropic', 'bedrock', 'simulated']).optional(),
+  "thoughtSource": zod.enum(['anthropic', 'bedrock', 'mistral', 'simulated']).optional(),
   "toolName": zod.string(),
   "toolInput": zod.record(zod.string(), zod.unknown()),
   "toolOutput": zod.record(zod.string(), zod.unknown())
@@ -200,7 +200,7 @@ export const GetIncidentResponse = zod.object({
   "turn": zod.number(),
   "agent": zod.string().optional(),
   "thought": zod.string(),
-  "thoughtSource": zod.enum(['anthropic', 'bedrock', 'simulated']).optional(),
+  "thoughtSource": zod.enum(['anthropic', 'bedrock', 'mistral', 'simulated']).optional(),
   "toolName": zod.string(),
   "toolInput": zod.record(zod.string(), zod.unknown()),
   "toolOutput": zod.record(zod.string(), zod.unknown())
@@ -261,7 +261,7 @@ export const ApproveIncidentResponse = zod.object({
   "turn": zod.number(),
   "agent": zod.string().optional(),
   "thought": zod.string(),
-  "thoughtSource": zod.enum(['anthropic', 'bedrock', 'simulated']).optional(),
+  "thoughtSource": zod.enum(['anthropic', 'bedrock', 'mistral', 'simulated']).optional(),
   "toolName": zod.string(),
   "toolInput": zod.record(zod.string(), zod.unknown()),
   "toolOutput": zod.record(zod.string(), zod.unknown())
@@ -322,7 +322,7 @@ export const RejectIncidentResponse = zod.object({
   "turn": zod.number(),
   "agent": zod.string().optional(),
   "thought": zod.string(),
-  "thoughtSource": zod.enum(['anthropic', 'bedrock', 'simulated']).optional(),
+  "thoughtSource": zod.enum(['anthropic', 'bedrock', 'mistral', 'simulated']).optional(),
   "toolName": zod.string(),
   "toolInput": zod.record(zod.string(), zod.unknown()),
   "toolOutput": zod.record(zod.string(), zod.unknown())
@@ -383,7 +383,7 @@ export const RetryIncidentResponse = zod.object({
   "turn": zod.number(),
   "agent": zod.string().optional(),
   "thought": zod.string(),
-  "thoughtSource": zod.enum(['anthropic', 'bedrock', 'simulated']).optional(),
+  "thoughtSource": zod.enum(['anthropic', 'bedrock', 'mistral', 'simulated']).optional(),
   "toolName": zod.string(),
   "toolInput": zod.record(zod.string(), zod.unknown()),
   "toolOutput": zod.record(zod.string(), zod.unknown())
@@ -444,7 +444,7 @@ export const RollbackIncidentResponse = zod.object({
   "turn": zod.number(),
   "agent": zod.string().optional(),
   "thought": zod.string(),
-  "thoughtSource": zod.enum(['anthropic', 'bedrock', 'simulated']).optional(),
+  "thoughtSource": zod.enum(['anthropic', 'bedrock', 'mistral', 'simulated']).optional(),
   "toolName": zod.string(),
   "toolInput": zod.record(zod.string(), zod.unknown()),
   "toolOutput": zod.record(zod.string(), zod.unknown())
@@ -509,7 +509,7 @@ export const CorrectIncidentResponse = zod.object({
   "turn": zod.number(),
   "agent": zod.string().optional(),
   "thought": zod.string(),
-  "thoughtSource": zod.enum(['anthropic', 'bedrock', 'simulated']).optional(),
+  "thoughtSource": zod.enum(['anthropic', 'bedrock', 'mistral', 'simulated']).optional(),
   "toolName": zod.string(),
   "toolInput": zod.record(zod.string(), zod.unknown()),
   "toolOutput": zod.record(zod.string(), zod.unknown())
