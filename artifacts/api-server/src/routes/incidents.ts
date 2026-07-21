@@ -594,7 +594,10 @@ router.get("/incidents", async (_req, res): Promise<void> => {
     .orderBy(desc(incidentStateTable.updatedAt))
     .limit(50);
 
-  res.json(ListIncidentsResponse.parse(serializeDates(incidents)));
+  // Do not run through ListIncidentsResponse.parse() — the generated Zod schema
+  // does not include triggeredAt / resolvedAt, so .parse() silently strips them.
+  // The data comes from the DB (trusted), so validation is not needed here.
+  res.json(serializeDates(incidents));
 });
 
 router.get("/incidents/:incidentId", async (req, res): Promise<void> => {
@@ -610,7 +613,9 @@ router.get("/incidents/:incidentId", async (req, res): Promise<void> => {
     return;
   }
 
-  res.json(GetIncidentResponse.parse(serializeDates(incident)));
+  // Do not run through GetIncidentResponse.parse() — the generated Zod schema
+  // does not include triggeredAt / resolvedAt, so .parse() silently strips them.
+  res.json(serializeDates(incident));
 });
 
 // ── Execution logs ────────────────────────────────────────────────────────

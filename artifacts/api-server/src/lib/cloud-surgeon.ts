@@ -469,9 +469,18 @@ export async function runAgentLoop(
     const effectiveWinRate = winRateResult.winRate * correctionFactor;
 
     const stormDetected = Boolean((context as Record<string, unknown>).stormDetected);
-    const routingMode = stormDetected
-      ? ("PENDING_APPROVAL" as const)
+    let routingMode: RoutingMode = stormDetected
+      ? "PENDING_APPROVAL"
       : computeRoutingMode(strategyName, ragHit?.distance, effectiveWinRate, winRateResult.count);
+
+    // Bug fix: if the diagnostician found the target service doesn't exist, force
+    // PENDING_APPROVAL regardless of win-rate. Acting autonomously against a phantom
+    // service name is always wrong — a human must confirm the correct service first.
+    const diagToolOutput = (context.turns[0]?.toolOutput ?? {}) as Record<string, unknown>;
+    const diagErrorMsg = typeof diagToolOutput.error === "string" ? diagToolOutput.error : "";
+    if (diagErrorMsg.includes("does not exist") && routingMode !== "PENDING_APPROVAL") {
+      routingMode = "PENDING_APPROVAL";
+    }
 
     context.routingMode = routingMode;
     context.ragScore = ragHit?.distance ?? null;
@@ -481,7 +490,9 @@ export async function runAgentLoop(
     // The internal value can exceed 1.0 when correctionFactor > 1 (strategy
     // outperforming prediction), but surfacing "120%" in the UI is misleading.
     context.effectiveWinRate = winRateResult.count > 0 ? Math.min(effectiveWinRate, 1.0) : null;
-    context.correctionFactor = correctionFactor !== 1.0 ? correctionFactor : null;
+    // Always store correctionFactor explicitly — storing null when it equals 1.0
+    // makes the dashboard show "correction: null" instead of "×1.00".
+    context.correctionFactor = correctionFactor;
     context.winRateSampleSize = winRateResult.count;
     context.routingDecisionComputed = true;
 
@@ -540,7 +551,15 @@ export async function runAgentLoop(
             : "Human-approved — proceeding with remediation."),
     );
 
-    const serviceName = detectServiceName(alertText);
+    // Use the service name the diagnostician actually resolved against the live cluster
+    // (stored in its toolInput from Phase 0). Re-running detectServiceName() on the raw
+    // alert text can produce a different string — e.g. "checkout" vs "checkout-service" —
+    // which caused the FAILED incident where the remediator targeted a non-existent service.
+    const turn0ServiceName = (context.turns[0]?.toolInput as Record<string, unknown>)?.serviceName;
+    const serviceName =
+      typeof turn0ServiceName === "string" && turn0ServiceName
+        ? turn0ServiceName
+        : detectServiceName(alertText);
     const { thought, source: thoughtSource } = await invokeLLMThought(alertText, 1, context.turns[0]?.toolOutput ?? null, { strategyName, serviceName });
 
     const diagOutput = (context.turns[0]?.toolOutput ?? {}) as Record<string, unknown>;

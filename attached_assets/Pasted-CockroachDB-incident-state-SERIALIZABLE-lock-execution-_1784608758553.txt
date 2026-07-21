@@ -1,0 +1,45 @@
+CockroachDB — incident_state (SERIALIZABLE lock) · execution_logs (3 rows) · agent_handoffs (4 rows) · strategy "ecs_service_restart"
+14:59:24
+Incident Triggered
+ECS checkout-service CPU 92% — task count 2/5 — high latency
+
+ID: 2b9a6159
+Strategy: ecs_service_restart
+Win-rate: 78%
+14:59:24
+diagnostician
+"Starting diagnostic phase — inspecting ECS service via AWS API"
+
+14:59:27
+aws_repair_service({"serviceName":"cloud-surgeon/checkout","action":"ecs:diagnose"})
+{"success":true,"simulated":false,"service":"ecs","actionTaken":"DESCRIBE_SERVICES","data":{"serviceArn":"arn:aws:ecs:us-east-1:153983052396:service/cloud-surgeon/checkout","status":"ACTIVE","runningC…
+▼ expand
+14:59:29
+remediator
+PENDING_APPROVAL
+"Insufficient confidence to act autonomously — RAG distance: 0.252, effective win-rate: 78% (raw: 78%, correction: *1.00, 34 samples). Awaiting human approval."
+
+15:32:41
+Human approval received
+PENDING_APPROVAL → AUTONOMOUS
+Operator reviewed and approved the remediation plan.
+
+15:32:41
+remediator
+AUTONOMOUS
+"Applying strategy 'ecs_service_restart' in AUTONOMOUS mode. High confidence from memory — acting autonomously."
+
+15:32:45
+aws_repair_service({"serviceName":"cloud-surgeon/checkout-service","action":"ecs:describe_and_remediate"})
+{"success":false,"simulated":false,"service":"ecs","actionTaken":"DESCRIBE_SERVICES","error":"Service 'checkout-service' does not exist in cluster 'cloud-surgeon'. Services present in cluster 'cloud-s…
+▼ expand
+15:32:46
+auditor
+"Verifying repair outcome and closing incident. Indexing result in vector memory."
+
+15:32:47
+verify_resolution({"incidentId":"2b9a6159-7e21-4003-9823-26f2c81b9b7e","repairVerified":false,"actionPerformed":false,"actionTaken":"DESCRIBE_SERVICES","strategyUsed":"ecs_service_restart"})
+{"verified":false,"verdict":"FAIL","actionPerformed":false,"actionTaken":"DESCRIBE_SERVICES","auditTime":"2026-07-20T14:32:47.617Z","strategyUsed":"ecs_service_restart","message":"Repair output indica…
+▼ expand
+15:32:48
+FAILED

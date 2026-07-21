@@ -370,6 +370,15 @@ export async function generateRepairPlan(
       const parsed = JSON.parse(extractJson(raw)) as unknown;
       const validated = validateLLMPlan(parsed);
       if (validated) {
+        // Enforce a risk-level floor: the LLM must not understate risk relative to
+        // the static plan. E.g. if the static plan for ecs_service_restart is "medium",
+        // an LLM-generated "low" would mislead operators reviewing the pre-execution plan.
+        const RISK_ORDER = { low: 0, medium: 1, high: 2 } as const;
+        const staticRisk = (staticBase.riskLevel ?? "low") as keyof typeof RISK_ORDER;
+        const llmRisk = (validated.riskLevel ?? "low") as keyof typeof RISK_ORDER;
+        if (RISK_ORDER[llmRisk] < RISK_ORDER[staticRisk]) {
+          validated.riskLevel = staticRisk;
+        }
         return { strategy: strategyName, ...validated, generatedBy: "llm", generatedAt };
       }
     }
@@ -495,8 +504,13 @@ export async function generateAndStoreRollbackPlan(
   const estimatedTime = ROLLBACK_TIMES[strategyName] ?? "5–10 minutes";
   const riskLevel = ROLLBACK_RISK[strategyName] ?? "medium";
 
+  // Mark commands as failed when the tool returned success:false so the rollback
+  // panel accurately reflects what actually ran vs what was merely attempted.
+  const toolFailed = toolOutput.success === false;
+  const execLabel = toolFailed ? "ATTEMPTED (failed)" : "Action executed";
+
   const commandsExecuted: string[] = [];
-  if (toolOutput.action) commandsExecuted.push(`Action executed: ${toolOutput.action}`);
+  if (toolOutput.action) commandsExecuted.push(`${execLabel}: ${toolOutput.action}`);
   if (toolOutput.serviceName) commandsExecuted.push(`Target service: ${toolOutput.serviceName}`);
   if (toolOutput.steps && Array.isArray(toolOutput.steps)) {
     for (const step of (toolOutput.steps as unknown[]).slice(0, 5)) {
@@ -506,16 +520,29 @@ export async function generateAndStoreRollbackPlan(
     commandsExecuted.push(`Detail: ${String(toolOutput.detail).slice(0, 200)}`);
   }
   if (commandsExecuted.length === 0) {
-    commandsExecuted.push(`aws_repair_service(strategy=${strategyName}, service=${preRepairState.serviceName ?? "auto-detected"})`);
+    const fallbackLabel = toolFailed ? "ATTEMPTED (failed)" : "Executed";
+    commandsExecuted.push(`${fallbackLabel}: aws_repair_service(strategy=${strategyName}, service=${preRepairState.serviceName ?? "auto-detected"})`);
   }
 
+  // Resolve generic placeholders with actual values from pre-repair state so rollback
+  // instructions are immediately actionable rather than requiring manual substitution.
+  const knownServiceName = preRepairState.serviceName as string | undefined;
+  const resolvedSteps = steps.map((step) => {
+    if (!knownServiceName) return step;
+    const parts = knownServiceName.split("/");
+    const cluster = parts.length > 1 ? parts[0]! : (process.env.ECS_DEFAULT_CLUSTER ?? "cloud-surgeon");
+    const svc = parts.length > 1 ? parts[1]! : parts[0]!;
+    return step.replace(/<cluster>/g, cluster).replace(/<service>/g, svc);
+  });
+
   const warnings: string[] = [];
+  if (toolFailed) warnings.push("⚠ Repair action failed before completion — verify cluster state before executing rollback steps.");
   if (riskLevel === "high") warnings.push("⚠ High-risk rollback — coordinate with on-call team before executing.");
   if (strategyName === "disk_cleanup") warnings.push("⚠ Deleted files cannot be recovered without a snapshot.");
   if (strategyName === "network_route_failover") warnings.push("⚠ DNS propagation takes 60 s — traffic will continue on failover path during rollback.");
 
   const rollbackInfo: RollbackInfo = {
-    steps, estimatedTime, riskLevel, commandsExecuted, warnings,
+    steps: resolvedSteps, estimatedTime, riskLevel, commandsExecuted, warnings,
     generatedAt: new Date().toISOString(),
   };
 
