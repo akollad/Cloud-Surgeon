@@ -319,13 +319,39 @@ export async function generateRepairPlan(
     ? JSON.stringify(diagOutput).slice(0, 500)
     : "No diagnostic data available.";
 
+  // For CockroachDB strategies, detect the cluster plan from diagnostic output so we
+  // can tell the LLM whether crdb_internal is available or restricted.
+  const isCrdbStrategy = strategyName.startsWith("crdb_");
+  const isBasicPlan =
+    isCrdbStrategy &&
+    (diagSummary.includes('"BASIC"') || diagSummary.includes('"SERVERLESS"'));
+
+  const crdbConstraint = isCrdbStrategy
+    ? "\n\nCRITICAL CONSTRAINT — CockroachDB plan restrictions:\n" +
+      (isBasicPlan
+        ? "THIS CLUSTER IS ON THE BASIC/SERVERLESS PLAN. crdb_internal IS COMPLETELY BLOCKED.\n" +
+          "DO NOT mention crdb_internal anywhere — not in steps, not in preconditions, not in expectedOutcome.\n" +
+          "Any reference to crdb_internal (cluster_contention_events, index_recommendations, ranges_no_leases,\n" +
+          "cluster_queries, jobs, etc.) will cause a runtime error and must be excluded entirely.\n" +
+          "Use ONLY these alternatives:\n" +
+          "  • Contention / active sessions → pg_stat_activity\n" +
+          "  • Existing indexes → information_schema.statistics\n" +
+          "  • Range distribution → SHOW RANGES FROM TABLE <table> (via ccloud cluster sql)\n" +
+          "  • Jobs / changefeeds → SHOW CHANGEFEED JOBS (via ccloud cluster sql)\n" +
+          "  • Metrics → CockroachDB Cloud Console dashboard (no SQL needed)\n" +
+          "  • Latency baseline → use the Cloud Console SQL Activity tab or CloudWatch ECS metrics\n"
+        : "crdb_internal is available. Steps may reference cluster_contention_events, index_recommendations,\n" +
+          "ranges_no_leases, cluster_queries, and jobs as appropriate.\n")
+    : "";
+
   const prompt =
     `You are a DevOps expert generating a contextual repair plan.\n\n` +
     `Alert: "${alertText.slice(0, 250)}"\n` +
     `Strategy: ${strategyName}\n` +
     `Target service: ${serviceName}\n` +
-    `Diagnostic findings: ${diagSummary}\n\n` +
-    `Return ONLY a valid JSON object — no markdown, no code blocks, no explanation — with exactly these fields:\n` +
+    `Diagnostic findings: ${diagSummary}` +
+    crdbConstraint +
+    `\n\nReturn ONLY a valid JSON object — no markdown, no code blocks, no explanation — with exactly these fields:\n` +
     `{\n` +
     `  "estimatedDuration": "<X–Y seconds/minutes, specific to this alert>",\n` +
     `  "riskLevel": "<low|medium|high>",\n` +

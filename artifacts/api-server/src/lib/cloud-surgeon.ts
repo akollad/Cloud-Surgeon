@@ -192,10 +192,17 @@ async function callTool(
     } else if (isDescribeOnly) {
       verdict  = "NO_ACTION_REQUIRED";
       verified = true;
-      message  =
-        `No infrastructure change was made (${actionTaken || "describe only"}). ` +
-        "Service state confirmed healthy — no repair action was necessary. " +
-        "If throttling persists, a quota increase via AWS Support may be required.";
+      // Tailor the message to the strategy domain so we don't suggest AWS-specific
+      // remediation (quota increase, Support ticket) inside a CockroachDB incident.
+      const strategyUsed = String(toolInput.strategyUsed ?? "");
+      const isCrdbAction = strategyUsed.startsWith("crdb_");
+      message = isCrdbAction
+        ? `No infrastructure change applied (${actionTaken || "diagnostic only"}). ` +
+          "Read-only diagnostic completed — review findings and apply any DDL recommendations " +
+          "during a scheduled maintenance window."
+        : `No infrastructure change was made (${actionTaken || "describe only"}). ` +
+          "Service state confirmed healthy — no repair action was necessary. " +
+          "If throttling persists, a quota increase via AWS Support may be required.";
     } else {
       verdict  = "PASS";
       verified = true;
