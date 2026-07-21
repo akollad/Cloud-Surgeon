@@ -477,7 +477,10 @@ export async function runAgentLoop(
     context.ragScore = ragHit?.distance ?? null;
     context.ragStrategyHint = ragHit?.strategyName ?? null;
     context.winRate = winRateResult.count > 0 ? winRateResult.winRate : null;
-    context.effectiveWinRate = winRateResult.count > 0 ? effectiveWinRate : null;
+    // effectiveWinRate is a probability — cap display at 1.0 (100%).
+    // The internal value can exceed 1.0 when correctionFactor > 1 (strategy
+    // outperforming prediction), but surfacing "120%" in the UI is misleading.
+    context.effectiveWinRate = winRateResult.count > 0 ? Math.min(effectiveWinRate, 1.0) : null;
     context.correctionFactor = correctionFactor !== 1.0 ? correctionFactor : null;
     context.winRateSampleSize = winRateResult.count;
     context.routingDecisionComputed = true;
