@@ -127,26 +127,45 @@ export async function initChangefeed(): Promise<void> {
     // Check if an existing changefeed is already running for our tables.
     // If CDC_WEBHOOK_SECRET is set, also verify the existing changefeed URL
     // contains the token — if not, cancel and recreate with the token.
+    // Look for an existing changefeed in any recoverable state (running, paused, or failed).
+    // A paused/failed job that is ignored and left in place while a new one is created
+    // results in duplicate changefeeds that can produce duplicate CDC events.
     const existing = await pool.query<{ job_id: string; status: string; description: string }>(
       `SELECT job_id, status, description FROM [SHOW CHANGEFEED JOBS] 
        WHERE description LIKE '%execution_logs%' 
          AND description LIKE '%agent_handoffs%'
-         AND status = 'running'
+         AND status IN ('running', 'paused', 'failed')
+       ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'paused' THEN 1 ELSE 2 END
        LIMIT 1`,
     );
 
     if (existing.rows.length > 0) {
       const job = existing.rows[0];
       // If a token is configured but the existing changefeed URL doesn't include it,
-      // cancel and recreate so the sink is authenticated.
+      // always cancel and recreate — regardless of job status — so the sink is authenticated.
       const needsToken = secret && !job.description.includes("?token=");
-      if (needsToken) {
+      if (needsToken || job.status === "failed") {
+        // Cancel the existing job (failed jobs must be explicitly cancelled before a new one
+        // can be created on the same tables; paused jobs with wrong token also need replacement).
         logger.info(
-          { jobId: job.job_id },
-          "[CDC] Existing changefeed lacks token — cancelling to recreate with authentication",
+          { jobId: job.job_id, status: job.status, reason: needsToken ? "missing-token" : "failed-job" },
+          "[CDC] Cancelling existing changefeed to recreate with correct configuration",
         );
         await pool.query(`CANCEL JOB ${job.job_id}`).catch(() => {});
+        // Fall through to CREATE CHANGEFEED below.
+      } else if (job.status === "paused") {
+        // A paused job with the correct token can be resumed without recreating the changefeed.
+        // Resuming preserves the cursor position and avoids re-delivering already-processed events.
+        logger.info(
+          { jobId: job.job_id },
+          "[CDC] Resuming paused CockroachDB changefeed",
+        );
+        await pool.query(`RESUME JOB ${job.job_id}`).catch(() => {});
+        _cdcActive = true;
+        _startHeartbeat();
+        return;
       } else {
+        // job.status === "running" and token is correct — reuse as-is.
         _cdcActive = true;
         logger.info(
           { jobId: job.job_id },

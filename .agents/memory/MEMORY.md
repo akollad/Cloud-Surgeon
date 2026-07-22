@@ -1,4 +1,5 @@
 - [MUTATION_ACTIONS set mismatch](mutation-actions-mismatch.md) — auditor's set must use exact actionTaken strings from aws.ts; wrong names → actionPerformed=false → false NO_ACTION_REQUIRED verdict.
+- [Codebase anomalies audit — full pass](codebase-anomalies-audit.md) — 10 production bugs found and fixed (repair plan field name, vector try/catch, MTTR SQL, ECS keyword collision, crdb_query DDL guard, CDC paused/failed, seed resolvedAt, claim release scoping).
 - [Orval zod codegen breaks on format uuid/date-time](orval-zod-uuid-format.md) — `format: uuid` in openapi.yaml generates zod v4-only `zod.uuid()`; use plain `type: string` instead.
 - [ccloud CLI headless auth](ccloud-headless-auth.md) — v0.6.12 needs browser OAuth; call the REST API directly with COCKROACH_CLOUD_API_KEY instead.
 - [ccloud CLI headless auth in ECS](ccloud-cli-ecs.md) — v0.6.12 headless auth fails even with COCKROACH_API_KEY; REST fallback is the real path; node:24-slim + ca-certificates + curl required.

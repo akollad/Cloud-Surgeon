@@ -189,11 +189,16 @@ router.get("/metrics/impact", async (_req, res): Promise<void> => {
     SELECT
       context_json->>'strategyName'                                              AS strategy_name,
       COUNT(*)                                                                   AS incident_count,
-      ROUND(AVG(EXTRACT(EPOCH FROM (resolved_at - triggered_at)))
+      -- Use agentStartedAt when available (set at Phase 1 start, excludes human review time).
+      -- Falls back to triggered_at for legacy incidents. Consistent with global MTTR formula.
+      ROUND(AVG(EXTRACT(EPOCH FROM (resolved_at -
+          COALESCE(NULLIF(context_json->>'agentStartedAt','')::TIMESTAMPTZ, triggered_at))))
         FILTER (WHERE EXTRACT(EPOCH FROM (resolved_at - triggered_at)) <= 1800), 2) AS mttr_avg_seconds,
-      ROUND(MIN(EXTRACT(EPOCH FROM (resolved_at - triggered_at)))
+      ROUND(MIN(EXTRACT(EPOCH FROM (resolved_at -
+          COALESCE(NULLIF(context_json->>'agentStartedAt','')::TIMESTAMPTZ, triggered_at))))
         FILTER (WHERE EXTRACT(EPOCH FROM (resolved_at - triggered_at)) <= 1800), 2) AS mttr_min_seconds,
-      ROUND(MAX(EXTRACT(EPOCH FROM (resolved_at - triggered_at)))
+      ROUND(MAX(EXTRACT(EPOCH FROM (resolved_at -
+          COALESCE(NULLIF(context_json->>'agentStartedAt','')::TIMESTAMPTZ, triggered_at))))
         FILTER (WHERE EXTRACT(EPOCH FROM (resolved_at - triggered_at)) <= 1800), 2) AS mttr_max_seconds
     FROM incident_state
     WHERE status = 'RESOLVED'

@@ -51,12 +51,35 @@ export async function claimIncidentForAgent(
   return null;
 }
 
-/** Releases the claim on an incident (end of an agent phase). */
-export async function releaseIncidentClaim(incidentId: string): Promise<void> {
-  await db
-    .update(incidentStateTable)
-    .set({ claimedByAgent: null })
-    .where(eq(incidentStateTable.incidentId, incidentId));
+/**
+ * Releases the claim on an incident (end of an agent phase).
+ *
+ * When `agentName` is provided, the UPDATE is guarded by a WHERE clause that
+ * checks the current claimedByAgent value. This prevents a late-running or
+ * recovering process for agent A from accidentally stripping a claim that
+ * agent B has already taken (e.g. after a crash-and-recovery cycle).
+ *
+ * Omit agentName (startup force-release) only to clear a claim unconditionally.
+ */
+export async function releaseIncidentClaim(
+  incidentId: string,
+  agentName?: AgentName,
+): Promise<void> {
+  if (agentName) {
+    // Scoped release: only clears the claim if this agent currently holds it.
+    await pool.query(
+      `UPDATE incident_state
+       SET claimed_by_agent = NULL, updated_at = now()
+       WHERE incident_id = $1 AND claimed_by_agent = $2`,
+      [incidentId, agentName],
+    );
+  } else {
+    // Unconditional release — used only by startup recovery to clear orphaned claims.
+    await db
+      .update(incidentStateTable)
+      .set({ claimedByAgent: null })
+      .where(eq(incidentStateTable.incidentId, incidentId));
+  }
 }
 
 /** Logs an agent handoff in agent_handoffs. */

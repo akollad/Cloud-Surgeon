@@ -102,6 +102,12 @@ export async function seedDemoIncidents(): Promise<{ seeded: boolean; count: num
     const minutesAgo = Math.round((DEMO_INCIDENTS.length - 1 - i) * 65 + 8);
     const triggeredAt = new Date(now.getTime() - minutesAgo * 60 * 1000);
     const updatedAt = new Date(triggeredAt.getTime() + (inc.status === "PENDING_APPROVAL" ? 90 : 240) * 1000);
+    // For RESOLVED incidents, resolvedAt = updatedAt. agentStartedAt tracks when Phase 1
+    // began (30 s after trigger — simulates a fast autonomous repair).
+    const resolvedAt = inc.status === "RESOLVED" ? updatedAt : null;
+    const agentStartedAt = inc.status === "RESOLVED"
+      ? new Date(triggeredAt.getTime() + 30 * 1000).toISOString()
+      : null;
 
     const contextJson = {
       alertText: inc.alertText,
@@ -113,6 +119,7 @@ export async function seedDemoIncidents(): Promise<{ seeded: boolean; count: num
       winRateSampleSize: Math.floor(8 + Math.random() * 20),
       correctionFactor: 1.0,
       effectiveWinRate: inc.winRate,
+      ...(agentStartedAt ? { agentStartedAt } : {}),
       turns: [
         {
           turn: 0,
@@ -138,9 +145,11 @@ export async function seedDemoIncidents(): Promise<{ seeded: boolean; count: num
 
     await db.execute(sql`
       INSERT INTO incident_state
-        (alert_fingerprint, status, current_step, context_json, triggered_at, updated_at)
+        (alert_fingerprint, status, current_step, context_json, triggered_at, updated_at, resolved_at)
       VALUES
-        (${fingerprint}, ${inc.status}, ${inc.currentStep}, ${JSON.stringify(contextJson)}, ${triggeredAt.toISOString()}, ${updatedAt.toISOString()})
+        (${fingerprint}, ${inc.status}, ${inc.currentStep}, ${JSON.stringify(contextJson)},
+         ${triggeredAt.toISOString()}, ${updatedAt.toISOString()},
+         ${resolvedAt ? resolvedAt.toISOString() : null})
       ON CONFLICT (alert_fingerprint) DO NOTHING
     `);
   }

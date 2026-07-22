@@ -370,14 +370,18 @@ server.registerTool(
     ) {
       result = await repairRdsConnections(rdsInstanceId()!);
     } else if (
-      combined.includes("rds") ||
-      combined.includes("database") ||
-      combined.includes("connection pool")
+      !isDefinitelyEcs && (
+        combined.includes("rds") ||
+        combined.includes("database") ||
+        combined.includes("connection pool")
+      )
     ) {
       // No RDS configured — do NOT attempt an ECS lookup with the DB service name.
+      // The !isDefinitelyEcs guard ensures an ECS service whose name contains "database"
+      // (e.g. "cloud-surgeon/database-service") is NOT silently misrouted here; a
+      // serviceName with a "/" always means ECS and falls through to the ECS branch.
       // Mixing an ECS "not found" error with the crdb guidance creates contradictory
-      // output that causes the LLM to follow the wrong branch (the ECS hint instead
-      // of crdb_cluster_health). Return a single, unambiguous directive.
+      // output that causes the LLM to follow the wrong branch.
       result = {
         success: false,
         simulated: false,
@@ -478,6 +482,26 @@ server.registerTool(
     },
   },
   async ({ sql, database }) => {
+    // Enforce read-only access: only SELECT, SHOW, and EXPLAIN are permitted.
+    // The crdb_query tool is intentionally diagnostic-only; mutations must go
+    // through dedicated repair tools with proper approval gates.
+    const trimmedSql = sql.trimStart().toLowerCase();
+    const isReadOnly =
+      trimmedSql.startsWith("select") ||
+      trimmedSql.startsWith("show") ||
+      trimmedSql.startsWith("explain");
+    if (!isReadOnly) {
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            success: false,
+            error: `crdb_query is read-only. Only SELECT, SHOW, and EXPLAIN are permitted. ` +
+              `Received: "${sql.slice(0, 80)}". Use a dedicated repair tool for write operations.`,
+          }),
+        }],
+      };
+    }
     const result = await crdbMcp.query(sql, database ?? "defaultdb");
     return { content: [{ type: "text", text: JSON.stringify(result) }] };
   },

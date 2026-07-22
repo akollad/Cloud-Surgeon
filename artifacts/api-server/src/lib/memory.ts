@@ -205,28 +205,37 @@ export async function findSimilarIncident(embedding: number[]): Promise<{
   distance: number;
   outcomeSuccess: boolean;
 } | undefined> {
-  const literal = `[${embedding.join(",")}]`;
-  const rows = await db.execute<{
-    error_message_text: string;
-    strategy_name: string;
-    outcome_success: boolean;
-    distance: number;
-  }>(sql`
-    SELECT error_message_text, strategy_name, outcome_success,
-           embedding <=> ${literal}::vector AS distance
-    FROM incident_vectors
-    ORDER BY embedding <=> ${literal}::vector
-    LIMIT 1
-  `);
-  const row = rows.rows[0];
-  return row
-    ? {
-        errorMessageText: row.error_message_text,
-        strategyName: row.strategy_name,
-        outcomeSuccess: Boolean(row.outcome_success),
-        distance: Number(row.distance),
-      }
-    : undefined;
+  // Wrapped in try/catch: a dimension mismatch between the embedding vector and the
+  // DB column (e.g. after changing embedding models) throws a CockroachDB SQL error
+  // rather than returning an empty result. Without this guard, the routing phase
+  // crashes entirely instead of gracefully falling back to PENDING_APPROVAL.
+  try {
+    const literal = `[${embedding.join(",")}]`;
+    const rows = await db.execute<{
+      error_message_text: string;
+      strategy_name: string;
+      outcome_success: boolean;
+      distance: number;
+    }>(sql`
+      SELECT error_message_text, strategy_name, outcome_success,
+             embedding <=> ${literal}::vector AS distance
+      FROM incident_vectors
+      ORDER BY embedding <=> ${literal}::vector
+      LIMIT 1
+    `);
+    const row = rows.rows[0];
+    return row
+      ? {
+          errorMessageText: row.error_message_text,
+          strategyName: row.strategy_name,
+          outcomeSuccess: Boolean(row.outcome_success),
+          distance: Number(row.distance),
+        }
+      : undefined;
+  } catch {
+    // Non-fatal: routing falls back to PENDING_APPROVAL when no RAG hit is available.
+    return undefined;
+  }
 }
 
 // ── Incident storm detection ──────────────────────────────────────────────

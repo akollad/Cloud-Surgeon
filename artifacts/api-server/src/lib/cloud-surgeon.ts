@@ -457,7 +457,7 @@ export async function runAgentLoop(
     });
 
     current = await persistWithChaosRetry(incident.incidentId, "DIAGNOSING", "AGENT_TURN_0", context, chaos, 0);
-    await releaseIncidentClaim(incident.incidentId);
+    await releaseIncidentClaim(incident.incidentId, "diagnostician");
 
     if (simulateCrash && startTurn === 0) {
       context.crashed = true;
@@ -649,7 +649,7 @@ export async function runAgentLoop(
     });
 
     current = await persistWithChaosRetry(incident.incidentId, "REPAIRING", "AGENT_TURN_1", context, chaos, 1);
-    await releaseIncidentClaim(incident.incidentId);
+    await releaseIncidentClaim(incident.incidentId, "remediator");
   }
 
   // ════════════════════════════════════════════════════════════
@@ -723,7 +723,7 @@ export async function runAgentLoop(
       incident.incidentId, finalStatus, "FINALIZED", context, chaos, 2,
       { resolvedAt: new Date(), ruConsumed: estimateRuConsumed(context.turns.length) },
     );
-    await releaseIncidentClaim(incident.incidentId);
+    await releaseIncidentClaim(incident.incidentId, "auditor");
 
     // Feed Layer 1 with the actual result — auto-calibrates the strategy immediately
     const { embedding: resolvedEmbedding } = await generateEmbedding(`${alertText} | strategy:${strategyName}`);

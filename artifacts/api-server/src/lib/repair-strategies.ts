@@ -510,15 +510,20 @@ export async function generateAndStoreRollbackPlan(
   const execLabel = toolFailed ? "ATTEMPTED (failed)" : "Action executed";
 
   const commandsExecuted: string[] = [];
-  if (toolOutput.action) commandsExecuted.push(`${execLabel}: ${toolOutput.action}`);
+  // AwsToolResult uses `actionTaken`; crdb_skill_repair also returns `actionTaken`.
+  // The old code read `toolOutput.action` which never exists in either output type,
+  // causing commandsExecuted to always fall through to the generic fallback.
+  if (toolOutput.actionTaken) commandsExecuted.push(`${execLabel}: ${toolOutput.actionTaken}`);
   if (toolOutput.serviceName) commandsExecuted.push(`Target service: ${toolOutput.serviceName}`);
-  if (toolOutput.steps && Array.isArray(toolOutput.steps)) {
-    for (const step of (toolOutput.steps as unknown[]).slice(0, 5)) {
-      commandsExecuted.push(`• ${String(step).slice(0, 150)}`);
+  // CRDB skill repair returns `actionsApplied` (string[]) — use it for detail lines.
+  if (toolOutput.actionsApplied && Array.isArray(toolOutput.actionsApplied)) {
+    for (const applied of (toolOutput.actionsApplied as unknown[]).slice(0, 5)) {
+      commandsExecuted.push(`• ${String(applied).slice(0, 150)}`);
     }
-  } else if (toolOutput.detail) {
-    commandsExecuted.push(`Detail: ${String(toolOutput.detail).slice(0, 200)}`);
   }
+  // AWS results use `recommendation`; CRDB results use `outcome` — prefer whichever exists.
+  const detail = toolOutput.recommendation ?? toolOutput.outcome;
+  if (detail) commandsExecuted.push(`Detail: ${String(detail).slice(0, 200)}`);
   if (commandsExecuted.length === 0) {
     const fallbackLabel = toolFailed ? "ATTEMPTED (failed)" : "Executed";
     commandsExecuted.push(`${fallbackLabel}: aws_repair_service(strategy=${strategyName}, service=${preRepairState.serviceName ?? "auto-detected"})`);
