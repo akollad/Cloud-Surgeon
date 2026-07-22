@@ -456,11 +456,6 @@ export async function rollbackEcsService(
   if (!hasCredentials()) return noCredentialsResult("ecs");
   const client = new ECSClient({ region: region() });
   try {
-    const updateInput: Parameters<typeof client.send>[0] extends { input: infer I } ? I : never =
-      previousTaskDefinition
-        ? { cluster, service, taskDefinition: previousTaskDefinition, forceNewDeployment: true }
-        : { cluster, service, forceNewDeployment: true };
-
     await client.send(new UpdateServiceCommand(
       previousTaskDefinition
         ? { cluster, service, taskDefinition: previousTaskDefinition, forceNewDeployment: true }

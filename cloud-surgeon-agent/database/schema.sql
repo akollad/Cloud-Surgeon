@@ -224,6 +224,18 @@ CREATE INDEX IF NOT EXISTS idx_playbooks_strategy
     ON playbooks (strategy_name);
 
 -- ----------------------------------------------------------------------------
+-- Migration: add ROLLED_BACK to the incident_state.status CHECK constraint.
+-- Required by runRollbackLoop() in cloud-surgeon.ts which sets status = 'ROLLED_BACK'
+-- on a successful rollback. Without this, the UPDATE fails with a CHECK violation.
+-- ----------------------------------------------------------------------------
+ALTER TABLE incident_state DROP CONSTRAINT IF EXISTS incident_state_status_check;
+ALTER TABLE incident_state
+    ADD CONSTRAINT incident_state_status_check
+    CHECK (status IN ('TRIGGERED', 'DIAGNOSING', 'REPAIRING',
+                      'RESOLVED', 'FAILED', 'PENDING_APPROVAL',
+                      'ROLLED_BACK'));
+
+-- ----------------------------------------------------------------------------
 -- CDC changefeed token authentication
 --
 -- When CDC_WEBHOOK_SECRET is set, the changefeed sink URL includes

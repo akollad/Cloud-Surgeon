@@ -648,6 +648,36 @@ export async function runAgentLoop(
       toolName: remediatorToolName, toolInput, toolOutput,
     });
 
+    // If the repair tool itself requires human sign-off (e.g. RDS parameter group
+    // change that needs a reboot confirmation), escalate to PENDING_APPROVAL before
+    // the Auditor auto-resolves the incident. The repair action has already been
+    // applied; the hold prevents auto-closure without operator review.
+    // Exception: if the incident was already human-approved, let it proceed to the
+    // Auditor — the operator already gave sign-off.
+    const wasHumanApprovedForRemediation =
+      (context as Record<string, unknown>).originalRoutingMode === "PENDING_APPROVAL" &&
+      context.routingMode === "AUTONOMOUS";
+    if (
+      (toolOutput as Record<string, unknown>).approvalRequired === true &&
+      !wasHumanApprovedForRemediation
+    ) {
+      context.routingMode = "PENDING_APPROVAL";
+      (context as Record<string, unknown>).approvalRequiredReason =
+        `Repair tool '${remediatorToolName}' applied a change that requires human verification ` +
+        `before the incident can be closed (approvalRequired=true). ` +
+        `Review the repair output and approve or reject via the dashboard.`;
+      await logAgentHandoff(
+        incident.incidentId, "remediator", "PENDING_APPROVAL",
+        `Repair applied but requires human verification — escalating to PENDING_APPROVAL. ` +
+        `Strategy: '${strategyName}'. Review the execution log and approve or reject.`,
+      );
+      current = await persistWithChaosRetry(
+        incident.incidentId, "PENDING_APPROVAL", "AWAITING_REPAIR_APPROVAL", context, chaos, 1,
+      );
+      await releaseIncidentClaim(incident.incidentId, "remediator");
+      return current;
+    }
+
     current = await persistWithChaosRetry(incident.incidentId, "REPAIRING", "AGENT_TURN_1", context, chaos, 1);
     await releaseIncidentClaim(incident.incidentId, "remediator");
   }
