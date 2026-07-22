@@ -503,13 +503,16 @@ export async function runAgentLoop(
             // Show the actual reason PENDING_APPROVAL was chosen, not a generic "low confidence".
             // effectiveWinRate = rawWinRate × correctionFactor and can exceed 1.0 when the
             // strategy outperforms its prediction — cap the displayed value at 100%.
-            const cappedPct = Math.min(effectiveWinRate * 100, 100).toFixed(0);
+            // Use Math.floor instead of toFixed(0) rounding so a value like 79.9%
+            // never displays as "80%" — which would produce the paradoxical message
+            // "effective win-rate 80% below the 80% autonomous threshold".
+            const displayPct = Math.floor(Math.min(effectiveWinRate * 100, 100));
             const pendingReason =
               winRateResult.count < 3
                 ? `only ${winRateResult.count} sample(s) in memory — ${3 - winRateResult.count} more needed to unlock autonomous mode`
-                : `effective win-rate ${cappedPct}% below the 80% autonomous threshold`;
+                : `effective win-rate ${displayPct}% below the 80% autonomous threshold`;
             return ragHit
-              ? `RAG distance: ${ragHit.distance.toFixed(3)}, ${pendingReason} (raw win-rate: ${(winRateResult.winRate * 100).toFixed(0)}%, correction: ×${correctionFactor.toFixed(2)}, ${winRateResult.count} sample(s))`
+              ? `RAG distance: ${ragHit.distance.toFixed(3)}, ${pendingReason} (raw win-rate: ${Math.floor(winRateResult.winRate * 100)}%, correction: ×${correctionFactor.toFixed(2)}, ${winRateResult.count} sample(s))`
               : `no RAG match — ${pendingReason}`;
           })();
       await logAgentHandoff(
