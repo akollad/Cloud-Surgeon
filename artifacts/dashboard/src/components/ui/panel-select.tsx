@@ -1,9 +1,9 @@
 /**
- * PanelSelect — composant réutilisable pour les selects du panneau Controls.
+ * PanelSelect — reusable select component for the Controls panel.
  *
- * Le dropdown est rendu via un portail au niveau du <body> pour échapper
- * à l'overflow:hidden du sidebar. Sa position est calculée depuis le rect
- * du bouton trigger.
+ * The dropdown is rendered via a portal at the <body> level to escape
+ * the sidebar's overflow:hidden. Its position is computed from the
+ * trigger button's bounding rect.
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";

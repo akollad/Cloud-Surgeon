@@ -215,7 +215,7 @@ export default function LiveDiagnostic() {
                 ev.type === "heartbeat"       ? "hsl(var(--muted-foreground))" :
                 "hsl(var(--muted-foreground))";
 
-              /* heartbeat — ligne pulse discrète */
+              /* heartbeat — subtle pulse line */
               if (ev.type === "heartbeat") {
                 return (
                   <div key={i} className="flex items-center gap-2 py-0.5 opacity-30 animate-in fade-in duration-500">

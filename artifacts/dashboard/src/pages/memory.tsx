@@ -35,7 +35,7 @@ export default function StrategyMemory() {
         <div className="flex items-center gap-3">
           {allRates.length > 0 && (
             <span className="text-[11px] font-mono text-muted-foreground hidden sm:block">
-              {allRates.length} stratégie{allRates.length !== 1 ? "s" : ""}
+              {allRates.length} strateg{allRates.length !== 1 ? "ies" : "y"}
             </span>
           )}
           <Button

@@ -53,7 +53,7 @@ export function Paginator({ page, totalPages, totalItems, pageSize, onPage }: Pa
           onClick={() => onPage(page - 1)}
           disabled={page === 1}
           className={btn(page === 1)}
-          aria-label="Page précédente"
+          aria-label="Previous page"
         >
           <ChevronLeft className="w-3.5 h-3.5" />
         </button>
@@ -86,7 +86,7 @@ export function Paginator({ page, totalPages, totalItems, pageSize, onPage }: Pa
           onClick={() => onPage(page + 1)}
           disabled={page === totalPages}
           className={btn(page === totalPages)}
-          aria-label="Page suivante"
+          aria-label="Next page"
         >
           <ChevronRight className="w-3.5 h-3.5" />
         </button>

@@ -308,7 +308,7 @@ graph TB
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/<your-github-username>/cloud-surgeon.git
+git clone https://github.com/akollad/Cloud-Surgeon.git
 cd cloud-surgeon
 
 # Node dependencies (all workspaces)

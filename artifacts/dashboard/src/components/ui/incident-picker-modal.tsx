@@ -1,12 +1,12 @@
 /**
- * IncidentPickerModal — composant réutilisable pour sélectionner un incident.
+ * IncidentPickerModal — reusable component for selecting an incident.
  *
- * Fonctionnalités :
- * - Overlay plein écran avec backdrop blur (style Decision Trace)
- * - Recherche par fingerprint, ID ou status
- * - Pagination côté client (8 incidents par page)
- * - Fermeture : bouton ×, touche Escape, clic en dehors
- * - Animation d'entrée / sortie fluide
+ * Features:
+ * - Full-screen overlay with backdrop blur (Decision Trace style)
+ * - Search by fingerprint, ID or status
+ * - Client-side pagination (8 incidents per page)
+ * - Close: × button, Escape key, click outside
+ * - Smooth enter / exit animation
  */
 
 import { useState, useEffect, useRef, type KeyboardEvent } from "react";
