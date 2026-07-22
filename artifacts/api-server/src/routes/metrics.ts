@@ -78,6 +78,7 @@ router.get("/metrics/impact", async (_req, res): Promise<void> => {
     mttr_min_seconds: string | null;
     mttr_max_seconds: string | null;
     outlier_count: string;
+    human_wait_avg_seconds: string | null;
     total_ru_consumed: string;
     avg_ru_per_incident: string | null;
     autonomous_count: string;
@@ -93,25 +94,57 @@ router.get("/metrics/impact", async (_req, res): Promise<void> => {
       COUNT(*) FILTER (WHERE status NOT IN (
         'RESOLVED','FAILED','PENDING_APPROVAL'))                        AS incidents_active,
 
-      -- MTTR in seconds — only incidents resolved within 30 min (1800 s).
-      -- Incidents exceeding this threshold are stuck incidents (agent crash, server
-      -- restart) whose wall-clock time includes hours of idle wait, not agent work.
-      -- They are counted separately as outlier_count for transparency.
-      ROUND(AVG(EXTRACT(EPOCH FROM (resolved_at - triggered_at)))
-        FILTER (WHERE status IN ('RESOLVED','FAILED')
+      -- Agent MTTR: from when the agent actually started Phase 1 to resolution.
+      -- For human-approved incidents, context_json->>'agentStartedAt' is set at the
+      -- moment the remediator begins, AFTER the operator review window. This gives
+      -- true agent execution time, excluding human decision latency.
+      -- Falls back to triggered_at for pre-fix incidents that have no agentStartedAt.
+      -- Incidents whose wall-clock time exceeds 30 min are excluded as outliers.
+      ROUND(AVG(
+        EXTRACT(EPOCH FROM (resolved_at -
+          COALESCE(
+            NULLIF(context_json->>'agentStartedAt', '')::TIMESTAMPTZ,
+            triggered_at
+          )
+        ))
+      ) FILTER (WHERE status IN ('RESOLVED','FAILED')
           AND resolved_at IS NOT NULL AND triggered_at IS NOT NULL
           AND EXTRACT(EPOCH FROM (resolved_at - triggered_at)) <= 1800), 2) AS mttr_avg_seconds,
-      ROUND(MIN(EXTRACT(EPOCH FROM (resolved_at - triggered_at)))
-        FILTER (WHERE status IN ('RESOLVED','FAILED')
+      ROUND(MIN(
+        EXTRACT(EPOCH FROM (resolved_at -
+          COALESCE(
+            NULLIF(context_json->>'agentStartedAt', '')::TIMESTAMPTZ,
+            triggered_at
+          )
+        ))
+      ) FILTER (WHERE status IN ('RESOLVED','FAILED')
           AND resolved_at IS NOT NULL AND triggered_at IS NOT NULL
           AND EXTRACT(EPOCH FROM (resolved_at - triggered_at)) <= 1800), 2) AS mttr_min_seconds,
-      ROUND(MAX(EXTRACT(EPOCH FROM (resolved_at - triggered_at)))
-        FILTER (WHERE status IN ('RESOLVED','FAILED')
+      ROUND(MAX(
+        EXTRACT(EPOCH FROM (resolved_at -
+          COALESCE(
+            NULLIF(context_json->>'agentStartedAt', '')::TIMESTAMPTZ,
+            triggered_at
+          )
+        ))
+      ) FILTER (WHERE status IN ('RESOLVED','FAILED')
           AND resolved_at IS NOT NULL AND triggered_at IS NOT NULL
           AND EXTRACT(EPOCH FROM (resolved_at - triggered_at)) <= 1800), 2) AS mttr_max_seconds,
       COUNT(*) FILTER (WHERE status IN ('RESOLVED','FAILED')
           AND resolved_at IS NOT NULL AND triggered_at IS NOT NULL
           AND EXTRACT(EPOCH FROM (resolved_at - triggered_at)) > 1800)        AS outlier_count,
+
+      -- Average human review wait time across all PENDING_APPROVAL incidents that
+      -- were subsequently approved (i.e. have agentStartedAt). This is the operator
+      -- decision latency that autonomous mode eliminates entirely.
+      ROUND(AVG(
+        EXTRACT(EPOCH FROM (
+          NULLIF(context_json->>'agentStartedAt', '')::TIMESTAMPTZ - triggered_at
+        ))
+      ) FILTER (WHERE context_json->>'agentStartedAt' IS NOT NULL
+          AND context_json->>'originalRoutingMode' = 'PENDING_APPROVAL'
+          AND status IN ('RESOLVED','FAILED')
+          AND resolved_at IS NOT NULL), 2) AS human_wait_avg_seconds,
 
       -- CockroachDB cost in RU
       COALESCE(SUM(ru_consumed), 0)                                    AS total_ru_consumed,
@@ -186,9 +219,13 @@ router.get("/metrics/impact", async (_req, res): Promise<void> => {
       humanBaselineSeconds: HUMAN_BASELINE_MTTR_SECONDS,
       reductionPct: mttrReductionPct,
       outlierCount: Number(g.outlier_count ?? 0),
+      // Average time operators spent reviewing before approving a PENDING_APPROVAL incident.
+      // This is the decision latency that full autonomous mode eliminates entirely.
+      humanWaitAvgSeconds: g.human_wait_avg_seconds != null ? Number(g.human_wait_avg_seconds) : null,
       source:
-        "Real measurement (resolved_at − triggered_at) on RESOLVED/FAILED incidents. " +
-        "Incidents resolved in > 30 min are excluded as stuck-incident outliers (server crash/restart) " +
+        "Agent MTTR = resolved_at − agentStartedAt (Phase-1 start, excludes human review window). " +
+        "Falls back to resolved_at − triggered_at for incidents predating the agentStartedAt field. " +
+        "Incidents whose wall-clock time exceeds 30 min are excluded as outliers (server crash/restart) " +
         "and counted separately in outlierCount.",
     },
 

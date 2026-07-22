@@ -92,7 +92,7 @@ type AnyEvent =
   | { kind: "handoff";    ts: string; h: any }
   | { kind: "log";        ts: string; l: any }
   | { kind: "transition"; ts: string; reason: TransitionReason; fromMode: string; toMode: string; agentName: string }
-  | { kind: "resolve";    ts: string; status: string; mttrMs: number | null; verdict?: string };
+  | { kind: "resolve";    ts: string; status: string; mttrMs: number | null; humanWaitMs: number | null; verdict?: string };
 
 function inferTransitionReason(autonomousNote: string): TransitionReason {
   // PENDING_APPROVAL → AUTONOMOUS requires an explicit human /approve call —
@@ -168,16 +168,31 @@ function mergeEvents(incident: any, logs: any[], handoffs: any[]): AnyEvent[] {
   const terminal = ["RESOLVED", "FAILED", "PENDING_APPROVAL"];
   if (incident.resolvedAt || terminal.includes(incident.status)) {
     const ts = incident.resolvedAt ?? incident.updatedAt;
-    const mttrMs = incident.resolvedAt
-      ? new Date(incident.resolvedAt).getTime() - new Date(triggerTs).getTime()
+
+    // agentStartedAt is stored in contextJson when Phase 1 (remediator) begins.
+    // For human-approved incidents this is AFTER the operator review window, so
+    // we can separate "agent execution time" from "human wait time".
+    const agentStartedAt = (incident.contextJson as any)?.agentStartedAt as string | undefined;
+
+    const agentMttrMs = incident.resolvedAt
+      ? new Date(incident.resolvedAt).getTime() -
+        new Date(agentStartedAt ?? triggerTs).getTime()
       : null;
+
+    // Human wait = time between trigger and when the agent was finally allowed to act.
+    // Only meaningful when agentStartedAt was set AND it's clearly a review delay (>5s).
+    const humanWaitMs =
+      agentStartedAt && incident.resolvedAt
+        ? new Date(agentStartedAt).getTime() - new Date(triggerTs).getTime()
+        : null;
+
     // Extract verdict from last verify_resolution log if present.
     const verifyLog = sortedLogs.findLast((l: any) => {
       try { return JSON.parse(l.result ?? "{}").verdict; } catch { return false; }
     });
     let verdict: string | undefined;
     try { verdict = verifyLog ? JSON.parse(verifyLog.result).verdict : undefined; } catch {}
-    r.push({ kind: "resolve", ts, status: incident.status, mttrMs, verdict });
+    r.push({ kind: "resolve", ts, status: incident.status, mttrMs: agentMttrMs, humanWaitMs, verdict });
   }
 
   return r;
@@ -427,6 +442,11 @@ function ResolveEvent({ ev }: { ev: Extract<AnyEvent, { kind: "resolve" }> }) {
           {ev.mttrMs != null && (
             <span className="font-mono text-[10px] text-muted-foreground">
               MTTR: <span className="text-emerald-400 font-bold">{fmtMttr(ev.mttrMs)}</span>
+              {ev.humanWaitMs != null && ev.humanWaitMs > 5000 && (
+                <span className="text-amber-400/70 ml-1">
+                  (+ {fmtMttr(ev.humanWaitMs)} human review)
+                </span>
+              )}
             </span>
           )}
         </div>

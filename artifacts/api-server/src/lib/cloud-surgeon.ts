@@ -539,17 +539,31 @@ export async function runAgentLoop(
     if (!claimed) return current;
 
     const routingMode = context.routingMode ?? "EXPLORATORY";
+    // An incident that started as PENDING_APPROVAL and was approved by a human will
+    // have originalRoutingMode="PENDING_APPROVAL" and routingMode="AUTONOMOUS".
+    // Saying "High confidence from memory — acting autonomously" in that situation is
+    // factually wrong: a human was required precisely because confidence was insufficient.
+    const wasHumanApproved =
+      (context as Record<string, unknown>).originalRoutingMode === "PENDING_APPROVAL" &&
+      routingMode === "AUTONOMOUS";
     await logAgentHandoff(
       incident.incidentId,
       "remediator",
       routingMode,
       `Applying strategy '${strategyName}' in ${routingMode} mode. ` +
-        (routingMode === "EXPLORATORY"
-          ? "Unknown strategy — extended diagnostic mode active."
-          : routingMode === "AUTONOMOUS"
-            ? "High confidence from memory — acting autonomously."
-            : "Human-approved — proceeding with remediation."),
+        (wasHumanApproved
+          ? "Human-approved — proceeding with remediation."
+          : routingMode === "EXPLORATORY"
+            ? "Unknown strategy — extended diagnostic mode active."
+            : routingMode === "AUTONOMOUS"
+              ? "High confidence from memory — acting autonomously."
+              : "Human-approved — proceeding with remediation."),
     );
+
+    // Record when the agent actually started Phase 1. For human-approved incidents this
+    // is AFTER the operator review window, so downstream consumers can compute true
+    // agent execution time (resolved_at − agentStartedAt) separate from human wait time.
+    (context as Record<string, unknown>).agentStartedAt = new Date().toISOString();
 
     // Use the service name the diagnostician actually resolved against the live cluster
     // (stored in its toolInput from Phase 0). Re-running detectServiceName() on the raw
