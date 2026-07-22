@@ -103,7 +103,7 @@ Cloud-Surgeon, lui, ne dort jamais."**
 👉 **Aller sur IMPACT & COST**
 
 > *"Côté AWS, Cloud-Surgeon utilise :*
-> *— Amazon Bedrock (Claude via Nova Lite) pour le raisonnement des agents*
+> *— Amazon Bedrock (Mistral Large 3 via bedrock-mantle, Nova Lite en fallback automatique) pour le raisonnement des agents*
 > *— ECS Fargate comme cible de réparation live*
 > *— CloudWatch + SNS pour l'ingestion d'alertes*
 > *— RDS et Lambda comme autres surfaces de remédiation*
