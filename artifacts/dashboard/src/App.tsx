@@ -5,6 +5,7 @@ import NotFound from '@/pages/not-found';
 import { Route, Switch, Router as WouterRouter } from 'wouter';
 import { Shell } from '@/components/layout/Shell';
 import { LoginGate } from '@/components/LoginGate';
+import { SoundNotificationsProvider } from '@/components/SoundNotificationsProvider';
 
 import JudgeGuide from '@/pages/guide';
 import LiveDiagnostic from '@/pages/live';
@@ -40,14 +41,16 @@ function Router() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <LoginGate>
-          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
-            <Router />
-          </WouterRouter>
-        </LoginGate>
-        <Toaster />
-      </TooltipProvider>
+      <SoundNotificationsProvider>
+        <TooltipProvider>
+          <LoginGate>
+            <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
+              <Router />
+            </WouterRouter>
+          </LoginGate>
+          <Toaster />
+        </TooltipProvider>
+      </SoundNotificationsProvider>
     </QueryClientProvider>
   );
 }

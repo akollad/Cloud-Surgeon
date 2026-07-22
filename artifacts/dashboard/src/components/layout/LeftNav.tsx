@@ -1,8 +1,9 @@
 import { Link, useLocation } from "wouter";
-import { Activity, Zap, GitCommit, List, BarChart2, ShieldAlert, BookOpen, Terminal, GitBranch, X, ChevronLeft, ChevronRight } from "lucide-react";
+import { Activity, Zap, GitCommit, List, BarChart2, ShieldAlert, BookOpen, Terminal, GitBranch, X, ChevronLeft, ChevronRight, Volume2, VolumeX } from "lucide-react";
 import { useHealthCheck } from "@workspace/api-client-react";
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/brand";
+import { useSoundContext } from "@/components/SoundNotificationsProvider";
 
 const navItems = [
   { href: "/",            label: "Guide",             icon: BookOpen,   prefix: false },
@@ -26,6 +27,7 @@ interface LeftNavProps {
 export function LeftNav({ open, onClose, collapsed, onToggleCollapse }: LeftNavProps) {
   const [location] = useLocation();
   const { data: health } = useHealthCheck(undefined, { query: { refetchInterval: 5000 } });
+  const { muted, toggle: toggleSound } = useSoundContext();
 
   return (
     <nav
@@ -130,26 +132,45 @@ export function LeftNav({ open, onClose, collapsed, onToggleCollapse }: LeftNavP
       {/* ── Footer ───────────────────────────────────────────────────────── */}
       <div className={cn(
         "border-t border-sidebar-border/50 flex items-center",
-        collapsed ? "py-3 justify-center" : "px-4 py-3 justify-between"
+        collapsed ? "py-3 flex-col gap-2 justify-center" : "px-4 py-3 justify-between"
       )}>
         {!collapsed && (
           <p className="text-[9px] font-mono text-sidebar-foreground/60 uppercase tracking-widest truncate">
             CockroachDB × AWS 2026
           </p>
         )}
-        {/* Desktop-only collapse button */}
-        <button
-          onClick={onToggleCollapse}
-          className="hidden md:flex items-center justify-center w-6 h-6 rounded-sm
-                     text-sidebar-foreground/40 hover:text-sidebar-foreground
-                     hover:bg-white/10 transition-colors shrink-0"
-          aria-label={collapsed ? "Expand navigation" : "Collapse navigation"}
-        >
-          {collapsed
-            ? <ChevronRight className="w-3.5 h-3.5" />
-            : <ChevronLeft  className="w-3.5 h-3.5" />
-          }
-        </button>
+        <div className="flex items-center gap-1">
+          {/* Sound mute toggle */}
+          <button
+            onClick={toggleSound}
+            title={muted ? "Unmute notifications" : "Mute notifications"}
+            className={cn(
+              "flex items-center justify-center w-6 h-6 rounded-sm transition-colors shrink-0",
+              muted
+                ? "text-sidebar-foreground/25 hover:text-sidebar-foreground/60 hover:bg-white/10"
+                : "text-sidebar-foreground/40 hover:text-sidebar-foreground hover:bg-white/10"
+            )}
+            aria-label={muted ? "Unmute sound notifications" : "Mute sound notifications"}
+          >
+            {muted
+              ? <VolumeX className="w-3.5 h-3.5" />
+              : <Volume2  className="w-3.5 h-3.5" />
+            }
+          </button>
+          {/* Desktop-only collapse button */}
+          <button
+            onClick={onToggleCollapse}
+            className="hidden md:flex items-center justify-center w-6 h-6 rounded-sm
+                       text-sidebar-foreground/40 hover:text-sidebar-foreground
+                       hover:bg-white/10 transition-colors shrink-0"
+            aria-label={collapsed ? "Expand navigation" : "Collapse navigation"}
+          >
+            {collapsed
+              ? <ChevronRight className="w-3.5 h-3.5" />
+              : <ChevronLeft  className="w-3.5 h-3.5" />
+            }
+          </button>
+        </div>
       </div>
     </nav>
   );
