@@ -1,148 +1,179 @@
 # Cloud-Surgeon — Demo Script
-**Durée cible : 2 min 30 sec**  
-**Outil : screen recording du dashboard live**
+**Target duration: 2 min 30 sec**
+**Format: screen recording of the live dashboard — NO terminal needed. Every action is done through the dashboard UI.**
 
 ---
 
-## SETUP avant de commencer
-- Ouvre le dashboard : `/dashboard/`
-- Panneau droit visible (Controls)
-- Onglet **GUIDE** actif
-- Scénario sélectionné : **"ECS service checkout: payment 5xx spike"**
+## PRE-RECORDING SETUP (do this before hitting record)
+
+1. Open the dashboard in your browser: `https://<your-replit-url>/dashboard/`
+2. Log in with your `DASHBOARD_PASSWORD`
+3. Make sure the **right-side Controls panel is visible** (click the sliders icon on mobile, or expand it on desktop)
+4. Navigate to the **Guide** page (first item in the left nav) — this is your starting screen
+5. In the Controls panel (right side):
+   - Set **Scenario** dropdown to → `"ECS service checkout: payment 5xx spike"`
+   - Set **Chaos Engineering** dropdown to → `"None"`
+6. Verify the **API Online** green dot is visible in the top-left of the left nav
+7. Open a second browser tab at the same URL — you'll use it to quickly switch pages during recording
 
 ---
 
-## [0:00 – 0:20] — LE PROBLÈME
+## [0:00 – 0:18] — OPENING
 
-> *Narration (voix ou texte à l'écran) :*
+**What's on screen:** Guide page. Left nav shows "API Online" in green. Right Controls panel is visible.
 
-**"Il est 2h du matin. Ton service de paiement est en train de tomber.
-Chaque seconde coûte de l'argent. Personne n'est réveillé.
-Cloud-Surgeon, lui, ne dort jamais."**
+> 🎙️ *"It's 2 AM. Your payment service is going down. Every second costs money. Nobody is awake. Cloud-Surgeon never sleeps."*
 
-👉 **Montre le dashboard — "API ONLINE" en vert en haut à gauche.**
+> 🎙️ *"Cloud-Surgeon is an autonomous AI DevOps agent. It detects, diagnoses, and repairs AWS infrastructure incidents — with no human intervention — using CockroachDB as its persistent memory and decision engine."*
 
-> *"Cloud-Surgeon est un agent DevOps autonome.
-> Il détecte, diagnostique, et répare les incidents AWS —
-> sans intervention humaine — grâce à CockroachDB comme mémoire persistante."*
+**👉 HOLD on the Guide page for the full 18 seconds. Let the narration play over the dashboard.**
 
 ---
 
-## [0:20 – 1:00] — SCÉNARIO A : RÉSOLUTION AUTONOME (haute confiance)
+## [0:18 – 0:22] — TRIGGER INCIDENT (Scenario A)
 
-> *"Scénario 1 : l'agent reconnaît l'incident depuis sa mémoire vectorielle."*
+**What to do:**
+1. In the **Controls panel** (right side), confirm the Scenario dropdown shows → `"ECS service checkout: payment 5xx spike"`
+2. Confirm Chaos Engineering is set to → `"None"`
+3. Click **"Trigger Agent"** button
 
-**Actions à l'écran :**
+> 🎙️ *"Scenario one: an ECS payment service is throwing 5xx errors. We trigger the agent."*
 
-1. Panneau droit → **SCENARIO** : sélectionner **"ECS service checkout: payment 5xx spike"**
-2. Cliquer **TRIGGER AGENT**
-3. Aller immédiatement sur **LIVE DIAGNOSTIC** dans le menu gauche
-
-> *"Le Diagnosticien interroge CloudWatch, consulte l'état ECS,
-> puis effectue une recherche vectorielle dans CockroachDB —
-> il cherche dans la mémoire les incidents similaires passés."*
-
-4. Montrer les logs qui défilent en temps réel
-
-> *"Il trouve une correspondance : 'ECS Fargate Redeploy' — win-rate 92%.
-> Confiance suffisante : le Remediateur agit sans demander d'approbation."*
-
-5. Aller sur **DECISION TRACE**
-
-> *"Voici la trace de décision complète : le vecteur de l'incident,
-> la stratégie sélectionnée, et le raisonnement de chaque agent —
-> tout est persisté transactionnellement dans CockroachDB."*
+**👉 You will see a toast notification appear: "Incident Triggered · [incident-id]"**
 
 ---
 
-## [1:00 – 1:30] — LA MÉMOIRE COCKROACHDB
+## [0:22 – 0:55] — LIVE DIAGNOSTIC (watching the agent work)
 
-👉 **Cliquer sur STRATEGY MEMORY dans le menu gauche**
+**What to do:**
+1. Immediately click **"Live Diagnostic"** in the left navigation menu
+2. You will see the incident card appear on screen — it starts as **TRIGGERED** (red border, pulsing)
+3. Watch as it transitions: `TRIGGERED → DIAGNOSING → REPAIRING`
+4. The CDC Audit Stream at the bottom will start scrolling real-time logs
 
-> *"CockroachDB n'est pas juste la base de données — c'est le cerveau du système.*
->
-> *Quatre couches de mémoire :*
-> *— Vecteurs VECTOR(1024) avec index C-SPANN pour le RAG*
-> *— État JSONB transactionnel pour la résilience aux crashes*
-> *— CDC (Change Data Capture) pour streamer les événements en temps réel*
-> *— MCP Server de CockroachDB Cloud pour les diagnostics live du cluster"*
+> 🎙️ *"The Diagnostician agent queries CloudWatch, inspects the ECS service state, then runs a vector similarity search in CockroachDB — looking for past incidents that match this pattern."*
 
-👉 **Cliquer sur CALIBRATION**
+**👉 Pause on the log stream scrolling. Let the judges see the real-time events.**
 
-> *"Et après chaque incident, l'Auditeur recalibre les win-rates.
-> Si la prédiction s'écarte de la réalité de plus de 15%,
-> le multiplicateur est ajusté automatiquement.
-> Le système apprend de chaque intervention."*
+> 🎙️ *"It finds a match: 'ECS Fargate Redeploy' — 92% win rate. Confidence is high enough. The Remediator acts autonomously, no human approval needed."*
+
+**👉 Watch the incident card flash green when it reaches RESOLVED.**
 
 ---
 
-## [1:30 – 2:00] — SCÉNARIO B : CRASH RESILIENCE (Chaos Engineering)
+## [0:55 – 1:10] — DECISION TRACE
 
-> *"Maintenant, une démo de résilience aux crashes."*
+**What to do:**
+1. Click **"Decision Trace"** in the left navigation menu
+2. Select the incident that just resolved from the dropdown at the top
 
-**Actions à l'écran :**
+> 🎙️ *"Here is the full decision trace: the incident vector, the strategy selected, the win rate from CockroachDB memory, and the reasoning of each agent — all committed transactionally to CockroachDB."*
 
-1. Retourner sur **GUIDE** → section **Scenario C: Chaos / Crash Recovery**
-2. Panneau droit → **CHAOS ENGINEERING** → sélectionner **"SIGKILL mid-repair"**
-3. Cliquer **TRIGGER AGENT** pour démarrer une réparation
-4. Attendre 5 secondes → déclencher le chaos (SIGKILL)
-
-> *"On vient de tuer le serveur en pleine réparation —
-> exactement comme un crash en production."*
-
-5. L'API redémarre automatiquement — montrer **"API ONLINE"** revenir en vert
-
-> *"À la reconnexion, l'agent reprend exactement là où il s'est arrêté.
-> Pas de perte d'état. Pas de double exécution.
-> C'est possible grâce aux transactions SERIALIZABLE de CockroachDB."*
+**👉 Scroll slowly through the trace so the judges can read the agent reasoning steps.**
 
 ---
 
-## [2:00 – 2:20] — AWS SERVICES
+## [1:10 – 1:40] — COCKROACHDB MEMORY LAYER
 
-👉 **Aller sur IMPACT & COST**
+**What to do:**
+1. Click **"Strategy Memory"** in the left navigation menu
 
-> *"Côté AWS, Cloud-Surgeon utilise :*
-> *— Amazon Bedrock (Mistral Large 3 via bedrock-mantle, Nova Lite en fallback automatique) pour le raisonnement des agents*
-> *— ECS Fargate comme cible de réparation live*
-> *— CloudWatch + SNS pour l'ingestion d'alertes*
-> *— RDS et Lambda comme autres surfaces de remédiation*
-> *— S3 + CloudFront pour le dashboard en production"*
+> 🎙️ *"CockroachDB is not just the database — it is the brain of the system."*
 
----
+> 🎙️ *"Four memory layers: VECTOR(1024) embeddings with C-SPANN indexing for RAG similarity search. Transactional JSONB state for crash resilience. Change Data Capture streaming every event in real time. And the CockroachDB Cloud MCP Server for live cluster diagnostics."*
 
-## [2:20 – 2:30] — CONCLUSION
+**👉 Show the strategy table — point to the win rates and vector match scores.**
 
-👉 **Revenir sur GUIDE ou ALL INCIDENTS**
+2. Click **"Calibration"** in the left navigation menu
 
-> *"Cloud-Surgeon, c'est :*
-> *80% de réduction du MTTR.*
-> *Zéro intervention humaine pour les incidents haute confiance.*
-> *Une mémoire qui grandit à chaque incident.*
->
-> *CockroachDB × AWS — l'infrastructure qui ne dort jamais."*
+> 🎙️ *"After every incident, the Auditor agent recalibrates the win rates. If the predicted outcome deviates from reality by more than 15%, the correction factor is automatically adjusted. The system gets smarter with every incident it handles."*
+
+**👉 Show the calibration chart or table briefly.**
 
 ---
 
-## CHECKLIST hackathon (à couvrir dans la vidéo)
+## [1:40 – 2:05] — SCENARIO B: CRASH RESILIENCE
 
-| Requis | Couvert | Timestamp |
-|--------|---------|-----------|
-| CockroachDB Distributed Vector Indexing | ✅ | 0:40 — recherche vectorielle win-rate |
-| CockroachDB MCP Server | ✅ | 0:30 — diagnostics cluster live |
-| CDC / Agent Skills | ✅ | 1:05 — streaming état en temps réel |
-| AWS Bedrock | ✅ | 2:05 |
+**What to do:**
+1. Go back to the **Controls panel** (right side)
+2. Set the **Scenario** dropdown to → `"ECS service checkout: payment 5xx spike"` (same as before)
+3. Set the **Chaos Engineering** dropdown to → `"SIGKILL crash after diagnostic"`
+4. Click **"Trigger Agent"**
+
+> 🎙️ *"Now, a crash resilience demo. We trigger a new incident — but this time with chaos mode: the server will be killed mid-repair."*
+
+5. Immediately go to **"Live Diagnostic"** in the left nav
+6. Watch the incident reach **REPAIRING** status
+7. Go back to the Controls panel → scroll down to **System Ops** section → click **"SIGKILL API Server"**
+
+> 🎙️ *"We just killed the server in the middle of a repair — exactly like a production crash."*
+
+8. Watch the **"API Online"** dot turn red briefly, then go green again (server auto-restarts in ~5 seconds)
+9. Watch the incident resume and complete — **it picks up exactly where it stopped**
+
+> 🎙️ *"On reconnection, the agent resumes exactly where it left off. No state lost. No double execution. This is possible because every agent thought is committed to CockroachDB in a SERIALIZABLE transaction before any AWS action is taken."*
+
+---
+
+## [2:05 – 2:20] — IMPACT & AWS SERVICES
+
+**What to do:**
+1. Click **"Impact & Cost"** in the left navigation menu
+
+> 🎙️ *"Cloud-Surgeon runs on: Amazon Bedrock with Mistral Large 3 for agent reasoning, with Nova Lite as automatic fallback. AWS ECS Fargate as the live repair target. CloudWatch and SNS for alert ingestion. RDS and Lambda as additional remediation surfaces."*
+
+**👉 Let the metrics panel show — point to MTTR reduction and resolved incident count.**
+
+---
+
+## [2:20 – 2:30] — CLOSING
+
+**What to do:**
+1. Click **"All Incidents"** in the left navigation menu — show the full incident list
+
+> 🎙️ *"Cloud-Surgeon: 80% reduction in mean time to repair. Zero human intervention for high-confidence incidents. A memory that grows stronger with every incident it handles."*
+
+> 🎙️ *"CockroachDB × AWS — infrastructure that never sleeps."*
+
+**👉 Hold on the incident list for the last 5 seconds. End recording.**
+
+---
+
+## SUMMARY: EVERYTHING IS DONE IN THE DASHBOARD
+
+| Action | How |
+|---|---|
+| Trigger an incident | Controls panel (right) → Trigger Incident → select scenario → click "Trigger Agent" |
+| Simulate a CloudWatch alarm | Controls panel (right) → CloudWatch Webhook → fill Alarm Name → click "Simulate Webhook" |
+| Inject a predictive anomaly | Controls panel (right) → Predictive Injection → select scenario → click "Ingest Anomaly Metric" |
+| Kill the server (chaos) | Controls panel (right) → System Ops → click "SIGKILL API Server" |
+| Watch real-time agent logs | Live Diagnostic page → CDC Audit Stream (bottom of page) |
+| **No terminal needed** | All actions are triggered through the dashboard UI |
+
+---
+
+## HACKATHON CHECKLIST
+
+| Required | Covered | Timestamp |
+|---|---|---|
+| CockroachDB Distributed Vector Indexing | ✅ | 1:10 — Strategy Memory, C-SPANN, win rates |
+| CockroachDB MCP Server | ✅ | 1:10 — live cluster diagnostics via MCP |
+| CDC / Change Data Capture | ✅ | 0:22 — CDC Audit Stream scrolling in real time |
+| AWS Bedrock (Mistral Large 3) | ✅ | 2:05 |
 | AWS ECS / Lambda / RDS | ✅ | 2:05 |
-| CloudWatch + SNS | ✅ | 2:10 |
-| Demo app fonctionnelle | ✅ | tout le long |
-| Mémoire CockroachDB visible | ✅ | 1:00 — Strategy Memory + Calibration |
+| CloudWatch + SNS | ✅ | 2:05 |
+| App running on its target device (web) | ✅ | entire video |
+| CockroachDB memory layer visible | ✅ | 1:10 — Strategy Memory + Calibration |
+| Crash resilience demo | ✅ | 1:40 — SIGKILL + resume |
 
 ---
 
-## CONSEILS POUR L'ENREGISTREMENT
+## RECORDING TIPS
 
-- **Outil recommandé** : OBS Studio (gratuit), QuickTime (Mac), ou Xbox Game Bar (Windows)
-- **Résolution** : 1920×1080 minimum
-- **Parle lentement** — 2:30 se remplit vite, ne te précipite pas sur les clics
-- **Pause d'1 seconde** entre chaque action pour que les changements soient visibles
-- **Upload YouTube** : mode "Non répertorié" suffit pour la soumission (accessible par lien)
+- **Recommended tool:** OBS Studio (free, Windows/Mac/Linux), QuickTime (Mac), or Xbox Game Bar (Windows)
+- **Resolution:** 1920×1080 minimum
+- **Speak slowly** — 2:30 fills up fast, don't rush the clicks
+- **Wait 1–2 seconds after each click** before narrating, so the UI change is visible
+- **Mute the browser tab sound** if you have the sound notifications enabled (bottom of left nav)
+- **YouTube upload:** "Unlisted" mode is sufficient — accessible by link without a Google account
+- **No background music** unless you own the rights — silence or original music only per the rules
