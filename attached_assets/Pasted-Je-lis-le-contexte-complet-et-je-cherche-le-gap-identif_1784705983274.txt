@@ -1,0 +1,82 @@
+Je lis le contexte complet et je cherche le gap identifié en fin de session.
+
+Je lis la suite de repair-strategies.ts et le cœur de la boucle agent pour trouver le gap exact.
+
+Je lis le cœur de la boucle agent pour trouver le gap.
+
+J'ai trouvé le gap. Le MUTATION_ACTIONS set dans la boucle auditor (ligne 659) ne correspond pas aux actionTaken strings réels retournés par aws.ts. Laisse-moi vérifier via le MCP server.
+
+Je lis le handler aws_repair_service dans le MCP server pour voir ce qu'il retourne exactement.
+
+J'ai trouvé le gap. Le MUTATION_ACTIONS set ne correspond pas aux strings actionTaken réels de aws.ts :
+
+    ECS repair → "UPDATE_SERVICE_FORCE_DEPLOYMENT" — absent du set (le set a "UPDATE_SERVICE" et "FORCE_NEW_DEPLOYMENT" qui n'existent pas)
+    RDS repair → "MODIFY_DB_INSTANCE_PARAM_GROUP" — absent (le set a "MODIFY_DB_INSTANCE")
+
+Je lis aussi les actionTaken de crdb_skill_repair pour compléter.
+
+Voilà le gap complet. Le MUTATION_ACTIONS set contient des strings qui n'existent jamais dans le code ("UPDATE_SERVICE", "FORCE_NEW_DEPLOYMENT", "MODIFY_DB_INSTANCE") alors que les vraies valeurs de aws.ts sont "UPDATE_SERVICE_FORCE_DEPLOYMENT" et "MODIFY_DB_INSTANCE_PARAM_GROUP". Résultat : l'auditor voit actionPerformed = false pour toutes les réparations ECS et RDS réelles, et génère "NO_ACTION_REQUIRED" au lieu de "PASS".
+
+De plus, describeActions dans verify_resolution ne couvre pas les actionTaken CRDB du crdb_skill_repair. Je corrige les deux.
+
+Maintenant je corrige aussi le describeActions set dans verify_resolution pour couvrir les actionTaken CRDB.
+
+Maintenant je rebuilde et vérifie que ça compile.
+
+Tout est en ordre. Laisse-moi mettre la mémoire à jour avec ce gap.
+
+Gap corrigé et validé. Voici le résumé :
+
+Le bug trouvé — Dans la phase Auditor (cloud-surgeon.ts), le set MUTATION_ACTIONS contenait des strings qui n'ont jamais existé dans le code :
+
+    "UPDATE_SERVICE" et "FORCE_NEW_DEPLOYMENT" → la vraie valeur est "UPDATE_SERVICE_FORCE_DEPLOYMENT"
+    "MODIFY_DB_INSTANCE" → la vraie valeur est "MODIFY_DB_INSTANCE_PARAM_GROUP"
+
+Résultat : actionPerformed était toujours false pour les réparations ECS et RDS réelles, donc l'auditor produisait verdict: "NO_ACTION_REQUIRED" — "aucune action n'a été effectuée" — même après avoir forcé un nouveau déploiement ECS ou modifié un parameter group RDS.
+
+Les deux corrections appliquées :
+
+    MUTATION_ACTIONS — remplacé par les vrais strings de aws.ts (UPDATE_SERVICE_FORCE_DEPLOYMENT, MODIFY_DB_INSTANCE_PARAM_GROUP, ROLLBACK_FORCE_DEPLOYMENT, ROLLBACK_PARAMETER_GROUP, ROLLBACK_CONCURRENCY)
+    describeActions dans verify_resolution — ajouté tous les actionTaken diagnostiques du crdb_skill_repair (CRDB_HOTSPOT_DIAGNOSED, CRDB_INDEX_DIAGNOSED, etc.)
+
+Pour les prochains incidents, l'auditor retournera correctement verdict: "PASS" après une réparation ECS ou RDS, et verdict: "NO_ACTION_REQUIRED" uniquement quand le service était déjà sain ou que la stratégie était purement diagnostique.
+
+cherche encore dans les timeline, les logs et repare plan, rollback etc... pour detecter d'autres incoherences et anomalies
+28 minutes ago
+Analyzing code logic
+
+Je lance une analyse parallèle systématique sur tous les composants susceptibles d'avoir des incohérences.
+
+Deux bugs réels identifiés. Je vérifie les lignes exactes avant de corriger.
+
+Je confirme les deux bugs et cherche d'autres anomalies en parallèle.
+
+Je lis calibration.ts pour vérifier computeRoutingMode avec effectiveWinRate > 1.0, et je lance aussi un scan des routes et du webhook pour d'autres incohérences.
+
+Maintenant j'applique les corrections en parallèle. Deux bugs confirmés :
+
+    toolOutput.action (n'existe pas dans AwsToolResult ni crdb_skill_repair) → doit être toolOutput.actionTaken, plus les champs steps/detail qui n'existent pas non plus dans les sorties réelles
+    findSimilarIncident sans try/catch → crash non géré si dimension vector incorrecte ou erreur DB
+
+J'ai 9 anomalies nouvelles à trier. Je lis les lignes exactes pour les 5 plus impactantes en parallèle avant de corriger.
+
+J'applique les 4 corrections en parallèle.
+
+Je complète la logique CDC pour résumer les jobs paused/failed, et je rebuilde en parallèle.
+
+Build propre. Je complète la logique CDC pour les jobs paused/failed (actuellement ils sont trouvés mais traités comme "running" — il faut les reprendre ou les annuler selon leur état).
+Verifying and scanning
+Restarted workflow artifacts/api-server: API Server
+Analyzing remaining issues
+Analyzing incident data
+
+Build propre. Il reste 3 corrections à appliquer en parallèle — je lis les lignes exactes d'abord.
+
+J'applique les 3 dernières corrections en parallèle.
+
+Fix 1 — seed : RESOLVED sans resolvedAt Fix 2 — coordination : releaseIncidentClaim vérifie l'agent avant de libérer (startup garde l'unconditional) Fix 3 — cloud-surgeon : tous les call sites passent leur agentName
+
+Je mets à jour les 3 call sites dans cloud-surgeon.ts et je rebuilde.
+
+87/87 tests ✅, build propre, serveur live. Je mets à jour la mémoire.
+Summarizing fixes
