@@ -171,12 +171,24 @@ async function callTool(
     const repairVerified  = Boolean(toolInput.repairVerified);
     const actionPerformed = Boolean(toolInput.actionPerformed);
 
+    // Read-only action names — no infrastructure was changed.
+    // Must match the exact actionTaken strings from aws.ts and mcp/server.ts crdb_skill_repair.
     const describeActions = new Set([
+      // AWS describe-only (no mutation applied)
       "DESCRIBE_FUNCTION",
       "DESCRIBE_FUNCTION_CONCURRENCY",
       "DESCRIBE_SERVICES",
       "DESCRIBE_DB_INSTANCES",
       "AWS_API_CALL",
+      // CRDB diagnostic-only (crdb_skill_repair read-only branches)
+      "CRDB_HOTSPOT_DIAGNOSED",
+      "CRDB_INDEX_DIAGNOSED",
+      "CRDB_SLOW_QUERY_LISTED",
+      "CRDB_REPLICATION_ASSESSED",
+      "CRDB_CHANGEFEED_LISTED",
+      "CRDB_HEALTH_CHECKED",
+      // Routing/no-op decisions
+      "ROUTING_DECISION",
     ]);
     const actionTaken = String(toolInput.actionTaken ?? "");
     const isDescribeOnly = !actionPerformed || describeActions.has(actionTaken);
@@ -656,10 +668,24 @@ export async function runAgentLoop(
     const repairSuccess  = Boolean(repairOutput?.success);
     const repairAction   = String(repairOutput?.actionTaken ?? "");
 
+    // These strings MUST match the exact actionTaken values returned by aws.ts
+    // and mcp/server.ts crdb_skill_repair — any mismatch silently makes the auditor
+    // report "NO_ACTION_REQUIRED" even after a real mutation was applied.
+    // Do not use generic or abbreviated names: use the exact strings from the source.
     const MUTATION_ACTIONS = new Set([
-      "PUT_FUNCTION_CONCURRENCY", "UPDATE_SERVICE", "FORCE_NEW_DEPLOYMENT",
-      "REBOOT_DB_INSTANCE", "MODIFY_DB_INSTANCE", "RESTORE_DB_PARAMETER_GROUP",
-      "CHANGEFEED_RESTART", "CRDB_SKILL_REPAIR",
+      // ECS — aws.ts repairEcsService / rollbackEcsService
+      "UPDATE_SERVICE_FORCE_DEPLOYMENT",  // repairEcsService: success, tasks restarted
+      "ROLLBACK_FORCE_DEPLOYMENT",        // rollbackEcsService
+      // Lambda — aws.ts repairLambdaConcurrency / rollbackLambdaConcurrency
+      "PUT_FUNCTION_CONCURRENCY",         // repairLambdaConcurrency: reserved concurrency scaled
+      "ROLLBACK_CONCURRENCY",             // rollbackLambdaConcurrency
+      // RDS — aws.ts repairRdsConnections / rollbackRdsParameterGroup
+      "MODIFY_DB_INSTANCE_PARAM_GROUP",   // repairRdsConnections: parameter group changed
+      "REBOOT_DB_INSTANCE",              // possible future use
+      "ROLLBACK_PARAMETER_GROUP",         // rollbackRdsParameterGroup
+      // CRDB — reserved for when crdb_skill_repair performs actual writes
+      "CHANGEFEED_RESTART",
+      "CRDB_SKILL_REPAIR",
     ]);
     const actionPerformed = MUTATION_ACTIONS.has(repairAction);
 
