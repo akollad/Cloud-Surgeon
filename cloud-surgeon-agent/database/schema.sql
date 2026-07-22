@@ -236,6 +236,49 @@ ALTER TABLE incident_state
                       'ROLLED_BACK'));
 
 -- ----------------------------------------------------------------------------
+-- Migration: fix column types — timestamp → timestamptz
+-- These columns were created as plain TIMESTAMP on older clusters.
+-- The Drizzle schema defines them with withTimezone:true; aligning the DB.
+-- ----------------------------------------------------------------------------
+ALTER TABLE incident_state   ALTER COLUMN updated_at  TYPE TIMESTAMPTZ;
+ALTER TABLE execution_logs   ALTER COLUMN created_at  TYPE TIMESTAMPTZ;
+
+-- ----------------------------------------------------------------------------
+-- Data repair: backfill auditVerdict + repairSuccess in context_json
+-- for incidents resolved before these fields were written by the Auditor.
+-- Reconstructed from turns[2].toolOutput.verdict and turns[1].toolOutput.success.
+-- ----------------------------------------------------------------------------
+UPDATE incident_state
+SET context_json = jsonb_set(
+    jsonb_set(context_json, '{auditVerdict}',
+      COALESCE(context_json->'turns'->2->'toolOutput'->'verdict', '"PASS"')),
+    '{repairSuccess}',
+    COALESCE(context_json->'turns'->1->'toolOutput'->'success', 'false'))
+WHERE status IN ('RESOLVED','FAILED')
+  AND context_json->>'auditVerdict' IS NULL
+  AND jsonb_array_length(context_json->'turns') = 3;
+
+UPDATE incident_state
+SET context_json = jsonb_set(
+    jsonb_set(context_json, '{auditVerdict}',
+      CASE current_step
+        WHEN 'HUMAN_CORRECTED' THEN '"HUMAN_CORRECTED"'
+        ELSE '"HUMAN_REJECTED"' END::jsonb),
+    '{repairSuccess}', 'false')
+WHERE status = 'FAILED'
+  AND context_json->>'auditVerdict' IS NULL
+  AND current_step IN ('HUMAN_REJECTED','HUMAN_CORRECTED');
+
+UPDATE incident_state
+SET context_json = jsonb_set(
+    jsonb_set(context_json, '{auditVerdict}', '"PASS"'),
+    '{repairSuccess}',
+    COALESCE(context_json->'turns'->1->'toolOutput'->'success', 'true'))
+WHERE status = 'RESOLVED' AND current_step = 'FINALIZED'
+  AND context_json->>'auditVerdict' IS NULL
+  AND jsonb_array_length(context_json->'turns') = 2;
+
+-- ----------------------------------------------------------------------------
 -- CDC changefeed token authentication
 --
 -- When CDC_WEBHOOK_SECRET is set, the changefeed sink URL includes
