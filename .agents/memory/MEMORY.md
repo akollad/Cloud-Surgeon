@@ -23,3 +23,4 @@
 - [ecsTaskExecutionRole needs inline Secrets Manager policy](ecs-execution-role-secrets.md) — managed AmazonECSTaskExecutionRolePolicy excludes secretsmanager:GetSecretValue; missing inline policy causes ResourceInitializationError at container start.
 - [S3 + CloudFront safe deploy order](s3-cloudfront-safe-deploy.md) — sync without --delete first, wait for invalidation-completed, then sync --delete; skipping this causes MIME type errors during the invalidation window.
 - [Mistral Large 3 via bedrock-mantle](mistral-bedrock-mantle.md) — AI_PROVIDER=mistral routes through bedrock-mantle.ts (Bearer BEDROCK_API_KEY, OpenAI-compat); Nova Lite is automatic tier-2 fallback; model overridable via BEDROCK_MANTLE_MODEL.
+- [Incident API audit fixes (July 2026)](incident-api-audit-fixes.md) — alertText/strategyName flattened to top-level; pagination enabled; suggestedStrategy whitelisted; auditVerdict/repairSuccess stored in contextJson.

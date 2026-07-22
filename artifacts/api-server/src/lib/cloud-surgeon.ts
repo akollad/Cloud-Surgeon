@@ -713,6 +713,10 @@ export async function runAgentLoop(
     const finalStatus = repairSuccess ? "RESOLVED" : "FAILED";
     const routingLabel = context.routingMode ?? "AUTONOMOUS";
     const auditVerdict = String((toolOutput as Record<string, unknown>).verdict ?? "PASS");
+    // Store closure fields in contextJson so the API can surface them as top-level
+    // fields via flattenIncident() — previously these were computed-only locals.
+    (context as Record<string, unknown>).auditVerdict  = auditVerdict;
+    (context as Record<string, unknown>).repairSuccess = repairSuccess;
     context.finalResponse = !repairSuccess
       ? `FAILED [${strategyName}]: Repair failed — escalation to on-call team recommended by Auditor.`
       : auditVerdict === "NO_ACTION_REQUIRED"

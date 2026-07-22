@@ -40,6 +40,44 @@ function serializeDates<T>(obj: T): T {
   return obj;
 }
 
+/**
+ * Promote key contextJson fields to top-level so the dashboard doesn't have
+ * to drill into the opaque contextJson blob for common display fields.
+ * alertText, strategyName, routingMode etc. live inside contextJson in the DB
+ * but the API contract exposes them as first-class incident properties.
+ */
+function flattenIncident(incident: Record<string, unknown>): Record<string, unknown> {
+  const ctx = (incident.contextJson ?? {}) as Record<string, unknown>;
+  return {
+    ...incident,
+    alertText:       (ctx.alertText       as string  | undefined) ?? null,
+    strategyName:    (ctx.strategyName    as string  | undefined) ?? null,
+    routingMode:     (ctx.routingMode     as string  | undefined) ?? null,
+    auditVerdict:    (ctx.auditVerdict    as string  | undefined) ?? null,
+    effectiveWinRate:(ctx.effectiveWinRate as number | undefined) ?? null,
+    winRate:         (ctx.winRate         as number  | undefined) ?? null,
+    repairSuccess:   (ctx.repairSuccess   as boolean | undefined) ?? null,
+    finalResponse:   (ctx.finalResponse   as string  | undefined) ?? null,
+    repairPlan:      (ctx.repairPlan      as unknown | undefined) ?? null,
+    rollbackInfo:    (ctx.rollbackInfo    as unknown | undefined) ?? null,
+  };
+}
+
+/**
+ * Known valid strategy names — kept in sync with STRATEGY_PLANS in
+ * repair-strategies.ts and the alert_patterns in cloud-surgeon.config.yaml.
+ * Used to validate human-provided strategy names before writing them to
+ * incident_vectors (prevents RAG memory corruption via arbitrary strings).
+ */
+const VALID_STRATEGIES = new Set([
+  "ecs_service_restart", "rds_cpu_throttle", "lambda_concurrency_scale",
+  "jvm_heap_restart", "db_connection_pool_reset", "network_route_failover",
+  "iam_credential_rotation", "external_dependency_circuit_break", "disk_cleanup",
+  "cloudwatch_alarm_triage", "default_repair",
+  "crdb_hotspot_resolution", "crdb_index_optimization", "crdb_slow_query_termination",
+  "crdb_replication_recovery", "crdb_changefeed_restart",
+]);
+
 // All incident/log routes require the shared API key with the
 // dashboard — see middleware/apiKeyAuth.ts.
 router.use(apiKeyAuth);
@@ -268,6 +306,14 @@ router.post("/incidents/:incidentId/correct", async (req, res): Promise<void> =>
 
   if (!suggestedStrategy) {
     res.status(400).json({ error: "Missing required field: suggestedStrategy" });
+    return;
+  }
+
+  // Whitelist check — prevent arbitrary strings from polluting incident_vectors RAG memory.
+  if (!VALID_STRATEGIES.has(suggestedStrategy)) {
+    res.status(400).json({
+      error: `Unknown strategy '${suggestedStrategy}'. Valid strategies: ${[...VALID_STRATEGIES].sort().join(", ")}`,
+    });
     return;
   }
 
@@ -587,17 +633,27 @@ router.get("/incidents/:incidentId/handoffs", async (req, res): Promise<void> =>
 
 // ── List / detail ─────────────────────────────────────────────────────────
 
-router.get("/incidents", async (_req, res): Promise<void> => {
+router.get("/incidents", async (req, res): Promise<void> => {
+  // Support ?limit= and ?offset= for pagination.
+  // Default 50, max 200 per request to keep responses manageable.
+  const limit  = Math.min(Math.max(Number(req.query.limit)  || 50, 1), 200);
+  const offset = Math.max(Number(req.query.offset) || 0, 0);
+
   const incidents = await db
     .select()
     .from(incidentStateTable)
     .orderBy(desc(incidentStateTable.updatedAt))
-    .limit(50);
+    .limit(limit)
+    .offset(offset);
 
   // Do not run through ListIncidentsResponse.parse() — the generated Zod schema
   // does not include triggeredAt / resolvedAt, so .parse() silently strips them.
   // The data comes from the DB (trusted), so validation is not needed here.
-  res.json(serializeDates(incidents));
+  // flattenIncident promotes key contextJson fields (alertText, strategyName …)
+  // to top-level so the dashboard can read them without drilling into contextJson.
+  const flat = (serializeDates(incidents) as unknown as Record<string, unknown>[])
+    .map(flattenIncident);
+  res.json(flat);
 });
 
 router.get("/incidents/:incidentId", async (req, res): Promise<void> => {
@@ -615,7 +671,8 @@ router.get("/incidents/:incidentId", async (req, res): Promise<void> => {
 
   // Do not run through GetIncidentResponse.parse() — the generated Zod schema
   // does not include triggeredAt / resolvedAt, so .parse() silently strips them.
-  res.json(serializeDates(incident));
+  // flattenIncident promotes contextJson fields to top-level (alertText, strategyName …).
+  res.json(flattenIncident(serializeDates(incident) as unknown as Record<string, unknown>));
 });
 
 // ── Execution logs ────────────────────────────────────────────────────────
