@@ -24,3 +24,9 @@ id = "jLGpxBvgaIKnTIdZDtrA8"
 uri = "file://DEMO_SCRIPT.md"
 type = "text"
 title = "Cloud-Surgeon — Script de démo complet"
+
+[[outputs]]
+id = "6cPmjp-_XYeZegGf1OQ7-"
+uri = "file://attached_assets/architecture-diagram.png"
+type = "image"
+title = "Cloud-Surgeon Architecture Diagram"
