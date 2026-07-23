@@ -1,0 +1,20 @@
+6. Juges et critères
+Le commanditaire et l'administrateur se réservent le droit exclusif de déterminer l'admissibilité et les méthodes d'évaluation de toutes les candidatures. Ce processus peut faire appel à des panels d'experts, à l'évaluation par les pairs, à une analyse automatisée par intelligence artificielle, ou à toute combinaison de ces méthodes afin de garantir une évaluation efficace, équitable et objective. Les candidatures admissibles seront évaluées par un jury sélectionné par le commanditaire (les « juges »). Les juges peuvent être des employés du commanditaire ou des tiers, peuvent ou non figurer individuellement sur le site web du hackathon, et leur composition peut changer avant ou pendant la période d'évaluation. L'évaluation peut se dérouler en une ou plusieurs phases avec un ou plusieurs jurys, à la discrétion du commanditaire. 
+
+Étape 1) La première étape déterminera par un système de réussite/échec si les idées atteignent un niveau de viabilité minimal, c'est-à-dire si le projet correspond raisonnablement au thème et applique raisonnablement les API/SDK requis présentés dans le Hackathon.
+
+Deuxième étape) Toutes les candidatures qui réussissent la première étape seront évaluées lors de la deuxième étape selon les critères suivants, qui ont la même importance (les « critères d’évaluation ») :
+
+Les candidatures seront évaluées selon les critères suivants, qui auront la même importance, et à l'entière discrétion des juges :
+
+Conception de la mémoire de l'agent :
+CockroachDB joue-t-il un rôle significatif et adapté à la production en tant que couche mémoire de l'agent ? Est-elle utilisée pour autre chose que des requêtes de test — état, plongements lexicaux, contexte ou données transactionnelles à grande échelle ?
+Mise en œuvre technologique :
+L’intégration avec les outils CockroachDB (index vectoriel distribué, serveur MCP, interface de ligne de commande ccloud) est-elle conforme aux normes d’ingénierie logicielle ? L’agent utilise-t-il ces outils correctement et en toute sécurité ?
+Impact concret :
+Quel impact réel le projet pourrait-il avoir sur les utilisateurs ou les flux de travail ? Le cas d'utilisation est-il pertinent et pas seulement impressionnant sur le plan technique ?
+État de préparation du produit :
+La conception est-elle sécurisée, observable et évolutive ? L’équipe a-t-elle réfléchi à la résilience, au contrôle d’accès et aux mesures à prendre en cas de problème ?
+Créativité et originalité :
+S’agit-il d’une idée véritablement nouvelle ou d’une application inédite de la technologie ? Démontre-t-elle une compréhension de ce qui distingue les systèmes multi-agents des applications traditionnelles ?
+Les notes attribuées par le jury détermineront les gagnants potentiels des prix. Les participants admissibles à un prix et dont les candidatures auront obtenu les meilleures notes globales selon les critères d'évaluation applicables seront les gagnants potentiels de ce prix.
