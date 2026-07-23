@@ -1,0 +1,39 @@
+* URL to your functional demo application.
+The Project must be capable of being successfully installed and running consistently on the platform for which it is intended and must function as depicted in the video and/or expressed in the text description.
+
+https://
+* URL to your open source and public code repository for judging and testing.
+The repository must contain all necessary source code, clear README documentation, any required dependencies, example configurations or datasets if applicable, and setup and run instructions required for the project to be functional.
+
+https://
+* URL to your open-source license file within your code repository.
+The repository must be public and open source by including an open source license file (we recommend MIT or Apache 2.0). This license should be detectable and visible at the top of the repository page (in the About section).
+
+https://
+* Which CockroachDB tools are used in your project?
+Your Project MUST use at least 2 of the following CockroachDB Tools. — Appears in project gallery
+
+Select all that apply
+Cloud Managed MCP ServerDistributed Vector Indexingccloud CLI,Agent Skills Repo
+* Which AWS Services are used in your project?
+Your Project MUST use at least 1 of these AWS Services. — Appears in project gallery
+
+Select all that apply
+Amazon BedrockAWS LambdaAmazon ECS / EKSAmazon S3Amazon SageMakerAmazon Bedrock AgentsOther AWS service
+* Please explain how your project meaningfully integrated the above selected CockroachDB and AWS components.
+All required CockroachDB and AWS components must be meaningfully integrated — not just initialized within the Project.
+
+* What date did you start this project? (MM-DD-YY)
+Projects must be newly created during the Submission Period.
+
+* Please explain any pre-existing code or work was incorporated into the Project.
+Participants may use standard development tools, including frameworks, libraries, starter templates, and AI coding assistants, but must disclose any other pre-existing code or work incorporated into the Project. The work described and submitted must have been built during the Submission Period.
+
+Optional: Upload an architectural diagram showing how CockroachDB, AWS services, and your agent interact
+Upload a PDF, png, jpg
+Allowed: pdf, png, jpg.
+Max 35MB per file.
+
+Add file
+Aucun fichier choisi
+Optional: Please provide feedback on the CockroachDB AI tools or features.
