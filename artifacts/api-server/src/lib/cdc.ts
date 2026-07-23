@@ -335,14 +335,15 @@ async function startPollingFallback(): Promise<void> {
  * {
  *   payload: [
  *     {
+ *       after: { <row columns> },   // null for DELETE events
  *       key: ["<uuid>"],
- *       value: {
- *         after: { <row columns> }   // null for DELETE events
- *       }
+ *       topic: "defaultdb.public.execution_logs",
+ *       updated: "1701369213714120000.0000000000"
  *     }
  *   ],
  *   length: N
  * }
+ * Note: `after` is at the item level, NOT nested under a `value` wrapper.
  */
 export function parseCdcPayload(body: unknown): AuditEvent[] {
   const events: AuditEvent[] = [];
@@ -352,10 +353,10 @@ export function parseCdcPayload(body: unknown): AuditEvent[] {
 
   for (const item of payload) {
     if (!item || typeof item !== "object") continue;
-    const val = (item as Record<string, unknown>).value as Record<string, unknown> | null;
-    if (!val) continue;
-    const after = val.after as Record<string, unknown> | null;
-    if (!after) continue; // DELETE — skip
+    // CockroachDB webhook sink places `after` directly on the item (not inside a `value` wrapper).
+    // Real payload shape: { payload: [{ after: {...}, key: [...], topic: "...", updated: "..." }] }
+    const after = (item as Record<string, unknown>).after as Record<string, unknown> | null;
+    if (!after) continue; // DELETE events have after=null — skip
 
     if ("log_id" in after) {
       events.push({
