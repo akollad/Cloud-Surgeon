@@ -23,7 +23,9 @@
 Last verified (July 22 2026): `{"status":"ok"}` — CloudFront health check confirmed post-deploy.
 Demo dashboard password: `cloudsurgeon-demo`.
 
-**Task definition revision 14** (current — 2026-07-22): Redeployed with sound notification system (Web Audio API, no audio files) added to dashboard. Docker image rebuilt and pushed to ECR. Dashboard rebuilt with BASE_PATH=/ and synced to S3 (CloudFront invalidation I4T7UYYJJXOS2XVNSB8U2OER0A). ECS service updated to task-definition/cloud-surgeon-api:14, 1/1 tasks running.
+**Task definition revision 14** (current — 2026-07-23): Redeployed with two fixes: `calibration.ts` win-rate routing threshold restored to 70% (AUTONOMOUS gate); `chaos.ts` switched from `process.kill()` to `process.exit(1)` so ECS restart policy triggers correctly. Docker image rebuilt and pushed to ECR (digest sha256:d9a0ccb…ee83f0). Dashboard unchanged — S3/CloudFront not touched. ECS force-new-deployment confirmed stable, 1/1 tasks running, `/api/healthz` → `{"status":"ok"}`.
+
+**Task definition revision 14** (previous — 2026-07-22): Redeployed with sound notification system (Web Audio API, no audio files) added to dashboard. Docker image rebuilt and pushed to ECR. Dashboard rebuilt with BASE_PATH=/ and synced to S3 (CloudFront invalidation I4T7UYYJJXOS2XVNSB8U2OER0A). ECS service updated to task-definition/cloud-surgeon-api:14, 1/1 tasks running.
 
 **Task definition revision 14** (previous entry — 2026-07-20) (current — 2026-07-20): Fixed ccloud headless auth in ECS. Root cause: `index.ts` was missing `import path from "node:path"` — esbuild bundled it without the import, `path.join()` threw a `ReferenceError` swallowed by `.catch(() => {})`, no credential files were written, ccloud reported "not logged in" on every boot. Fix: added the import + moved `configHome`/`dir` calculation inside the `try` block. Boot log now shows `🟢 authenticated (logged in to "Akollad Groupe")` on every container start. Also fixed: credentials.json format was `{ "default": { "apiKey": "..." } }` (camelCase) — ccloud v0.6.12 expects `{ "default": { "api_key": "..." } }` (snake_case, `json:"api_key"` tag in Go struct).
 
