@@ -144,7 +144,12 @@ export async function initChangefeed(): Promise<void> {
       // If a token is configured but the existing changefeed URL doesn't include it,
       // always cancel and recreate — regardless of job status — so the sink is authenticated.
       const needsToken = secret && !job.description.includes("?token=");
-      if (needsToken || job.status === "failed") {
+      // If the existing changefeed points at a different host (e.g. production CloudFront
+      // when running in dev, or a stale Replit domain), cancel and recreate so events are
+      // delivered to the current environment instead of the wrong one.
+      const targetHost = webhookUrl.replace(/^webhook-https?:\/\//, "").split("?")[0].split("/")[0];
+      const wrongHost = !job.description.includes(targetHost);
+      if (needsToken || wrongHost || job.status === "failed") {
         // Cancel the existing job (failed jobs must be explicitly cancelled before a new one
         // can be created on the same tables; paused jobs with wrong token also need replacement).
         logger.info(
