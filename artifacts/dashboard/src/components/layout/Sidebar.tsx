@@ -169,7 +169,7 @@ export function Sidebar({ open, onClose, collapsed, onToggleCollapse }: SidebarP
   const handlePredictive = () => {
     const map: Record<string, object[]> = {
       "ECS CPU spike (pre-alarm)":          [{ metricName: "CPUUtilization",     value: 84,         dimensions: { ServiceName: "checkout" },      serviceHint: "checkout" }],
-      "RDS connections approaching limit":  [{ metricName: "DatabaseConnections", value: 430,        dimensions: { ClusterName: "polite-genie" },  serviceHint: "polite-genie" }],
+      "RDS connections approaching limit":  [{ metricName: "DatabaseConnections", value: 430,        dimensions: { DBInstanceIdentifier: "prod-db" }, serviceHint: "api" }],
       "Lambda throttling pre-alarm":        [{ metricName: "Throttles",           value: 12,         dimensions: { FunctionName: "order-processor" }, serviceHint: "order-processor" }],
       "High ALB response time":             [{ metricName: "TargetResponseTime",  value: 2.8,        dimensions: { ServiceName: "checkout" },      serviceHint: "checkout" }],
       "Disk usage critical":                [{ metricName: "FreeableStorage",     value: 500000000,  dimensions: { ServiceName: "api" },           serviceHint: "api" }],
