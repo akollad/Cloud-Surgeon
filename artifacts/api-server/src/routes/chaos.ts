@@ -34,9 +34,12 @@ router.post("/chaos/sigkill", (req, res): void => {
     note: "Re-trigger the same incident after restart to prove stateful resumption from CockroachDB.",
   });
 
-  // Kill the process after the response delay
+  // Exit with code 1 after the response delay.
+  // process.exit(1) is detected by the Replit workflow runner as a crash
+  // and triggers an automatic restart — identical effect to SIGKILL but
+  // more reliably caught by managed process supervisors.
   setTimeout(() => {
-    process.kill(process.pid, "SIGKILL");
+    process.exit(1);
   }, 300);
 });
 

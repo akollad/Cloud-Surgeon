@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "cross-env NODE_ENV=development pnpm run build && pnpm run start",
+    "dev": "cross-env NODE_ENV=development pnpm run build && bash -c 'while true; do node --enable-source-maps ./dist/index.mjs; EXIT=$?; [ $EXIT -eq 0 ] && break; echo \"[auto-restart] Server exited (code $EXIT) — restarting in 2s...\"; sleep 2; done'",
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",

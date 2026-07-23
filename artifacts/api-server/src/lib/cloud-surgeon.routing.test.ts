@@ -28,8 +28,8 @@ describe("computeRoutingMode", () => {
     assert.equal(computeRoutingMode("lambda_concurrency_scale", undefined, 0.81, 5), "AUTONOMOUS");
   });
 
-  it("returns PENDING_APPROVAL when win-rate ≤ 80% even with many samples", () => {
-    assert.equal(computeRoutingMode("rds_cpu_throttle", 0.2, 0.79, 50), "PENDING_APPROVAL");
+  it("returns PENDING_APPROVAL when win-rate ≤ 70% even with many samples", () => {
+    assert.equal(computeRoutingMode("rds_cpu_throttle", 0.2, 0.69, 50), "PENDING_APPROVAL");
     assert.equal(computeRoutingMode("ecs_service_restart", 0.3, 0.50, 20), "PENDING_APPROVAL");
   });
 
@@ -37,12 +37,12 @@ describe("computeRoutingMode", () => {
     assert.equal(computeRoutingMode("ecs_service_restart", undefined, undefined, 3), "PENDING_APPROVAL");
   });
 
-  it("boundary: win-rate exactly 0.80 returns PENDING_APPROVAL (must be strictly > 0.8)", () => {
-    assert.equal(computeRoutingMode("ecs_service_restart", 0.1, 0.80, 10), "PENDING_APPROVAL");
+  it("boundary: win-rate exactly 0.70 returns PENDING_APPROVAL (must be strictly > 0.70)", () => {
+    assert.equal(computeRoutingMode("ecs_service_restart", 0.1, 0.70, 10), "PENDING_APPROVAL");
   });
 
-  it("boundary: win-rate 0.801 returns AUTONOMOUS", () => {
-    assert.equal(computeRoutingMode("ecs_service_restart", 0.1, 0.801, 10), "AUTONOMOUS");
+  it("boundary: win-rate 0.701 returns AUTONOMOUS", () => {
+    assert.equal(computeRoutingMode("ecs_service_restart", 0.1, 0.701, 10), "AUTONOMOUS");
   });
 });
 

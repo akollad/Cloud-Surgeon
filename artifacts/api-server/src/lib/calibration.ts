@@ -328,12 +328,14 @@ export async function getAllCalibrationData(): Promise<CalibrationRow[]> {
 /**
  * Decides the routing mode from the historical effective win-rate.
  *
- *  AUTONOMOUS      : known strategy (≥ 3 samples) AND win-rate > 80%
- *  PENDING_APPROVAL: known strategy but win-rate ≤ 80%, OR < 3 samples
+ *  AUTONOMOUS      : known strategy (≥ 3 samples) AND win-rate > 70%
+ *  PENDING_APPROVAL: known strategy but win-rate ≤ 70%, OR < 3 samples
  *  EXPLORATORY     : no known samples for this strategy
  *
- * Threshold is strictly > 0.80 — strategies at exactly 80% still require
- * human approval to ensure high confidence before autonomous action.
+ * Threshold set at 70% so that well-known strategies like
+ * ecs_service_restart (~74–78% observed win-rate) route autonomously,
+ * while lower-confidence strategies like db_connection_pool_reset (~50%)
+ * still escalate to human review.
  */
 export function computeRoutingMode(
   strategyName: string,
@@ -343,6 +345,6 @@ export function computeRoutingMode(
 ): RoutingMode {
   if (strategyName === "default_repair") return "EXPLORATORY";
   if (sampleCount < 3) return "PENDING_APPROVAL";
-  if ((winRate ?? 0) > 0.80) return "AUTONOMOUS";
+  if ((winRate ?? 0) > 0.70) return "AUTONOMOUS";
   return "PENDING_APPROVAL";
 }
