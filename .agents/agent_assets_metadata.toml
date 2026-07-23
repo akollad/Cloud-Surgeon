@@ -30,3 +30,9 @@ id = "6cPmjp-_XYeZegGf1OQ7-"
 uri = "file://attached_assets/architecture-diagram.png"
 type = "image"
 title = "Cloud-Surgeon Architecture Diagram"
+
+[[outputs]]
+id = "nPMGLlT52JHOPNzs8K71B"
+uri = "file://attached_assets/cloud-surgeon-voiceover.mp3"
+type = "audio"
+title = "Cloud-Surgeon — Voix off démo (Jackson)"
