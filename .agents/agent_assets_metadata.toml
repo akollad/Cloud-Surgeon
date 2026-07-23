@@ -36,3 +36,9 @@ id = "nPMGLlT52JHOPNzs8K71B"
 uri = "file://attached_assets/cloud-surgeon-voiceover.mp3"
 type = "audio"
 title = "Cloud-Surgeon — Voix off démo (Jackson)"
+
+[[outputs]]
+id = "kOUdNIjHIKPQXf0dowK2X"
+uri = "file://attached_assets/cloud-surgeon-voiceover_2.mp3"
+type = "audio"
+title = "Cloud-Surgeon — Voix off v2 (trimmed)"
