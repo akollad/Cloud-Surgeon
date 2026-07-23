@@ -42,3 +42,9 @@ id = "kOUdNIjHIKPQXf0dowK2X"
 uri = "file://attached_assets/cloud-surgeon-voiceover_2.mp3"
 type = "audio"
 title = "Cloud-Surgeon — Voix off v2 (trimmed)"
+
+[[outputs]]
+id = "W7vrk1PhUvChyRA27O4hI"
+uri = "file://VIDEO_RECORDING_GUIDE.md"
+type = "text"
+title = "Guide d'enregistrement OBS — Cloud-Surgeon"
