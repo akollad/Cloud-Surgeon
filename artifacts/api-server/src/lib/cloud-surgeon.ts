@@ -510,9 +510,12 @@ export async function runAgentLoop(
     // Bug fix: if the diagnostician found the target service doesn't exist, force
     // PENDING_APPROVAL regardless of win-rate. Acting autonomously against a phantom
     // service name is always wrong — a human must confirm the correct service first.
+    // Exception: predictive incidents are pre-alarm — the service may be struggling
+    // before it appears in ECS describe-services; don't override routing for them.
+    const isPredictiveIncident = incident.alertFingerprint?.startsWith("PREDICTIVE:") ?? false;
     const diagToolOutput = (context.turns[0]?.toolOutput ?? {}) as Record<string, unknown>;
     const diagErrorMsg = typeof diagToolOutput.error === "string" ? diagToolOutput.error : "";
-    if (diagErrorMsg.includes("does not exist") && routingMode !== "PENDING_APPROVAL") {
+    if (diagErrorMsg.includes("does not exist") && !isPredictiveIncident && routingMode !== "PENDING_APPROVAL") {
       routingMode = "PENDING_APPROVAL";
     }
 
@@ -539,12 +542,12 @@ export async function runAgentLoop(
             // strategy outperforms its prediction — cap the displayed value at 100%.
             // Use Math.floor instead of toFixed(0) rounding so a value like 79.9%
             // never displays as "80%" — which would produce the paradoxical message
-            // "effective win-rate 80% below the 80% autonomous threshold".
+            // "effective win-rate 70% below the 70% autonomous threshold".
             const displayPct = Math.floor(Math.min(effectiveWinRate * 100, 100));
             const pendingReason =
               winRateResult.count < 3
                 ? `only ${winRateResult.count} sample(s) in memory — ${3 - winRateResult.count} more needed to unlock autonomous mode`
-                : `effective win-rate ${displayPct}% below the 80% autonomous threshold`;
+                : `effective win-rate ${displayPct}% below the 70% autonomous threshold`;
             return ragHit
               ? `RAG distance: ${ragHit.distance.toFixed(3)}, ${pendingReason} (raw win-rate: ${Math.floor(winRateResult.winRate * 100)}%, correction: ×${correctionFactor.toFixed(2)}, ${winRateResult.count} sample(s))`
               : `no RAG match — ${pendingReason}`;

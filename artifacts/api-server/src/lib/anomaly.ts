@@ -109,8 +109,8 @@ export function keywordPredictiveMatch(
   // CPU saturation
   if ((mn.includes("cpuutilization") || mn.includes("cpu_utilization")) && value > 80) {
     if (d.includes("rds") || d.includes("db")) return "rds_cpu_throttle";
-    if (d.includes("ecs") || d.includes("container")) return "ecs_service_restart";
-    return "rds_cpu_throttle";
+    // Default: ECS CPU saturation is far more common in this stack than RDS CPU.
+    return "ecs_service_restart";
   }
   // DB connection exhaustion
   if (
