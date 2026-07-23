@@ -331,6 +331,28 @@ export async function getOrCreateIncident(alertText: string): Promise<IncidentSt
     .from(incidentStateTable)
     .where(eq(incidentStateTable.alertFingerprint, fp));
 
+  // If the existing incident is already terminal (RESOLVED / FAILED / ROLLED_BACK),
+  // reset it in-place so the agent runs a fresh cycle on the next trigger.
+  // This preserves crash-recovery: in-progress incidents (TRIGGERED, DIAGNOSING,
+  // REPAIRING, PENDING_APPROVAL) are intentionally reused so the agent loop can
+  // resume exactly where it left off after a server restart.
+  const terminalStatuses = ["RESOLVED", "FAILED", "ROLLED_BACK"] as const;
+  if (terminalStatuses.includes(existing.status as typeof terminalStatuses[number])) {
+    const [reset] = await db
+      .update(incidentStateTable)
+      .set({
+        status: "TRIGGERED",
+        currentStep: "INIT",
+        contextJson: { alertText, turns: [] } as Record<string, unknown>,
+        claimedByAgent: null,
+        resolvedAt: null,
+        ruConsumed: 0,            // NOT NULL column — reset to zero, not null
+      })
+      .where(eq(incidentStateTable.alertFingerprint, fp))
+      .returning();
+    return reset;
+  }
+
   return existing;
 }
 

@@ -391,6 +391,20 @@ export async function invokeLLMThought(
 }
 
 /**
+ * Strips <thinking>...</thinking> blocks that Mistral Large 3 (and some
+ * other models) occasionally emit before or within their response.
+ * Also strips the orphaned opening tag when the model cuts off mid-block.
+ * Safe to call on any string — no-ops if no thinking tags are present.
+ */
+function stripThinkingTags(text: string): string {
+  // Remove complete <thinking>...</thinking> blocks (non-greedy, dotall)
+  let cleaned = text.replace(/<thinking>[\s\S]*?<\/thinking>/gi, "");
+  // Remove orphaned opening tag (model cut off before closing)
+  cleaned = cleaned.replace(/<thinking>[\s\S]*/gi, "");
+  return cleaned.trim();
+}
+
+/**
  * Generic single-prompt LLM call — plan/playbook enrichment, expectedOutcome, etc.
  * Accepts an optional strategy name to inject the matching skill as system prompt.
  * Pass maxTokens to override the default 300-token cap (e.g. for JSON plan generation).
@@ -406,17 +420,20 @@ export async function invokeLLMText(
   const systemPrompt = buildSystemPrompt(strategyName) + docContext;
 
   if (provider === "anthropic") {
-    return callAnthropicLLM(prompt, systemPrompt, maxTokens ?? 300);
+    const raw = await callAnthropicLLM(prompt, systemPrompt, maxTokens ?? 300);
+    return raw ? stripThinkingTags(raw) : null;
   }
 
   if (provider === "mistral") {
     // Mistral Large 3 via bedrock-mantle. Returns null on any error → falls through to Nova Lite.
-    const text = await invokeMantleText(prompt, systemPrompt, maxTokens ?? 400);
-    if (text) return text;
+    const raw = await invokeMantleText(prompt, systemPrompt, maxTokens ?? 400);
+    if (raw) return stripThinkingTags(raw);
     // Nova Lite fallback — transparent, no caller change needed.
-    return invokeBedrockText(prompt, systemPrompt, maxTokens ?? 400);
+    const fallback = await invokeBedrockText(prompt, systemPrompt, maxTokens ?? 400);
+    return fallback ? stripThinkingTags(fallback) : null;
   }
 
   // AI_PROVIDER=bedrock: Nova Lite only.
-  return invokeBedrockText(prompt, systemPrompt, maxTokens ?? 400);
+  const raw = await invokeBedrockText(prompt, systemPrompt, maxTokens ?? 400);
+  return raw ? stripThinkingTags(raw) : null;
 }

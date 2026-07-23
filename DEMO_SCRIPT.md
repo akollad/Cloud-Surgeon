@@ -55,7 +55,7 @@
 
 **👉 Pause on the log stream scrolling. Let the judges see the real-time events.**
 
-> 🎙️ *"It finds a match: 'ECS Fargate Redeploy' — 92% win rate. Confidence is high enough. The Remediator acts autonomously, no human approval needed."*
+> 🎙️ *"It finds a match: 'ECS service restart' — 74% win rate, above the 70% autonomous threshold. Confidence is high enough. The Remediator acts autonomously, no human approval needed."*
 
 **👉 Watch the incident card flash green when it reaches RESOLVED.**
 
@@ -82,7 +82,7 @@
 
 > 🎙️ *"Four memory layers: VECTOR(1024) embeddings with C-SPANN indexing for RAG similarity search. Transactional JSONB state for crash resilience. Change Data Capture streaming every event in real time. And the CockroachDB Cloud MCP Server for live cluster diagnostics."*
 
-**👉 Show the strategy table — point to the win rates and vector match scores.**
+**👉 Show the strategy table — point to the win rates and vector match scores. Note: `ecs_service_restart` shows 74% win rate (above the 70% autonomous threshold). `db_connection_pool_reset` shows ~50% (below threshold — routes to human approval).**
 
 2. Click **"Calibration"** in the left navigation menu
 
