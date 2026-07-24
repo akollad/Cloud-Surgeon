@@ -2,7 +2,9 @@
 
 # Cloud-Surgeon
 
-> **Autonomous AI DevOps agent** — detects, diagnoses, and repairs cloud infrastructure incidents. CockroachDB is not just the storage layer — it **makes the repair decisions**, learns from every outcome, and coordinates multi-agent execution with zero external dependencies.
+> **The AI on-call engineer that gets smarter every incident — because the database makes the repair decisions, not the AI.**
+>
+> Cloud-Surgeon detects, diagnoses, and repairs cloud infrastructure incidents autonomously. CockroachDB is not just the storage layer — it **makes the repair decisions**, learns from every outcome, and coordinates multi-agent execution with zero external dependencies.
 
 Built for the **CockroachDB × AWS Hackathon 2026**.
 
@@ -36,7 +38,7 @@ indexResolvedIncident() → recalibrateStrategy()
   → next incident benefits immediately — no scheduled job, no human trigger
 ```
 
-**The result:** after 8 resolved incidents the win-rate reaches 81 %+. The agent gets better with every repair, backed entirely by SQL aggregations in CockroachDB — no external ML service, no Python training loop, no reindexing.
+**The result:** the agent gets measurably better with every repair — win-rate grows from ~60 % (cold start) to ~74 %+ on the live demo cluster, backed entirely by SQL aggregations in CockroachDB — no external ML service, no Python training loop, no reindexing. Temporal decay (90-day half-life) ensures old outcomes don't distort routing after service changes.
 
 ### CockroachDB tools used
 
@@ -81,11 +83,13 @@ Cloud-Surgeon receives infrastructure alerts (CloudWatch, webhooks, or manual in
 
 | Metric | Cloud-Surgeon | Human on-call |
 |---|---|---|
-| Median MTTR (ECS / RDS) | **~4 min** | ~47 min (PagerDuty industry avg) |
-| Win-rate after 8 resolved incidents | **81 %+** | n/a |
+| Median MTTR (ECS / RDS) | **~4 min** (demo stack, optimal conditions) | ~47 min (PagerDuty industry avg¹) |
+| Win-rate on live demo cluster | **~74 %+** (measured, grows with each incident) | n/a |
 | Token context per incident (RAG vs. full history) | **~2 100 tokens** | ~6 400 tokens (−67 %) |
 | Storm detection latency (vector cosine scan, 1 024-dim) | **< 180 ms** | manual triage |
-| Incidents resolved without human approval | **~83 %** (win-rate ≥ 0.80) | 0 % |
+| Incidents resolved without human approval | **~74 %** (win-rate > 0.70 threshold) | 0 % |
+
+> ¹ PagerDuty State of Digital Operations 2023. MTTR varies by incident complexity and LLM latency.
 
 **Key properties:**
 
