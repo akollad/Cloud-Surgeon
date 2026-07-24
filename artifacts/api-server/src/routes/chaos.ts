@@ -12,18 +12,41 @@
  *   The dashboard can then re-trigger the same incident and prove that
  *   recovery from CockroachDB is lossless.
  *
- * SECURITY: this route is protected by apiKeyAuth (same key as all
- *   incident routes). In production it would be disabled or restricted
- *   to an internal network.
+ * SECURITY:
+ *   - Protected by apiKeyAuth (CLOUD_SURGEON_API_KEY).
+ *   - Additionally gated by CHAOS_ENABLED=true env var — the route returns
+ *     403 unless explicitly enabled. Never set this in production deployments.
+ *   - Optionally further restricted by CHAOS_API_KEY: if that env var is set,
+ *     the caller must supply it as X-Chaos-Key header (separate from the main key).
  */
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request, type Response } from "express";
 import { apiKeyAuth } from "../middleware/apiKeyAuth";
 
 const router: IRouter = Router();
 
 router.use(apiKeyAuth);
 
-router.post("/chaos/sigkill", (req, res): void => {
+router.post("/chaos/sigkill", (req: Request, res: Response): void => {
+  // Gate 1: explicit opt-in via environment variable
+  if (process.env.CHAOS_ENABLED !== "true") {
+    res.status(403).json({
+      error: "Chaos engineering is disabled. Set CHAOS_ENABLED=true to enable this endpoint.",
+    });
+    return;
+  }
+
+  // Gate 2: optional secondary key for an extra layer of protection
+  const chaosKey = process.env.CHAOS_API_KEY;
+  if (chaosKey) {
+    const provided = req.headers["x-chaos-key"];
+    if (provided !== chaosKey) {
+      res.status(403).json({
+        error: "Invalid or missing X-Chaos-Key header.",
+      });
+      return;
+    }
+  }
+
   req.log.warn("CHAOS: SIGKILL requested via dashboard — process will die in 300ms");
 
   // Respond immediately before dying, so the dashboard receives

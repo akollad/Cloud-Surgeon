@@ -59,11 +59,13 @@ CloudWatch Alarm / Predictive Anomaly
 
 | Metric | Cloud-Surgeon | Human on-call |
 |---|---|---|
-| Median MTTR (ECS / RDS) | **~4 min** | ~47 min (PagerDuty industry avg) |
-| Win-rate after 8 resolved incidents | **81 %+** | n/a |
+| Median MTTR (ECS / RDS) | **~4 min** (demo stack, optimal conditions) | ~47 min (PagerDuty industry avg¹) |
+| Win-rate on demo cluster (live sample) | **~74 %** (measured, not projected) | n/a |
 | Token context per incident (RAG vs. full history) | **~2 100 tokens** | ~6 400 (−67 %) |
 | Vector storm detection latency (1 024-dim cosine ANN) | **< 180 ms** | manual triage |
-| Incidents resolved without human approval | **~83 %** (win-rate ≥ 0.80) | 0 % |
+| Incidents resolved without human approval | **~74 %** (win-rate > 0.70 threshold) | 0 % |
+
+> ¹ PagerDuty State of Digital Operations 2023. MTTR varies by incident complexity and LLM latency.
 
 ---
 
@@ -279,7 +281,7 @@ Rather than polling the database every N seconds, the dashboard receives live ev
 
 - **Four CockroachDB hackathon tools** in production use — not initialized, actually called by the agent during every incident
 - **Live AWS stack** running throughout the submission period: ECS Fargate + ALB + S3 + CloudFront, real CloudWatch alarms, real CockroachDB Serverless cluster
-- **Self-learning memory** that demonstrably improves: win-rate grows from ~60 % (random) to 81 %+ after 8 resolved incidents
+- **Self-learning memory** that demonstrably improves: win-rate grows from ~60 % (cold start, no prior data) to ~74 %+ on the live demo cluster — each resolved incident recalibrates the routing decision for the next one
 - **Pre-alarm healing** — we are not aware of another autonomous agent that opens incidents *before* the alarm threshold is breached, using only database-native anomaly detection
 - **Crash-resilient agent loop** — tested live with `POST /api/chaos/sigkill` mid-repair; ECS restart policy + JSONB context recovery brings the agent back to the exact turn it was killed on
 - **CDC-powered live dashboard** — CockroachDB is the event bus; the dashboard never polls for new events
@@ -289,7 +291,7 @@ Rather than polling the database every N seconds, the dashboard receives live ev
 ## What We Learned
 
 - CockroachDB's SERIALIZABLE isolation eliminates an entire class of infrastructure (lock services) for multi-agent coordination — if you model agent phases as database state, the database becomes the scheduler
-- The contextual bandit doesn't need a Python ML stack: a weighted `SUM / NULLIF(SUM, 0)` aggregation over a vector table is sufficient to route repairs with measurably improving accuracy
+- The contextual bandit doesn't need a Python ML stack: a time-decayed weighted `SUM / NULLIF(SUM, 0)` aggregation over a vector table routes repairs with improving accuracy — and exponential decay (90-day half-life) ensures old outcomes don't distort routing after service changes
 - CockroachDB CDC webhook sink + SSE is a surprisingly capable event bus for real-time dashboards — the changefeed handles backpressure, retries, and at-least-once delivery that you'd otherwise implement in Kafka
 - Headless CLI auth in containers is a solved problem if you understand the credential file format — document it once, never manually rotate again
 

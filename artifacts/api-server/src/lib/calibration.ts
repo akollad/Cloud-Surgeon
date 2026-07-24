@@ -156,13 +156,44 @@ export async function recalibrateAllStrategies(): Promise<{ updated: number }> {
 
 // ── Internal win-rate helper ──────────────────────────────────────────────
 
+/**
+ * Computes the time-decayed win-rate for a strategy.
+ *
+ * Each observation is weighted by an exponential decay factor based on age:
+ *
+ *   decay(t) = exp( -t_seconds / HALF_LIFE_SECONDS / ln(2) )
+ *            ≈ 0.50 at 90 days, 0.25 at 180 days, ~0.06 at 1 year
+ *
+ * This means recent incidents dominate routing decisions, while very old
+ * outcomes fade out gracefully — critical for a real infrastructure agent
+ * where services, architectures, and failure modes evolve over time.
+ *
+ * The per-row `weight` column (1.0 automatic / 0.5 human signal) is
+ * multiplied by the temporal decay, so both dimensions are honoured.
+ *
+ * HALF_LIFE_SECONDS = 90 days ≈ 7,776,000 s.
+ * Configurable via CALIBRATION_HALF_LIFE_DAYS env var.
+ */
 async function getStrategyWinRate(
   strategyName: string,
 ): Promise<{ winRate: number; count: number }> {
+  const halfLifeDays = Number(process.env.CALIBRATION_HALF_LIFE_DAYS ?? 90);
+  // ln(2) ≈ 0.693147 — converts half-life to the exponential decay constant
+  const halfLifeSeconds = halfLifeDays * 86400;
+
   const rows = await db.execute<{ win_rate: string; total: string }>(sql`
     SELECT
-      SUM(CASE WHEN outcome_success THEN weight ELSE 0.0 END)
-        / NULLIF(SUM(weight), 0.0) AS win_rate,
+      SUM(
+        CASE WHEN outcome_success
+          THEN weight * exp(-extract(epoch from (now() - created_at))
+               / ${halfLifeSeconds}::float * 0.693147)
+          ELSE 0.0
+        END
+      ) / NULLIF(
+        SUM(weight * exp(-extract(epoch from (now() - created_at))
+            / ${halfLifeSeconds}::float * 0.693147)),
+        0.0
+      ) AS win_rate,
       COUNT(*) AS total
     FROM incident_vectors
     WHERE strategy_name = ${strategyName}
